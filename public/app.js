@@ -1,11 +1,55 @@
 let map;
 let temporaryMarker;
+let userMarker;
 
 function initMap() {
     map = new google.maps.Map(document.getElementById('map'), {
         center: { lat: -6.2088, lng: 106.8456 },
         zoom: 12
     });
+
+    // Get user's current location
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+            const userLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+            map.setCenter(userLocation);
+            userMarker = new google.maps.Marker({
+                position: userLocation,
+                map: map,
+                title: 'Your Location',
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 7,
+                    fillColor: '#4285F4',
+                    fillOpacity: 1,
+                    strokeWeight: 2,
+                    strokeColor: 'white'
+                }
+            });
+        }, () => {
+            handleLocationError(true);
+        });
+
+        // Watch user's location
+        navigator.geolocation.watchPosition(position => {
+            const userLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+            if (userMarker) {
+                userMarker.setPosition(userLocation);
+            }
+        }, () => {
+            handleLocationError(false);
+        });
+    } else {
+        // Browser doesn't support Geolocation
+        handleLocationError(false);
+    }
+
 
     map.addListener('click', (e) => {
         if (temporaryMarker) {
@@ -20,6 +64,13 @@ function initMap() {
     document.getElementById('add-pin-form').addEventListener('submit', submitPin);
 
     fetchPins();
+}
+
+function handleLocationError(browserHasGeolocation) {
+    // You can handle the error here, e.g., show a message to the user
+    console.error(browserHasGeolocation ?
+        'Error: The Geolocation service failed.' :
+        'Error: Your browser doesn\'t support geolocation.');
 }
 
 function submitPin(e) {
@@ -87,3 +138,4 @@ function addPinToMap(pin) {
         infowindow.open(map, marker);
     });
 }
+
