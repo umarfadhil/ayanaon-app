@@ -25,6 +25,6 @@ router.post('/pins', (req, res) => {
     }, 3600000);
 });
 
-app.use('/.netlify/functions/api', router);
+app.use('/', router);
 
 module.exports.handler = serverless(app);
