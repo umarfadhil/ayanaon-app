@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ada Apa?</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="map"></div>
+    <div id="pin-form">
+        <h2>Drop a Pin</h2>
+        <form id="add-pin-form">
+            <input type="text" id="description" placeholder="What's happening?" required>
+            <select id="category" required>
+                <option value="" disabled selected>Select a category</option>
+                <option value="🎉 Event">🎉 Event</option>
+                <option value="🍔 Food Promo">🍔 Food Promo</option>
+                <option value="🚦 Traffic">🚦 Traffic</option>
+                <option value="💡 Misc">💡 Misc</option>
+            </select>
+            <input type="file" id="photo" accept="image/*">
+            <button type="submit">Drop Pin</button>
+        </form>
+    </div>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCbo1zvustw8UB6PvUm2JC1PppdYvilnKg&callback=initMap" async defer></script>
+    <script src="app.js"></script>
+</body>
+</html>
