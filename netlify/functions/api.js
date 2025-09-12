@@ -1,20 +1,19 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const path = require('path');
+const serverless = require('serverless-http');
 
 const app = express();
-const port = 3000;
+const router = express.Router();
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use(bodyParser.json());
 
 let pins = [];
 
-app.get('/api/pins', (req, res) => {
+router.get('/pins', (req, res) => {
     res.json(pins);
 });
 
-app.post('/api/pins', (req, res) => {
+router.post('/pins', (req, res) => {
     const pin = req.body;
     pin.id = Date.now();
     pins.push(pin);
@@ -26,6 +25,6 @@ app.post('/api/pins', (req, res) => {
     }, 3600000);
 });
 
-app.listen(port, () => {
-    console.log(`Server listening at http://localhost:${port}`);
-});
+app.use('/.netlify/functions/api', router);
+
+module.exports.handler = serverless(app);
