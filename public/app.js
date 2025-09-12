@@ -1,6 +1,7 @@
 let map;
 let temporaryMarker;
 let userMarker;
+let userCity;
 
 function initMap() {
     map = new google.maps.Map(document.getElementById('map'), {
@@ -29,6 +30,25 @@ function initMap() {
                     strokeColor: 'white'
                 }
             });
+
+            // Get user's city
+            const geocoder = new google.maps.Geocoder();
+            geocoder.geocode({ 'location': userLocation }, (results, status) => {
+                if (status === 'OK') {
+                    if (results[0]) {
+                        for (const component of results[0].address_components) {
+                            if (component.types.includes('administrative_area_level_2')) {
+                                userCity = component.long_name;
+                                fetchPins(userCity);
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    console.error('Geocoder failed due to: ' + status);
+                }
+            });
+
         }, () => {
             handleLocationError(true);
         });
@@ -113,10 +133,18 @@ function submitPin(e) {
     });
 }
 
-function fetchPins() {
-    fetch('/api/pins')
+function fetchPins(city) {
+    let url = '/api/pins';
+    if (city) {
+        url += `?city=${city}`;
+    }
+    fetch(url)
     .then(response => response.json())
     .then(pins => {
+        // Clear existing pins before adding new ones
+        // (You might want to implement a more sophisticated way to handle this)
+        // For now, we'll just log the pins to the console
+        console.log(pins);
         pins.forEach(pin => {
             addPinToMap(pin);
         });
@@ -138,4 +166,5 @@ function addPinToMap(pin) {
         infowindow.open(map, marker);
     });
 }
+
 
