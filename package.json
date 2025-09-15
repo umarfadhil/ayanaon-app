@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "netlify dev",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,6 +15,10 @@
     "body-parser": "^2.2.0",
     "express": "^5.1.0",
     "mongodb": "^6.19.0",
-    "serverless-http": "^4.0.0"
+    "serverless-http": "^4.0.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "netlify-cli": "^23.5.1"
   }
 }

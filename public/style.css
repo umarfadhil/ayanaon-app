@@ -1,3 +1,7 @@
+* {
+    box-sizing: border-box;
+}
+
 body {
     font-family: sans-serif;
     margin: 0;
@@ -9,35 +13,98 @@ body {
     width: 100%;
 }
 
+#add-pin-btn {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    z-index: 1;
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 30px;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s;
+}
+
+#add-pin-btn:hover {
+    transform: scale(1.1);
+}
+
 #pin-form {
     position: absolute;
-    top: 20px;
+    bottom: 80px;
     left: 20px;
-    background-color: white;
+    background-color: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
     padding: 20px;
-    border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    border-radius: 15px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
     z-index: 1;
+    width: 350px;
+    transform: translateY(100%);
+    transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+
+#pin-form:not(.hidden) {
+    transform: translateY(0);
+}
+
+#pin-form.hidden {
+    transform: translateY(150%);
 }
 
 #pin-form h2 {
     margin-top: 0;
+    color: #333;
+    text-align: center;
 }
 
 #pin-form input,
-#pin-form select,
-#pin-form button {
+#pin-form select {
     display: block;
-    width: 100%;
-    margin-bottom: 10px;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 3px;
+    width: calc(100% - 10px);
+    margin-bottom: 15px;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.2);
+    color: #333;
+    font-size: 14px;
+}
+
+#pin-form input::placeholder {
+    color: #666;
 }
 
 #pin-form button {
+    display: block;
+    width: 100%;
+    padding: 15px;
+    border: none;
+    border-radius: 10px;
     background-color: #4285f4;
     color: white;
-    border: none;
+    font-size: 16px;
     cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+#pin-form button:hover {
+    background-color: #357ae8;
+}
+
+#unique-ips-count {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 10px 15px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    font-weight: bold;
 }

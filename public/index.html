@@ -3,23 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ada Apa?</title>
+    <title>Petalytix - Aya Naon?</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="map"></div>
-    <div id="pin-form">
-        <h2>Drop a Pin</h2>
+    <button id="add-pin-btn">+</button>
+    <div id="unique-ips-count"></div>
+    <div id="pin-form" class="hidden">
+        <h2>Aya Naon?</h2>
         <form id="add-pin-form">
-            <input type="text" id="description" placeholder="What's happening?" required>
+            <input type="text" id="description" placeholder="Tulis deskripsi singkat" required>
             <select id="category" required>
-                <option value="" disabled selected>Select a category</option>
-                <option value="🎉 Event">🎉 Event</option>
-                <option value="🍔 Food Promo">🍔 Food Promo</option>
-                <option value="🚦 Traffic">🚦 Traffic</option>
-                <option value="💡 Misc">💡 Misc</option>
+                <option value="" disabled selected>Pilih kateogri</option>
+                <option value="🎉 Event / Acara">🎉 Event / Acara</option>
+                <option value="🍔 Food & Promo / Diskon Makanan">🍔 Food & Promo / Diskon Makanan</option>
+                <option value="💸 Promo & Discount Others / Promo & Diskon Lainnya">💸 Promo & Discount Others / Promo & Diskon Lainnya</option>
+                <option value="🚦 Traffic & Transport / Lalu Lintas">🚦 Traffic & Transport / Lalu Lintas</option>
+                <option value="🛍️ Local Market & Commerce / Pasar Lokal">🛍️ Local Market & Commerce / Pasar Lokal</option>
+                <option value="🎭 Culture & Entertainment / Budaya & Hiburan">🎭 Culture & Entertainment / Budaya & Hiburan</option>
+                <option value="🏀 Sports & Activity / Olahraga & Aktivitas">🏀 Sports & Activity / Olahraga & Aktivitas</option>
+                <option value="🎓 Community & Education / Komunitas & Edukasi">🎓 Community & Education / Komunitas & Edukasi</option>
+                <option value="🌧️ Weather & Safety / Cuaca & Keamanan">🌧️ Weather & Safety / Cuaca & Keamanan</option>
+                <option value="🐾 Lost & Found / Barang & Hewan Hilang">🐾 Lost & Found / Barang & Hewan Hilang</option>
+                <option value="🧑‍🤝‍🧑 Social & Meetups / Sosial & Kopdar">🧑‍🤝‍🧑 Social & Meetups / Sosial & Kopdar</option>
+                <option value="💡 Misc / Lain-lain">💡 Misc / Lain-lain</option>
             </select>
-            <input type="file" id="photo" accept="image/*">
             <button type="submit">Drop Pin</button>
         </form>
     </div>

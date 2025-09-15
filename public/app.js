@@ -87,6 +87,10 @@ async function initMap() {
     });
 
     document.getElementById('add-pin-form').addEventListener('submit', submitPin);
+    document.getElementById('add-pin-btn').addEventListener('click', () => {
+        const pinForm = document.getElementById('pin-form');
+        pinForm.classList.toggle('hidden');
+    });
 
     fetchPins();
 }
@@ -133,6 +137,7 @@ function submitPin(e) {
         if (temporaryMarker) {
             temporaryMarker.map = null;
         }
+        console.log('Adding new pin to map:', data);
         addPinToMap(data);
         document.getElementById('add-pin-form').reset();
         alert('Pin dropped successfully!');
@@ -158,19 +163,80 @@ function fetchPins(city) {
 }
 
 function addPinToMap(pin) {
+    const icon = getIconForCategory(pin.category);
+    const markerElement = document.createElement('div');
+    markerElement.textContent = icon;
+    markerElement.style.fontSize = '24px';
+
     const marker = new google.maps.marker.AdvancedMarkerElement({
         position: { lat: pin.lat, lng: pin.lng },
         map: map,
-        title: pin.description
+        title: pin.description,
+        content: markerElement
     });
 
+    const contentString = `
+        <div>
+            <strong>${pin.category}</strong>
+        </div>
+        <div>${pin.description}</div>
+        <div>
+            <button onclick="upvotePin('${pin._id}')">👍</button>
+            <span id="upvotes-${pin._id}">${pin.upvotes}</span>
+            <button onclick="downvotePin('${pin._id}')">👎</button>
+            <span id="downvotes-${pin._id}">${pin.downvotes}</span>
+        </div>
+    `;
+
     const infowindow = new google.maps.InfoWindow({
-        content: `<div><strong>${pin.category}</strong></div><div>${pin.description}</div>`
+        content: contentString
     });
 
     marker.addListener('gmp-click', () => {
         infowindow.open(map, marker);
     });
+}
+
+function upvotePin(id) {
+    fetch(`/api/pins/${id}/upvote`, { method: 'POST' })
+        .then(response => {
+            if (response.ok) {
+                const upvotesSpan = document.getElementById(`upvotes-${id}`);
+                upvotesSpan.textContent = parseInt(upvotesSpan.textContent) + 1;
+            } else if (response.status === 403) {
+                alert('You have already voted for this pin.');
+            }
+        });
+}
+
+function downvotePin(id) {
+    fetch(`/api/pins/${id}/downvote`, { method: 'POST' })
+        .then(response => {
+            if (response.ok) {
+                const downvotesSpan = document.getElementById(`downvotes-${id}`);
+                downvotesSpan.textContent = parseInt(downvotesSpan.textContent) + 1;
+            } else if (response.status === 403) {
+                alert('You have already voted for this pin.');
+            }
+        });
+}
+
+function getIconForCategory(category) {
+    const icons = {
+        '🎉 Event / Acara': '🎉',
+        '🍔 Food & Promo / Diskon Makanan': '🍔',
+        '💸 Promo & Discount Others / Promo & Diskon Lainnya': '💸',
+        '🚦 Traffic & Transport / Lalu Lintas': '🚦',
+        '🛍️ Local Market & Commerce / Pasar Lokal': '🛍️',
+        '🎭 Culture & Entertainment / Budaya & Hiburan': '🎭',
+        '🏀 Sports & Activity / Olahraga & Aktivitas': '🏀',
+        '🎓 Community & Education / Komunitas & Edukasi': '🎓',
+        '🌧️ Weather & Safety / Cuaca & Keamanan': '🌧️',
+        '🐾 Lost & Found / Barang & Hewan Hilang': '🐾',
+        '🧑‍🤝‍🧑 Social & Meetups / Sosial & Kopdar': '🧑‍🤝‍🧑',
+        '💡 Misc / Lain-lain': '💡'
+    };
+    return icons[category] || '💡';
 }
 
 console.log('Fetching API key...');
@@ -185,3 +251,30 @@ fetch('/api/config')
         script.defer = true;
         document.head.appendChild(script);
     });
+
+function scheduleDailyRefresh() {
+    const now = new Date();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timeUntilMidnight = tomorrow - now;
+
+    setTimeout(() => {
+        location.reload();
+    }, timeUntilMidnight);
+}
+
+scheduleDailyRefresh();
+
+function fetchUniqueIpCount() {
+    fetch('/api/unique-ips')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('unique-ips-count').textContent = `Live Users: ${data.count}`;
+        })
+        .catch(error => console.error('Error fetching unique IP count:', error));
+}
+
+// Call initially
+fetchUniqueIpCount();
+
+// Call every 5 seconds
+setInterval(fetchUniqueIpCount, 5000);
