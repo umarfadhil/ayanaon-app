@@ -23,10 +23,17 @@ async function initMap() {
                 lng: position.coords.longitude
             };
             map.setCenter(userLocation);
+            const userMarkerPin = new google.maps.marker.PinElement({
+                scale: 1.5,
+                background: '#4285F4',
+                borderColor: 'white',
+                glyphColor: 'white',
+            });
             userMarker = new AdvancedMarkerElement({
                 position: userLocation,
                 map: map,
-                title: 'Your Location'
+                title: 'Your Location',
+                content: userMarkerPin.element,
             });
 
             // Get user's city
