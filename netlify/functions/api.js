@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const serverless = require('serverless-http');
+const { MongoClient } = require('mongodb');
 const axios = require('axios');
 
 const app = express();
@@ -8,22 +9,38 @@ const router = express.Router();
 
 app.use(bodyParser.json());
 
-let pins = [];
+const MONGODB_URI = process.env.MONGODB_URI;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
-router.get('/pins', (req, res) => {
-    const { city } = req.query;
-    if (city) {
-        const filteredPins = pins.filter(p => p.city === city);
-        res.json(filteredPins);
-    } else {
-        res.json(pins);
+let cachedDb = null;
+
+async function connectToDatabase() {
+    if (cachedDb) {
+        return cachedDb;
     }
+
+    const client = await MongoClient.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    const db = await client.db('ayanaon-db');
+    cachedDb = db;
+    return db;
+}
+
+router.get('/pins', async (req, res) => {
+    const db = await connectToDatabase();
+    const { city } = req.query;
+    let pins;
+    if (city) {
+        pins = await db.collection('pins').find({ city: city }).toArray();
+    } else {
+        pins = await db.collection('pins').find({}).toArray();
+    }
+    res.json(pins);
 });
 
 router.post('/pins', async (req, res) => {
+    const db = await connectToDatabase();
     const pin = req.body;
-    pin.id = Date.now();
+    pin.createdAt = new Date();
 
     // Get city from lat/lng
     try {
@@ -41,13 +58,8 @@ router.post('/pins', async (req, res) => {
         console.error('Error getting city from geocoding API:', error);
     }
 
-    pins.push(pin);
-    res.json(pin);
-
-    // Remove pin after 1 hour
-    setTimeout(() => {
-        pins = pins.filter(p => p.id !== pin.id);
-    }, 3600000);
+    const result = await db.collection('pins').insertOne(pin);
+    res.json(result.ops[0]);
 });
 
 app.use('/', router);

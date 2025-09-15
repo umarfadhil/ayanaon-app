@@ -130,6 +130,7 @@ function submitPin(e) {
         }
         addPinToMap(data);
         document.getElementById('add-pin-form').reset();
+        alert('Pin dropped successfully!');
     });
 }
 
