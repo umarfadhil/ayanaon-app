@@ -5,10 +5,14 @@ let temporaryMarker;
 let userMarker;
 let userCity;
 
-function initMap() {
-    map = new google.maps.Map(document.getElementById('map'), {
+async function initMap() {
+    const { Map } = await google.maps.importLibrary("maps");
+    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
+    map = new Map(document.getElementById('map'), {
         center: { lat: -6.2088, lng: 106.8456 },
-        zoom: 12
+        zoom: 12,
+        mapId: '4504f8b37365c3d0'
     });
 
     // Get user's current location
@@ -19,18 +23,10 @@ function initMap() {
                 lng: position.coords.longitude
             };
             map.setCenter(userLocation);
-            userMarker = new google.maps.Marker({
+            userMarker = new AdvancedMarkerElement({
                 position: userLocation,
                 map: map,
-                title: 'Your Location',
-                icon: {
-                    path: google.maps.SymbolPath.CIRCLE,
-                    scale: 7,
-                    fillColor: '#4285F4',
-                    fillOpacity: 1,
-                    strokeWeight: 2,
-                    strokeColor: 'white'
-                }
+                title: 'Your Location'
             });
 
             // Get user's city
@@ -62,7 +58,7 @@ function initMap() {
                 lng: position.coords.longitude
             };
             if (userMarker) {
-                userMarker.setPosition(userLocation);
+                userMarker.position = userLocation;
             }
         }, () => {
             handleLocationError(false);
@@ -75,9 +71,9 @@ function initMap() {
 
     map.addListener('click', (e) => {
         if (temporaryMarker) {
-            temporaryMarker.setMap(null);
+            temporaryMarker.map = null;
         }
-        temporaryMarker = new google.maps.Marker({
+        temporaryMarker = new AdvancedMarkerElement({
             position: e.latLng,
             map: map,
         });
@@ -114,8 +110,8 @@ function submitPin(e) {
     const pin = {
         description,
         category,
-        lat: temporaryMarker.getPosition().lat(),
-        lng: temporaryMarker.getPosition().lng()
+        lat: temporaryMarker.position.lat,
+        lng: temporaryMarker.position.lng
     };
 
     fetch('/api/pins', {
@@ -128,7 +124,7 @@ function submitPin(e) {
     .then(response => response.json())
     .then(data => {
         if (temporaryMarker) {
-            temporaryMarker.setMap(null);
+            temporaryMarker.map = null;
         }
         addPinToMap(data);
         document.getElementById('add-pin-form').reset();
@@ -155,7 +151,7 @@ function fetchPins(city) {
 }
 
 function addPinToMap(pin) {
-    const marker = new google.maps.Marker({
+    const marker = new google.maps.marker.AdvancedMarkerElement({
         position: { lat: pin.lat, lng: pin.lng },
         map: map,
         title: pin.description
@@ -165,7 +161,7 @@ function addPinToMap(pin) {
         content: `<div><strong>${pin.category}</strong></div><div>${pin.description}</div>`
     });
 
-    marker.addListener('click', () => {
+    marker.addListener('gmp-click', () => {
         infowindow.open(map, marker);
     });
 }
@@ -177,7 +173,7 @@ fetch('/api/config')
     .then(config => {
         console.log('API key fetched, loading map...');
         const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=marker`;
         script.async = true;
         script.defer = true;
         document.head.appendChild(script);
