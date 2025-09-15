@@ -37,6 +37,10 @@ router.get('/pins', async (req, res) => {
     res.json(pins);
 });
 
+router.get('/config', (req, res) => {
+    res.json({ googleMapsApiKey: GOOGLE_MAPS_API_KEY });
+});
+
 router.post('/pins', async (req, res) => {
     const db = await connectToDatabase();
     const pin = req.body;
@@ -59,9 +63,10 @@ router.post('/pins', async (req, res) => {
     }
 
     const result = await db.collection('pins').insertOne(pin);
-    res.json(result.ops[0]);
+    const insertedPin = await db.collection('pins').findOne({ _id: result.insertedId });
+    res.json(insertedPin);
 });
 
-app.use('/', router);
+app.use('/api', router);
 
 module.exports.handler = serverless(app);
