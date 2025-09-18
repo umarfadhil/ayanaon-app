@@ -6,6 +6,7 @@ body {
     font-family: sans-serif;
     margin: 0;
     padding: 0;
+    overflow: hidden;
 }
 
 #map {
@@ -13,10 +14,9 @@ body {
     width: 100%;
 }
 
-#add-pin-btn {
+#add-pin-btn, #info-btn, #locate-me-btn, #filter-btn {
     position: absolute;
     bottom: 20px;
-    left: 20px;
     z-index: 1;
     background-color: #4285f4;
     color: white;
@@ -30,8 +30,57 @@ body {
     transition: transform 0.2s;
 }
 
-#add-pin-btn:hover {
+#add-pin-btn {
+    left: 20px;
+}
+
+#info-btn {
+    left: 200px;
+    font-size: 24px; /* Adjusted for 'i' character */
+    font-weight: bold;
+}
+
+#locate-me-btn {
+    left: 140px;
+    font-size: 24px;
+    transform: rotate(-45deg);
+}
+
+#filter-btn {
+    left: 80px;
+    font-size: 24px;
+}
+
+#add-pin-btn:hover, #info-btn:hover, #locate-me-btn:hover, #filter-btn:hover {
     transform: scale(1.1);
+}
+
+#filter-dropdown {
+    position: absolute;
+    bottom: 80px;
+    left: 80px;
+    z-index: 1;
+    width: 500px;
+    background-color: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+}
+
+#filter-dropdown.hidden {
+    display: none;
+}
+
+#filter-container {
+    max-height: 50vh; /* 50% of the viewport height */
+    overflow-y: auto;
+}
+
+#filter-container label {
+    display: block;
+    margin-bottom: 5px;
+    color: #333;
 }
 
 #pin-form {
@@ -46,15 +95,19 @@ body {
     z-index: 1;
     width: 350px;
     transform: translateY(100%);
-    transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55), opacity 0.5s ease-out, visibility 0.5s ease-out;
 }
 
 #pin-form:not(.hidden) {
     transform: translateY(0);
+    opacity: 1;
+    visibility: visible;
 }
 
 #pin-form.hidden {
-    transform: translateY(150%);
+    transform: translateY(100vh);
+    opacity: 0;
+    visibility: hidden;
 }
 
 #pin-form h2 {
@@ -64,7 +117,9 @@ body {
 }
 
 #pin-form input,
-#pin-form select {
+#pin-form select,
+#pin-form textarea,
+#pin-form #lifetime-date-picker {
     display: block;
     width: calc(100% - 10px);
     margin-bottom: 15px;
@@ -76,8 +131,10 @@ body {
     font-size: 14px;
 }
 
-#pin-form input::placeholder {
+#pin-form input::placeholder,
+#pin-form textarea::placeholder {
     color: #666;
+    font-family: sans-serif;
 }
 
 #pin-form button {
@@ -97,14 +154,174 @@ body {
     background-color: #357ae8;
 }
 
-#unique-ips-count {
+#lifetime-date-picker {
+    margin-top: 10px;
+}
+
+#metrics-container {
     position: absolute;
     top: 20px;
     right: 20px;
     z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+#unique-ips-count, #active-pins-count {
     background-color: rgba(255, 255, 255, 0.8);
     padding: 10px 15px;
     border-radius: 5px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
     font-weight: bold;
+}
+
+
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.modal-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.modal-content {
+    background-color: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(10px);
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+    width: 90%;
+    max-width: 500px;
+    position: relative;
+    transform: translateY(0);
+    transition: transform 0.3s ease;
+}
+
+.modal-overlay.hidden .modal-content {
+    transform: translateY(-20px);
+}
+
+.close-btn {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    background: none;
+    border: none;
+    font-size: 28px;
+    cursor: pointer;
+    color: #aaa;
+}
+
+.close-btn:hover {
+    color: #333;
+}
+
+.custom-info-window {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    color: white;
+    padding: 20px;
+    width: 300px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -120%);
+}
+
+.info-window-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.info-window-category {
+    font-weight: bold;
+    font-size: 1.618em;
+    color: #88b0f1;
+}
+
+.close-info-window {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.info-window-title {
+    font-weight: bold;
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+
+.info-window-description {
+    margin-bottom: 20px;
+    font-size: 1.2em;
+}
+
+.info-window-when {
+    font-size: 1.2em;
+    color: #ccc;
+    margin-bottom: 10px;
+}
+
+.info-window-link {
+    font-size: 1.2em;
+    color: #90f2a8;
+    text-decoration: none;
+    margin-bottom: 15px;
+    margin-top: 15px;
+    word-wrap: break-word;
+}
+
+.info-window-vote {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    font-size: 1.5em;
+}
+
+.info-window-vote button {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    margin-right: 5px;
+    color: white;
+}
+
+.info-window-vote span {
+    margin-right: 15px;
+}
+
+.edit-btn {
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 15px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 65px;
+}
+
+.edit-btn:hover {
+    background-color: #357ae8;
+    color: #ffffff;
 }
