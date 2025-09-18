@@ -51,6 +51,7 @@ router.get('/pins', async (req, res) => {
         query.city = city;
     }
 
+    console.log('Executing pins query:', query);
     const pins = await db.collection('pins').find(query).toArray();
     res.json(pins);
 });

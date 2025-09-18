@@ -58,9 +58,11 @@ body {
 #filter-dropdown {
     position: absolute;
     bottom: 80px;
-    left: 80px;
+    left: 20px; /* Adjusted for mobile */
+    right: 20px; /* Added for mobile */
     z-index: 1;
-    width: 500px;
+    max-width: 500px; /* Keep max-width for larger screens */
+    width: calc(100% - 40px); /* Responsive width */
     background-color: rgba(255, 255, 255, 0.15);
     backdrop-filter: blur(10px);
     padding: 20px;
@@ -205,10 +207,12 @@ body {
     border-radius: 15px;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
     width: 90%;
+    max-height: 80%;
     max-width: 500px;
     position: relative;
     transform: translateY(0);
     transition: transform 0.3s ease;
+    overflow-y: auto; /* Added this line */
 }
 
 .modal-overlay.hidden .modal-content {

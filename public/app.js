@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
             map.setCenter(userMarker.position);
             map.setZoom(15);
         } else {
-            alert('Could not determine your location.');
+            alert('Akses lokasi ditolak. Silahkan buka akses lokasi untuk website ini agar dapat menggunakan fitur Locate Me');
         }
     });
 
@@ -217,8 +217,8 @@ async function initMap() {
 
     function fetchPins(city) {
         // Clear existing markers
-        markers.forEach(marker => marker.map = null);
-        markers = [];
+        // markers.forEach(marker => marker.map = null);
+        // markers = [];
     
         let url = '/api/pins';
         if (city) {
@@ -391,6 +391,7 @@ async function initMap() {
     getUserIp();
     fetchActivePinsCount(); // Call the new function
     setInterval(fetchActivePinsCount, 30000); // Update every 30 seconds
+    setInterval(fetchPins, 30000); // Refresh pins every 30 seconds
 }
 
 function upvotePin(id) {

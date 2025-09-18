@@ -1,16 +1,55 @@
-# ayanaon-app
-hyperlocal social discovery platform that answers the fundamental question Indonesians ask every day
+# AyaNaon-app
 
-## How to Verify Live Users Feature (Local Development)
+Welcome to AyaNaon-app! This is a community-driven map application designed to help you share and discover local information, promotions, and reports within your area. Think of it as a digital bulletin board powered by your community!
 
-To check if the "Live Users" feature is running correctly when using the local server (`netlify dev`), follow these steps:
+LINK: ayanaon.netlify.app (temporary)
 
-1.  **Start the local server:** Ensure the local Netlify development server is running by executing `netlify dev` in your terminal.
-2.  **Open the application in multiple browser tabs/windows:** Open the application in several different browser tabs or even different browsers (e.g., Chrome, Firefox). Each tab/browser will simulate a unique "user."
-3.  **Observe the "Live Users" count:** The "Live Users" count displayed on the application (usually in the top right corner) should increase as new tabs/browsers access the application.
-4.  **Check the network requests:**
-    *   Open your browser's developer tools (usually by pressing F12).
-    *   Go to the "Network" tab.
-    *   Filter for requests to `/api/unique-ips`. You should see these requests happening approximately every 5 seconds.
-    *   Examine the responses to these requests; they should contain the updated count of unique IP addresses.
-5.  **Check the backend logs (optional):** In the terminal where `netlify dev` is running, you can observe log messages from the `recordIpAddress` function (if `console.log` statements were added there) indicating when an IP address is recorded. You can also inspect your MongoDB database directly to view the `unique_ips` collection.
+## What is AyaNaon-app?
+
+AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in Sundanese) is a platform where users can drop "pins" on a map to highlight various events, deals, traffic updates, lost and found items, and more. It's built to foster local engagement and keep everyone informed about what's happening around them.
+
+## Key Features
+
+*   **Interactive Map:** Explore your local area with an intuitive Google Maps interface.
+*   **Pin Dropping:** Easily add new pins to the map with a title, detailed description, category, and an optional external link. You can even set an expiration time for your pins!
+*   **Category Filtering:** Quickly find what you're looking for by filtering pins based on different categories like "Events," "Food & Drink Promos," "Traffic & Accidents," and more.
+*   **Community Engagement:** Upvote or downvote pins to show your support or disagreement.
+*   **Location Services:** Find your current location on the map with a single click.
+*   **Pin Management:** Reporters can edit their own pins, ensuring information stays accurate.
+*   **Real-time Updates:** See the number of active pins and unique contributors in real-time.
+*   **Responsive Design:** Enjoy a seamless experience whether you're on your desktop or mobile phone.
+
+## How It Works (Under the Hood)
+
+AyaNaon-app is a modern web application built with:
+
+*   **Frontend:** HTML, CSS, and JavaScript, utilizing the Google Maps JavaScript API for the interactive map.
+*   **Backend:** Powered by Netlify Functions (serverless functions) using Node.js and Express.js.
+*   **Database:** MongoDB for storing all pin data, user IP addresses (anonymously), and other application information.
+
+## Getting Started
+
+To get the app up and running, you'll need to:
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/umarfadhil/ayanaon-app.git
+    cd ayanaon-app
+    ```
+2.  **Set up your environment variables:**
+    You'll need a `.env` file in your project root with:
+    *   `MONGODB_URI`: Your MongoDB connection string.
+    *   `GOOGLE_MAPS_API_KEY`: Your Google Maps JavaScript API key.
+3.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+4.  **Deploy to Netlify:** This app is designed for easy deployment on Netlify. Connect your GitHub repository to Netlify, and it will automatically build and deploy your functions and frontend.
+
+## Contributing
+
+We welcome contributions! If you have ideas for new features, bug fixes, or improvements, feel free to open an issue or submit a pull request.
+
+## Contact
+
+For any inquiries or feedback, please reach out to `contact@petalytix.id`.
