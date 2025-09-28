@@ -53,3 +53,12 @@ We welcome contributions! If you have ideas for new features, bug fixes, or impr
 ## Contact
 
 For any inquiries or feedback, please reach out to `contact@petalytix.id`.
+
+---
+
+## What's New in v1.1.0
+
+*   **Custom Map Views:** Added buttons to easily switch between Map/Terrain and Satellite/Hybrid views.
+*   **Improved Mobile Navigation:** Map panning on mobile devices now only requires one finger.
+*   **Cleaner UI:** Simplified the default map controls for a less cluttered interface.
+*   **Smarter Refresh:** The map's live pin refresh now pauses when a category filter is active, preventing filter disruption.

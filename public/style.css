@@ -9,6 +9,31 @@ body {
     overflow: hidden;
 }
 
+#map-type-control-container {
+    position: absolute;
+    top: 20px;
+    left: 10px;
+    z-index: 1;
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.map-type-btn {
+    background-color: transparent;
+    border: none;
+    padding: 10px 15px;
+    font-weight: bold;
+    cursor: pointer;
+    color: #333;
+}
+
+.map-type-btn.active {
+    background-color: #4285f4;
+    color: white;
+}
+
 #map {
     height: 100vh;
     width: 100%;
@@ -162,8 +187,8 @@ body {
 
 #metrics-container {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    top: 60px;
+    left: 10px;
     z-index: 1;
     display: flex;
     flex-direction: column;
@@ -176,6 +201,7 @@ body {
     border-radius: 5px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
     font-weight: bold;
+    font-size: 0.8rem;
 }
 
 

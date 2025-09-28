@@ -139,7 +139,11 @@ async function initMap() {
     map = new Map(document.getElementById('map'), {
         center: { lat: -6.2088, lng: 106.8456 },
         zoom: 12,
-        mapId: '4504f8b37365c3d0'
+        mapId: '4504f8b37365c3d0',
+        gestureHandling: 'greedy',
+        disableDefaultUI: true,
+        zoomControl: false,
+        fullscreenControl: true
     });
 
     function addPinToMap(pin) {
@@ -215,15 +219,12 @@ async function initMap() {
         markers.push(marker);
     }
 
-    function fetchPins(city) {
+    function fetchPins() {
         // Clear existing markers
         // markers.forEach(marker => marker.map = null);
         // markers = [];
     
         let url = '/api/pins';
-        if (city) {
-            url += `?city=${city}`;
-        }
         fetch(url)
         .then(response => response.json())
         .then(pins => {
@@ -309,6 +310,23 @@ async function initMap() {
     }
 
     // Get user's current location
+
+    // Custom Map Type Controls
+    const mapViewBtn = document.getElementById('map-view-btn');
+    const satelliteViewBtn = document.getElementById('satellite-view-btn');
+
+    mapViewBtn.addEventListener('click', () => {
+        map.setMapTypeId('terrain');
+        mapViewBtn.classList.add('active');
+        satelliteViewBtn.classList.remove('active');
+    });
+
+    satelliteViewBtn.addEventListener('click', () => {
+        map.setMapTypeId('hybrid');
+        satelliteViewBtn.classList.add('active');
+        mapViewBtn.classList.remove('active');
+    });
+
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(position => {
             const userLocation = {
@@ -329,23 +347,7 @@ async function initMap() {
                 content: userMarkerDiv,
             });
 
-            // Get user's city
-            const geocoder = new google.maps.Geocoder();
-            geocoder.geocode({ 'location': userLocation }, (results, status) => {
-                if (status === 'OK') {
-                    if (results[0]) {
-                        for (const component of results[0].address_components) {
-                            if (component.types.includes('administrative_area_level_2')) {
-                                userCity = component.long_name;
-                                fetchPins(userCity); // Call fetchPins here after userCity is set
-                                break;
-                            }
-                        }
-                    }
-                } else {
-                    console.error('Geocoder failed due to: ' + status);
-                }
-            });
+
 
         }, () => {
             handleLocationError(true);
@@ -391,7 +393,13 @@ async function initMap() {
     getUserIp();
     fetchActivePinsCount(); // Call the new function
     setInterval(fetchActivePinsCount, 30000); // Update every 30 seconds
-    setInterval(fetchPins, 30000); // Refresh pins every 30 seconds
+    // setInterval(fetchPins, 30000);
+    setInterval(() => {
+        const selectAllCheckbox = document.getElementById('select-all-categories');
+        if (selectAllCheckbox && selectAllCheckbox.checked) {
+            fetchPins();
+        }
+    }, 30000); // Refresh pins every 30 seconds
 }
 
 function upvotePin(id) {
@@ -512,7 +520,7 @@ function updatePin(id) {
         document.getElementById('add-pin-form').reset();
         document.getElementById('pin-form').classList.add('hidden');
         editingPinId = null;
-        fetchPins(userCity);
+        fetchPins();
     });
 }
 
@@ -520,7 +528,7 @@ function fetchActivePinsCount() {
     fetch('/api/pins/count')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('active-pins-count').textContent = `Jumlah Pin Aktif  : ${data.count} Pin`;
+            document.getElementById('active-pins-count').textContent = `Lokasi Aktif  : ${data.count} Pin`;
         })
         .catch(error => console.error('Error fetching active pins count:', error));
 }
@@ -554,7 +562,7 @@ function fetchUniqueIpCount() {
     fetch('/api/unique-ips')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('unique-ips-count').textContent = `Jumlah Reporter : ${data.count} Warga`;
+            document.getElementById('unique-ips-count').textContent = `Pengunjung : ${data.count} Warga`;
         })
         .catch(error => console.error('Error fetching unique IP count:', error));
 }
