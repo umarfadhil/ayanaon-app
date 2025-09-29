@@ -146,6 +146,10 @@ async function initMap() {
         fullscreenControl: true
     });
 
+    // Add Traffic Layer
+    const trafficLayer = new google.maps.TrafficLayer();
+    trafficLayer.setMap(map);
+
     function addPinToMap(pin) {
         const icon = getIconForCategory(pin.category);
         const markerElement = document.createElement('div');
@@ -195,9 +199,9 @@ async function initMap() {
                 <div class="info-window-when">${when}</div>
                 ${linkElement}
                 <div class="info-window-vote">
-                    <button onclick="upvotePin('${pin._id}')">👍</button>
+                    <button id="upvote-btn-${pin._id}">👍</button>
                     <span id="upvotes-${pin._id}">${pin.upvotes}</span>
-                    <button onclick="downvotePin('${pin._id}')">👎</button>
+                    <button id="downvote-btn-${pin._id}">👎</button>
                     <span id="downvotes-${pin._id}">${pin.downvotes}</span>
                     ${editButton}
                 </div>
@@ -207,13 +211,28 @@ async function initMap() {
         const infowindow = new CustomInfoWindow(pin, contentString);
         infowindow.setMap(map);
     
+        // Attach event listeners programmatically
+        const upvoteButton = infowindow.container.querySelector(`#upvote-btn-${pin._id}`);
+        if (upvoteButton) {
+            upvoteButton.addEventListener('click', () => upvotePin(pin._id));
+        }
+
+        const downvoteButton = infowindow.container.querySelector(`#downvote-btn-${pin._id}`);
+        if (downvoteButton) {
+            downvoteButton.addEventListener('click', () => downvotePin(pin._id));
+        }
+
         const closeButton = infowindow.container.querySelector('.close-info-window');
         closeButton.addEventListener('click', () => {
             infowindow.hide();
         });
     
         marker.addListener('gmp-click', () => {
-            infowindow.show();
+            if (infowindow.container.style.display === 'block') {
+                infowindow.hide();
+            } else {
+                infowindow.show();
+            }
         });
     
         markers.push(marker);
@@ -539,12 +558,11 @@ fetch('/api/config')
     .then(response => response.json())
     .then(config => {
         console.log('API key fetched, loading map...');
-        const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=marker`;
-        script.async = true;
-        script.defer = true;
-        document.head.appendChild(script);
-    });
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=marker&loading=async`;
+            script.async = true;
+            script.defer = true;
+            document.head.appendChild(script);    });
 
 function scheduleDailyRefresh() {
     const now = new Date();

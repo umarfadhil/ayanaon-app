@@ -62,3 +62,13 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 *   **Improved Mobile Navigation:** Map panning on mobile devices now only requires one finger.
 *   **Cleaner UI:** Simplified the default map controls for a less cluttered interface.
 *   **Smarter Refresh:** The map's live pin refresh now pauses when a category filter is active, preventing filter disruption.
+
+---
+
+## What's New in v1.2.0
+
+*   **Traffic Information:** Integrated a real-time traffic layer onto the map for improved navigation.
+*   **Performance Optimization:** Implemented best practices for Google Maps API loading, resolving console warnings and enhancing application performance.
+*   **Enhanced Welcome Message:** Added a 📍 emoji to the welcome pop-up for a more engaging user experience.
+*   **Improved Info Window Display:** Adjusted the spacing between marker icons and pop-up descriptions for better visual clarity.
+*   **Interactive Markers:** Enabled toggling of info window visibility by clicking the marker icon, allowing users to open and close pop-ups with a single click.
