@@ -10,6 +10,7 @@ let markers = [];
 let userIp;
 let editingPinId = null;
 let currentSearchQuery = '';
+let currentSearchTokens = [];
 let selectedStartDate = '';
 let selectedEndDate = '';
 let navigationModal;
@@ -45,6 +46,38 @@ function formatDateToYMD(date) {
     return `${year}-${month}-${day}`;
 }
 
+function normalizeSearchText(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+}
+
+function tokenizeSearchQuery(query) {
+    const normalized = normalizeSearchText(query);
+    if (!normalized) {
+        return [];
+    }
+    return normalized
+        .split(/\s+/)
+        .filter(Boolean);
+}
+
+function buildSearchableBlob(pin) {
+    return [
+        pin.title,
+        pin.description,
+        pin.category,
+        pin.link
+    ]
+        .filter(Boolean)
+        .map(normalizeSearchText)
+        .join(' ');
+}
+
 function initializeNavigationModal() {
     if (navigationModal) {
         return;
@@ -56,7 +89,7 @@ function initializeNavigationModal() {
     navigationModal.innerHTML = `
         <div class="navigation-modal__sheet">
             <div class="navigation-modal__handle"></div>
-            <h3 class="navigation-modal__title">Buka dengan</h3>
+            <h3 class="navigation-modal__title">Pilih Aplikasi</h3>
             <div class="navigation-modal__options"></div>
             <button type="button" class="navigation-modal__cancel">Batal</button>
         </div>
@@ -104,7 +137,7 @@ function openNavigationOption(option) {
         }
 
         if (fallbackUrl) {
-            fallbackTimer = setTimeout(() => {
+            setTimeout(() => {
                 if (document.visibilityState === 'visible') {
                     window.open(fallbackUrl, '_blank', 'noopener');
                 }
@@ -130,14 +163,14 @@ function buildNavigationOptions(pin) {
         options.push({
             key: 'apple',
             label: 'Apple Maps',
-            hint: 'Aplikasi bawaan iOS',
+            hint: 'Arahkan melalui Apple Maps',
             scheme: `maps://?daddr=${destination}&dirflg=d`,
             fallback: `https://maps.apple.com/?daddr=&q=${destination}`
         });
         options.push({
             key: 'google',
             label: 'Google Maps',
-            hint: 'Aplikasi Google Maps',
+            hint: 'Arahkan melalui Google Maps',
             scheme: `comgooglemaps://?daddr=${destination}&directionsmode=driving`,
             fallback: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`
         });
@@ -145,7 +178,7 @@ function buildNavigationOptions(pin) {
         options.push({
             key: 'google',
             label: 'Google Maps',
-            hint: 'Aplikasi Google Maps',
+            hint: 'Arahkan melalui Google Maps',
             scheme: `google.navigation:q=${destination}`,
             fallback: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`
         });
@@ -154,15 +187,15 @@ function buildNavigationOptions(pin) {
     options.push({
         key: 'waze',
         label: 'Waze',
-        hint: 'Aplikasi Waze',
+        hint: 'Arahkan melalui Waze',
         scheme: `waze://?ll=${destination}&navigate=yes`,
         fallback: `https://waze.com/ul?ll=${destination}&navigate=yes`
     });
 
     options.push({
         key: 'browser',
-        label: 'Buka di Browser',
-        hint: 'Tampilkan rute di browser',
+        label: 'Browser',
+        hint: 'Arahkan melalui browser',
         web: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`
     });
 
@@ -338,6 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filterSearchInput) {
         filterSearchInput.addEventListener('input', (event) => {
             currentSearchQuery = event.target.value.trim().toLowerCase();
+            currentSearchTokens = tokenizeSearchQuery(currentSearchQuery);
             filterMarkers();
         });
         filterSearchInput.addEventListener('keydown', (event) => {
@@ -421,13 +455,9 @@ document.addEventListener('DOMContentLoaded', () => {
         markers.forEach(marker => {
             const matchesCategory = selectedCategories.includes(marker.category);
             const pin = marker.pin || {};
-            const query = currentSearchQuery;
-            const matchesSearch = !query || [
-                pin.title,
-                pin.description,
-                pin.category,
-                pin.link
-            ].some(field => typeof field === 'string' && field.toLowerCase().includes(query));
+            const searchableText = buildSearchableBlob(pin);
+            const matchesSearch = currentSearchTokens.length === 0 ||
+                currentSearchTokens.every(token => searchableText.includes(token));
             const pinDate = getPinDateForFilter(pin);
             const matchesDate = (() => {
                 if (!startDateBoundary && !endDateBoundary) {
@@ -461,6 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (filterSearchInput) {
             currentSearchQuery = filterSearchInput.value.trim().toLowerCase();
         }
+        currentSearchTokens = tokenizeSearchQuery(currentSearchQuery);
 
         filterMarkers();
 
@@ -506,6 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
             checkbox.checked = true;
         });
         currentSearchQuery = '';
+        currentSearchTokens = [];
         if (filterSearchInput) {
             filterSearchInput.value = '';
         }
@@ -524,8 +556,10 @@ document.addEventListener('DOMContentLoaded', () => {
             filterDropdown.classList.add('hidden');
         }
         if (map && typeof map.setZoom === 'function' && typeof map.panTo === 'function') {
-            map.panTo(DEFAULT_MAP_CENTER);
-            map.setZoom(12);
+            const targetPosition = userMarker ? toLatLngLiteral(userMarker.position) : DEFAULT_MAP_CENTER;
+            map.panTo(targetPosition);
+            const desiredZoom = userMarker ? Math.min(map.getZoom() || 12, 13) : 12;
+            map.setZoom(desiredZoom);
         }
     }
 
@@ -664,7 +698,7 @@ async function initMap() {
                         <button id="downvote-btn-${pin._id}">👎</button>
                         <span id="downvotes-${pin._id}">${pin.downvotes}</span>
                     </div>
-                    <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Get Me Here</button>
+                    <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Arahkan</button>
                 </div>
             </div>
         `;

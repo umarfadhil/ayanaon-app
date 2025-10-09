@@ -80,4 +80,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 *   **Navigation Shortcuts:** Introduced the “Get Me Here” button with an app selector that surfaces Google Maps, Apple Maps, Waze, or the browser based on your device.
 *   **Streamlined Pin Actions:** Reworked the info-window layout so voting and navigation controls sit together, with edit actions highlighted above when available.
 *   **Mobile-Friendly Controls:** Refined floating buttons (including the reset icon) to stay legible and consistent across devices.
+---
+
+## What's New in v1.4.0
+
+*   **Smarter Search:** Multi-term queries now match across titles, descriptions, categories, and links with accent-insensitive token matching (e.g., `"Marathon 5K"`).
+*   **Reset Recenter Logic:** Resetting filters recenters the map on your detected location and falls back to Jakarta when location access is unavailable.
+*   **Navigation Polishing:** Navigation deep links now properly fall back without lingering timers, keeping the bottom-sheet experience snappy.
 
