@@ -38,7 +38,7 @@ body {
     width: 100%;
 }
 
-#add-pin-btn, #info-btn, #locate-me-btn, #filter-btn {
+#add-pin-btn, #info-btn, #locate-me-btn, #filter-btn, #reset-filter-btn {
     position: absolute;
     bottom: 20px;
     z-index: 1;
@@ -59,13 +59,13 @@ body {
 }
 
 #info-btn {
-    left: 200px;
+    left: 260px;
     font-size: 24px; /* Adjusted for 'i' character */
     font-weight: bold;
 }
 
 #locate-me-btn {
-    left: 140px;
+    left: 200px;
     font-size: 24px;
     transform: rotate(-45deg);
 }
@@ -75,8 +75,30 @@ body {
     font-size: 24px;
 }
 
-#add-pin-btn:hover, #info-btn:hover, #locate-me-btn:hover, #filter-btn:hover {
+
+#add-pin-btn:hover, #info-btn:hover, #locate-me-btn:hover, #filter-btn:hover, #reset-filter-btn:hover {
     transform: scale(1.1);
+}
+
+#reset-filter-btn {
+    left: 140px;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.reset-rotating {
+    animation: reset-spin 0.6s ease;
+}
+
+@keyframes reset-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 #filter-dropdown {
@@ -107,6 +129,73 @@ body {
     display: block;
     margin-bottom: 5px;
     color: #333;
+}
+
+.filter-date-range {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 0;
+    margin-bottom: 15px;
+    color: #1f1f1f;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+#filter-date-range-input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(66, 133, 244, 0.35);
+    background-color: rgba(255, 255, 255, 0.95);
+    font-size: 14px;
+    color: #333;
+    outline: none;
+    cursor: pointer;
+}
+
+#filter-date-range-input:focus {
+    border-color: #4285f4;
+    box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2);
+}
+
+.filter-search {
+    display: flex;
+    gap: 10px;
+    margin: 0 0 15px;
+}
+
+.filter-search input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(66, 133, 244, 0.35);
+    background-color: rgba(255, 255, 255, 0.95);
+    font-size: 14px;
+    color: #333;
+    outline: none;
+}
+
+.filter-search input:focus {
+    border-color: #4285f4;
+    box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2);
+}
+
+#filter-date-range-input + #filter-search-btn {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 10px;
+    background-color: #4285f4;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+#filter-date-range-input + #filter-search-btn:hover,
+#filter-date-range-input + #filter-search-btn:focus {
+    background-color: #2f6bdc;
+    transform: translateY(-1px);
 }
 
 #pin-form {
@@ -319,6 +408,156 @@ body {
     word-wrap: break-word;
 }
 
+.info-window-actions {
+    margin: 12px 0;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 12px;
+}
+
+.info-window-actions .edit-btn {
+    margin-right: auto;
+}
+
+.navigate-btn {
+    background-color: #34a853;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.navigate-btn:hover,
+.navigate-btn:focus {
+    background-color: #2c8d45;
+    transform: translateY(-1px);
+}
+
+.navigation-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+    z-index: 1500;
+}
+
+.navigation-modal--open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.navigation-modal__sheet {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(12, 18, 34, 0.92);
+    color: #f1f5f9;
+    border-radius: 18px 18px 0 0;
+    padding: 16px 20px 14px;
+    transform: translateY(32px);
+    transition: transform 0.25s ease;
+    backdrop-filter: blur(18px);
+    box-shadow: 0 -20px 40px rgba(0, 0, 0, 0.35);
+}
+
+.navigation-modal--open .navigation-modal__sheet {
+    transform: translateY(0);
+}
+
+.navigation-modal__handle {
+    width: 48px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.25);
+    margin: 0 auto 12px;
+}
+
+.navigation-modal__title {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin: 0 0 12px;
+    text-align: center;
+    color: #f8fafc;
+}
+
+.navigation-modal__options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.navigation-modal__option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 12px;
+    padding: 14px 16px;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.navigation-modal__option:hover,
+.navigation-modal__option:focus {
+    background: rgba(66, 133, 244, 0.25);
+    transform: translateY(-1px);
+}
+
+.navigation-modal__option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.navigation-modal__option-title {
+    font-size: 1em;
+    font-weight: 600;
+    color: #f8fafc;
+}
+
+.navigation-modal__option-hint {
+    font-size: 0.8em;
+    color: rgba(241, 245, 249, 0.75);
+}
+
+.navigation-modal__option-arrow {
+    font-size: 1.2em;
+    color: rgba(241, 245, 249, 0.6);
+}
+
+.navigation-modal__cancel {
+    margin-top: 14px;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.15);
+    border: none;
+    border-radius: 12px;
+    padding: 12px;
+    color: #f8fafc;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.navigation-modal__cancel:hover,
+.navigation-modal__cancel:focus {
+    background: rgba(255, 255, 255, 0.25);
+}
+
 .info-window-vote {
     margin-top: 10px;
     display: flex;
@@ -347,10 +586,22 @@ body {
     padding: 10px 15px;
     cursor: pointer;
     font-size: 14px;
-    margin-left: 65px;
+    margin-left: 0px;
 }
 
 .edit-btn:hover {
     background-color: #357ae8;
     color: #ffffff;
+}
+
+.info-window-vote-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.info-window-vote-actions .info-window-vote {
+    margin: 0;
 }

@@ -1,5 +1,7 @@
 console.log('app.js loaded');
 
+const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
+
 let map;
 let temporaryMarker;
 let userMarker;
@@ -7,6 +9,270 @@ let userCity;
 let markers = [];
 let userIp;
 let editingPinId = null;
+let currentSearchQuery = '';
+let selectedStartDate = '';
+let selectedEndDate = '';
+let navigationModal;
+let navigationOptionsContainer;
+let navigationCancelBtn;
+
+function toLatLngLiteral(position) {
+    if (!position) {
+        return null;
+    }
+    if (typeof position.lat === 'function' && typeof position.lng === 'function') {
+        return { lat: position.lat(), lng: position.lng() };
+    }
+    return { lat: position.lat, lng: position.lng };
+}
+
+function getDistanceSquared(origin, target) {
+    if (!origin || !target) {
+        return Number.POSITIVE_INFINITY;
+    }
+    const latDiff = origin.lat - target.lat;
+    const lngDiff = origin.lng - target.lng;
+    return latDiff * latDiff + lngDiff * lngDiff;
+}
+
+function formatDateToYMD(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return '';
+    }
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function initializeNavigationModal() {
+    if (navigationModal) {
+        return;
+    }
+
+    navigationModal = document.createElement('div');
+    navigationModal.id = 'navigation-modal';
+    navigationModal.className = 'navigation-modal';
+    navigationModal.innerHTML = `
+        <div class="navigation-modal__sheet">
+            <div class="navigation-modal__handle"></div>
+            <h3 class="navigation-modal__title">Buka dengan</h3>
+            <div class="navigation-modal__options"></div>
+            <button type="button" class="navigation-modal__cancel">Batal</button>
+        </div>
+    `;
+
+    document.body.appendChild(navigationModal);
+
+    navigationOptionsContainer = navigationModal.querySelector('.navigation-modal__options');
+    navigationCancelBtn = navigationModal.querySelector('.navigation-modal__cancel');
+
+    navigationModal.addEventListener('click', (event) => {
+        if (event.target === navigationModal) {
+            hideNavigationModal();
+        }
+    });
+
+    navigationCancelBtn.addEventListener('click', () => {
+        hideNavigationModal();
+    });
+}
+
+function hideNavigationModal() {
+    if (!navigationModal) {
+        return;
+    }
+    navigationModal.classList.remove('navigation-modal--open');
+}
+
+function openNavigationOption(option) {
+    if (!option) {
+        return;
+    }
+
+    hideNavigationModal();
+
+    if (option.scheme) {
+        const fallbackUrl = option.fallback || option.web || null;
+        try {
+            window.location.href = option.scheme;
+        } catch (error) {
+            if (fallbackUrl) {
+                window.open(fallbackUrl, '_blank', 'noopener');
+            }
+            return;
+        }
+
+        if (fallbackUrl) {
+            fallbackTimer = setTimeout(() => {
+                if (document.visibilityState === 'visible') {
+                    window.open(fallbackUrl, '_blank', 'noopener');
+                }
+            }, 1500);
+        }
+        return;
+    }
+
+    if (option.web) {
+        window.open(option.web, '_blank', 'noopener');
+    }
+}
+
+function buildNavigationOptions(pin) {
+    const destination = `${pin.lat},${pin.lng}`;
+    const encodedTitle = encodeURIComponent(pin.title || 'Tujuan');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
+
+    const options = [];
+
+    if (isIOS) {
+        options.push({
+            key: 'apple',
+            label: 'Apple Maps',
+            hint: 'Aplikasi bawaan iOS',
+            scheme: `maps://?daddr=${destination}&dirflg=d`,
+            fallback: `https://maps.apple.com/?daddr=&q=${destination}`
+        });
+        options.push({
+            key: 'google',
+            label: 'Google Maps',
+            hint: 'Aplikasi Google Maps',
+            scheme: `comgooglemaps://?daddr=${destination}&directionsmode=driving`,
+            fallback: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`
+        });
+    } else if (isAndroid) {
+        options.push({
+            key: 'google',
+            label: 'Google Maps',
+            hint: 'Aplikasi Google Maps',
+            scheme: `google.navigation:q=${destination}`,
+            fallback: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`
+        });
+    }
+
+    options.push({
+        key: 'waze',
+        label: 'Waze',
+        hint: 'Aplikasi Waze',
+        scheme: `waze://?ll=${destination}&navigate=yes`,
+        fallback: `https://waze.com/ul?ll=${destination}&navigate=yes`
+    });
+
+    options.push({
+        key: 'browser',
+        label: 'Buka di Browser',
+        hint: 'Tampilkan rute di browser',
+        web: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`
+    });
+
+    return options;
+}
+
+function showNavigationOptions(pin) {
+    initializeNavigationModal();
+
+    const options = buildNavigationOptions(pin);
+    if (!navigationOptionsContainer) {
+        return;
+    }
+
+    navigationOptionsContainer.innerHTML = '';
+
+    options.forEach(option => {
+        const optionButton = document.createElement('button');
+        optionButton.type = 'button';
+        optionButton.className = 'navigation-modal__option';
+        optionButton.innerHTML = `
+            <div class="navigation-modal__option-text">
+                <span class="navigation-modal__option-title">${option.label}</span>
+                ${option.hint ? `<span class="navigation-modal__option-hint">${option.hint}</span>` : ''}
+            </div>
+            <span class="navigation-modal__option-arrow">\u203a</span>
+        `;
+        optionButton.addEventListener('click', () => openNavigationOption(option));
+        navigationOptionsContainer.appendChild(optionButton);
+    });
+
+    navigationModal.classList.add('navigation-modal--open');
+}
+
+function parseDateInput(value, endOfDay = false) {
+    if (!value) {
+        return null;
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date)) {
+        return null;
+    }
+    if (endOfDay) {
+        date.setHours(23, 59, 59, 999);
+    } else {
+        date.setHours(0, 0, 0, 0);
+    }
+    return date;
+}
+
+function getPinDateForFilter(pin) {
+    if (!pin) {
+        return null;
+    }
+
+    const { lifetime } = pin;
+    if (lifetime) {
+        if (lifetime.type === 'date' && lifetime.value) {
+            const date = new Date(lifetime.value);
+            if (!Number.isNaN(date)) {
+                date.setHours(0, 0, 0, 0);
+                return date;
+            }
+        }
+        if (lifetime.type === 'today') {
+            const fallbackToday = new Date();
+            fallbackToday.setHours(0, 0, 0, 0);
+            if (lifetime.value) {
+                const lifetimeDate = new Date(lifetime.value);
+                if (!Number.isNaN(lifetimeDate)) {
+                    lifetimeDate.setHours(0, 0, 0, 0);
+                    return lifetimeDate;
+                }
+            }
+            return fallbackToday;
+        }
+    }
+
+    const possibleFields = [
+        'date',
+        'eventDate',
+        'startDate',
+        'start_date',
+        'createdAt',
+        'created_at',
+        'updatedAt',
+        'updated_at',
+        'timestamp'
+    ];
+
+    for (const field of possibleFields) {
+        if (pin[field]) {
+            const candidate = new Date(pin[field]);
+            if (!Number.isNaN(candidate)) {
+                candidate.setHours(0, 0, 0, 0);
+                return candidate;
+            }
+        }
+    }
+
+    return null;
+}
+
+function removeDeveloperOnlyCategoryOptions() {
+    const categorySelect = document.getElementById('category');
+    if (!categorySelect) {
+        return;
+    }
+    Array.from(categorySelect.querySelectorAll('option[data-developer-only="true"]')).forEach(option => option.remove());
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('welcome-modal');
@@ -17,6 +283,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterDropdown = document.getElementById('filter-dropdown');
     const selectAllCategories = document.getElementById('select-all-categories');
     const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
+    const filterSearchInput = document.getElementById('filter-search-input');
+    const filterSearchButton = document.getElementById('filter-search-btn');
+    const filterDateRangeInput = document.getElementById('filter-date-range-input');
+    const resetFilterBtn = document.getElementById('reset-filter-btn');
+    let filterDatePicker = null;
+
+    initializeNavigationModal();
 
     const hasVisited = localStorage.getItem('hasVisited');
 
@@ -62,19 +335,201 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    if (filterSearchInput) {
+        filterSearchInput.addEventListener('input', (event) => {
+            currentSearchQuery = event.target.value.trim().toLowerCase();
+            filterMarkers();
+        });
+        filterSearchInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                executeSearch();
+            }
+        });
+    }
+
+    if (filterSearchButton) {
+        filterSearchButton.addEventListener('click', () => {
+            executeSearch();
+        });
+    }
+
+    if (filterDateRangeInput) {
+        if (typeof flatpickr === 'function') {
+            filterDatePicker = flatpickr(filterDateRangeInput, {
+                mode: 'range',
+                dateFormat: 'Y-m-d',
+                allowInput: false,
+                onChange(selectedDates) {
+                    if (!selectedDates.length) {
+                        selectedStartDate = '';
+                        selectedEndDate = '';
+                    } else if (selectedDates.length === 1) {
+                        const single = formatDateToYMD(selectedDates[0]);
+                        selectedStartDate = single;
+                        selectedEndDate = single;
+                    } else {
+                        const [start, end] = selectedDates;
+                        selectedStartDate = formatDateToYMD(start);
+                        selectedEndDate = formatDateToYMD(end);
+                    }
+                    filterMarkers();
+                },
+                onClose(selectedDates) {
+                    if (!selectedDates.length) {
+                        filterDateRangeInput.value = '';
+                    }
+                }
+            });
+        } else {
+            filterDateRangeInput.removeAttribute('readonly');
+            filterDateRangeInput.addEventListener('change', () => {
+                const raw = filterDateRangeInput.value.trim();
+                if (!raw) {
+                    selectedStartDate = '';
+                    selectedEndDate = '';
+                    filterMarkers();
+                    return;
+                }
+                const parts = raw.split(/\s*(?:to|—|-)\s*/);
+                const first = parts[0] ? parts[0].trim() : '';
+                const second = parts[1] ? parts[1].trim() : '';
+                selectedStartDate = first;
+                selectedEndDate = second || first;
+                filterMarkers();
+            });
+        }
+    }
+
+    if (resetFilterBtn) {
+        resetFilterBtn.addEventListener('click', () => {
+            resetFilters();
+            resetFilterBtn.classList.remove('reset-rotating');
+            // Force reflow to restart animation
+            void resetFilterBtn.offsetWidth;
+            resetFilterBtn.classList.add('reset-rotating');
+        });
+    }
+
     function filterMarkers() {
         const selectedCategories = Array.from(categoryCheckboxes)
             .filter(checkbox => checkbox.checked)
             .map(checkbox => checkbox.value);
+        const startDateBoundary = parseDateInput(selectedStartDate);
+        const endDateBoundary = parseDateInput(selectedEndDate, true);
 
         markers.forEach(marker => {
-            if (selectedCategories.includes(marker.category)) {
+            const matchesCategory = selectedCategories.includes(marker.category);
+            const pin = marker.pin || {};
+            const query = currentSearchQuery;
+            const matchesSearch = !query || [
+                pin.title,
+                pin.description,
+                pin.category,
+                pin.link
+            ].some(field => typeof field === 'string' && field.toLowerCase().includes(query));
+            const pinDate = getPinDateForFilter(pin);
+            const matchesDate = (() => {
+                if (!startDateBoundary && !endDateBoundary) {
+                    return true;
+                }
+                if (!pinDate) {
+                    return false;
+                }
+                if (startDateBoundary && pinDate < startDateBoundary) {
+                    return false;
+                }
+                if (endDateBoundary && pinDate > endDateBoundary) {
+                    return false;
+                }
+                return true;
+            })();
+
+            if (matchesCategory && matchesSearch && matchesDate) {
                 marker.map = map;
             } else {
                 marker.map = null;
             }
         });
     }
+
+    function executeSearch() {
+        if (!filterDropdown) {
+            return;
+        }
+
+        if (filterSearchInput) {
+            currentSearchQuery = filterSearchInput.value.trim().toLowerCase();
+        }
+
+        filterMarkers();
+
+        if (!map) {
+            return;
+        }
+
+        const visibleMarkers = markers.filter(marker => marker.map === map);
+
+        if (!visibleMarkers.length) {
+            alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
+            return;
+        }
+
+        if (filterSearchInput) {
+            filterSearchInput.blur();
+        }
+        filterDropdown.classList.add('hidden');
+
+        const referencePosition = toLatLngLiteral(userMarker ? userMarker.position : map.getCenter());
+        const nearestMarker = visibleMarkers.reduce((closest, marker) => {
+            const closestDistance = getDistanceSquared(referencePosition, toLatLngLiteral(closest.position));
+            const candidateDistance = getDistanceSquared(referencePosition, toLatLngLiteral(marker.position));
+            return candidateDistance < closestDistance ? marker : closest;
+        }, visibleMarkers[0]);
+
+        const targetPosition = toLatLngLiteral(nearestMarker.position);
+        if (targetPosition) {
+            map.panTo(targetPosition);
+            if (typeof map.getZoom === 'function' && typeof map.setZoom === 'function') {
+                const desiredZoom = 15;
+                const currentZoom = map.getZoom();
+                if (!currentZoom || currentZoom < desiredZoom) {
+                    map.setZoom(desiredZoom);
+                }
+            }
+        }
+    }
+
+    function resetFilters() {
+        selectAllCategories.checked = true;
+        categoryCheckboxes.forEach(checkbox => {
+            checkbox.checked = true;
+        });
+        currentSearchQuery = '';
+        if (filterSearchInput) {
+            filterSearchInput.value = '';
+        }
+        selectedStartDate = '';
+        selectedEndDate = '';
+        if (filterDatePicker) {
+            filterDatePicker.clear();
+            if (filterDateRangeInput) {
+                filterDateRangeInput.setAttribute('readonly', 'readonly');
+            }
+        } else if (filterDateRangeInput) {
+            filterDateRangeInput.value = '';
+        }
+        filterMarkers();
+        if (filterDropdown) {
+            filterDropdown.classList.add('hidden');
+        }
+        if (map && typeof map.setZoom === 'function' && typeof map.panTo === 'function') {
+            map.panTo(DEFAULT_MAP_CENTER);
+            map.setZoom(12);
+        }
+    }
+
+    window.applyFilters = filterMarkers;
 
     // Lifetime options logic
     const lifetimeSelect = document.getElementById('lifetime-select');
@@ -137,7 +592,7 @@ async function initMap() {
     }
 
     map = new Map(document.getElementById('map'), {
-        center: { lat: -6.2088, lng: 106.8456 },
+        center: DEFAULT_MAP_CENTER,
         zoom: 12,
         mapId: '4504f8b37365c3d0',
         gestureHandling: 'greedy',
@@ -187,6 +642,7 @@ async function initMap() {
         }
     
         const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
+        const safeTitleForData = (pin.title || '').replace(/"/g, '&quot;');
 
         const contentString = `
             <div class="info-window-content">
@@ -198,12 +654,17 @@ async function initMap() {
                 <div class="info-window-description">${descriptionWithBreaks}</div>
                 <div class="info-window-when">${when}</div>
                 ${linkElement}
-                <div class="info-window-vote">
-                    <button id="upvote-btn-${pin._id}">👍</button>
-                    <span id="upvotes-${pin._id}">${pin.upvotes}</span>
-                    <button id="downvote-btn-${pin._id}">👎</button>
-                    <span id="downvotes-${pin._id}">${pin.downvotes}</span>
+                <div class="info-window-actions">
                     ${editButton}
+                </div>
+                <div class="info-window-vote-actions">
+                    <div class="info-window-vote">
+                        <button id="upvote-btn-${pin._id}">👍</button>
+                        <span id="upvotes-${pin._id}">${pin.upvotes}</span>
+                        <button id="downvote-btn-${pin._id}">👎</button>
+                        <span id="downvotes-${pin._id}">${pin.downvotes}</span>
+                    </div>
+                    <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Get Me Here</button>
                 </div>
             </div>
         `;
@@ -222,6 +683,11 @@ async function initMap() {
             downvoteButton.addEventListener('click', () => downvotePin(pin._id));
         }
 
+        const navigateButton = infowindow.container.querySelector('.navigate-btn');
+        if (navigateButton) {
+            navigateButton.addEventListener('click', () => showNavigationOptions(pin));
+        }
+
         const closeButton = infowindow.container.querySelector('.close-info-window');
         closeButton.addEventListener('click', () => {
             infowindow.hide();
@@ -236,6 +702,9 @@ async function initMap() {
         });
     
         markers.push(marker);
+        if (typeof window.applyFilters === 'function') {
+            window.applyFilters();
+        }
     }
 
     function fetchPins() {
@@ -316,6 +785,7 @@ async function initMap() {
             console.log('Adding new pin to map:', data);
             addPinToMap(data);
             document.getElementById('add-pin-form').reset();
+            removeDeveloperOnlyCategoryOptions();
             document.getElementById('lifetime-date-picker').style.display = 'none';
             alert('Pin dropped successfully!');
         });
@@ -406,6 +876,7 @@ async function initMap() {
         pinForm.classList.toggle('hidden');
         editingPinId = null; // Reset editing state
         document.getElementById('add-pin-form').reset();
+            removeDeveloperOnlyCategoryOptions();
     });
 
     fetchPins();
@@ -447,18 +918,19 @@ function downvotePin(id) {
 
 function getIconForCategory(category) {
     const icons = {
-        '🎉 Acara': '🎉',
+        '🏆 Restoran Legendaris': '🏆',
+        '🏃🏻 Olahraga & Aktivitas Hobi': '🏃🏻',
+        '🎉 Konser Musik & Acara': '🎉',
         '🍔 Promo & Diskon Makanan / Minuman': '🍔',
         '💸 Promo & Diskon Lainnya': '💸',
-        '🤝 Jual-Beli Barang': '🤝',
-        '🚦 Lalu Lintas & Kecelakaan': '🚦',
         '🛍️ Pasar Lokal & Pameran': '🛍️',
         '🎭 Budaya & Hiburan': '🎭',
-        '🏃🏻‍♂️‍➡️ Olahraga & Aktivitas Hobi': '🏃🏻‍♂️‍➡️',
-        '🎓 Komunitas & Edukasi': '🎓',
-        '🌧️ Cuaca & Bencana Alam': '🌧️',
-        '🐾 Barang & Hewan Hilang': '🐾',
+        '🎓 Edukasi': '🎓',
         '🧑‍🤝‍🧑 Sosial & Kopdar': '🧑‍🤝‍🧑',
+        '🤝 Jual-Beli Barang': '🤝',
+        '🐾 Barang & Hewan Hilang': '🐾',
+        '🚦 Lalu Lintas & Kecelakaan': '🚦',
+        '🌧️ Cuaca & Bencana Alam': '🌧️',
         '💡 Lain-lain': '💡'
     };
     return icons[category] || '💡';
@@ -489,7 +961,16 @@ function editPin(id) {
     const pin = markers.find(marker => marker.pin._id === id).pin;
     document.getElementById('title').value = pin.title;
     document.getElementById('description').value = pin.description;
-    document.getElementById('category').value = pin.category;
+    const categorySelect = document.getElementById('category');
+    if (categorySelect) {
+        let categoryOption = Array.from(categorySelect.options).find(option => option.value === pin.category);
+        if (!categoryOption) {
+            categoryOption = new Option(pin.category, pin.category);
+            categoryOption.dataset.developerOnly = 'true';
+            categorySelect.add(categoryOption);
+        }
+        categorySelect.value = pin.category;
+    }
     document.getElementById('link').value = pin.link;
     document.getElementById('lifetime-select').value = pin.lifetime.type;
     if (pin.lifetime.type === 'date') {
@@ -537,6 +1018,7 @@ function updatePin(id) {
         }
         alert('Pin updated successfully!');
         document.getElementById('add-pin-form').reset();
+            removeDeveloperOnlyCategoryOptions();
         document.getElementById('pin-form').classList.add('hidden');
         editingPinId = null;
         fetchPins();

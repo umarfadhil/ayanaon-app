@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Petalytix - Aya Naon?</title>
+    <title>AyaNaon? by Petalytix</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="favicon.svg">
+    <meta name="theme-color" content="#4285f4">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,24 +17,33 @@
         <button id="satellite-view-btn" class="map-type-btn">Satellite</button>
     </div>
     <button id="add-pin-btn">+</button>
-    <button id="info-btn">i</button>
-    <button id="locate-me-btn">➤</button>
+    <button id="info-btn">ⓘ</button>
     <button id="filter-btn">🔍︎</button>
+    <button id="reset-filter-btn" title="Reset filter" aria-label="Reset filter">♻</button>
+    <button id="locate-me-btn">➤</button>
     <div id="filter-dropdown" class="hidden">
         <div id="filter-container">
+            <div class="filter-search">
+                <input type="text" id="filter-search-input" placeholder="Bakso, Marathon 5K, Konser Noah, dll." aria-label="Cari pin">
+            </div>
+            <div class="filter-date-range" aria-label="Filter tanggal">
+                <input type="text" id="filter-date-range-input" placeholder="Pilih tanggal atau rentang" aria-label="Filter tanggal" readonly>
+                <button id="filter-search-btn" type="button">Cari</button>
+            </div>
             <label><input type="checkbox" id="select-all-categories" checked> Select All</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🎉 Acara" checked> 🎉 Acara</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🏆 Restoran Legendaris" checked> 🏆 Restoran Legendaris</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🏃🏻 Olahraga & Aktivitas Hobi" checked> 🏃🏻 Olahraga & Aktivitas Hobi</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🎉 Konser Musik & Acara" checked> 🎉 Konser Musik & Acara</label><br>
             <label><input type="checkbox" class="category-checkbox" value="🍔 Promo & Diskon Makanan / Minuman" checked> 🍔 Promo & Diskon Makanan/Minuman</label><br>
             <label><input type="checkbox" class="category-checkbox" value="💸 Promo & Diskon Lainnya" checked> 💸 Promo & Diskon Lainnya</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🤝 Jual-Beli Barang" checked> 🤝 Jual-Beli Barang</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🚦 Lalu Lintas & Kecelakaan" checked> 🚦 Lalu Lintas & Kecelakaan</label><br>
             <label><input type="checkbox" class="category-checkbox" value="🛍️ Pasar Lokal & Pameran" checked> 🛍️ Pasar Lokal & Pameran</label><br>
             <label><input type="checkbox" class="category-checkbox" value="🎭 Budaya & Hiburan" checked> 🎭 Budaya & Hiburan</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🏃🏻‍♂️‍➡️ Olahraga & Aktivitas Hobi" checked> 🏃🏻‍♂️‍➡️ Olahraga & Aktivitas Hobi</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🎓 Komunitas & Edukasi" checked> 🎓 Komunitas & Edukasi</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🌧️ Cuaca & Bencana Alam" checked> 🌧️ Cuaca & Bencana Alam</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🐾 Barang & Hewan Hilang" checked> 🐾 Barang & Hewan Hilang</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🎓 Edukasi" checked> 🎓 Edukasi</label><br>
             <label><input type="checkbox" class="category-checkbox" value="🧑‍🤝‍🧑 Sosial & Kopdar" checked> 🧑‍🤝‍🧑 Sosial & Kopdar</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🤝 Jual-Beli Barang" checked> 🤝 Jual-Beli Barang</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🐾 Barang & Hewan Hilang" checked> 🐾 Barang & Hewan Hilang</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🚦 Lalu Lintas & Kecelakaan" checked> 🚦 Lalu Lintas & Kecelakaan</label><br>
+            <label><input type="checkbox" class="category-checkbox" value="🌧️ Cuaca & Bencana Alam" checked> 🌧️ Cuaca & Bencana Alam</label><br>
             <label><input type="checkbox" class="category-checkbox" value="💡 Lain-lain" checked> 💡 Lain-lain</label><br>
         </div>
     </div>
@@ -45,18 +58,18 @@
             <textarea id="description" placeholder="Deskripsi" required></textarea>
             <select id="category" required>
                 <option value="" disabled selected>Pilih Kategori</option>
-                <option value="🎉 Acara">🎉 Acara</option>
+                <option value="🏃🏻 Olahraga & Aktivitas Hobi">🏃🏻 Olahraga & Aktivitas Hobi</option>
+                <option value="🎉 Konser Musik & Acara">🎉 Konser Musik & Acara</option>
                 <option value="🍔 Promo & Diskon Makanan / Minuman">🍔 Promo & Diskon Makanan / Minuman</option>
                 <option value="💸 Promo & Diskon Lainnya">💸 Promo & Diskon Lainnya</option>
-                <option value="🤝 Jual-Beli Barang">🤝 Jual-Beli Barang</option>
-                <option value="🚦 Lalu Lintas & Kecelakaan">🚦 Lalu Lintas & Kecelakaan</option>
                 <option value="🛍️ Pasar Lokal & Pameran">🛍️ Pasar Lokal & Pameran</option>
                 <option value="🎭 Budaya & Hiburan">🎭 Budaya & Hiburan</option>
-                <option value="🏃🏻‍♂️‍➡️ Olahraga & Aktivitas Hobi">🏃🏻‍♂️‍➡️ Olahraga & Aktivitas Hobi</option>
-                <option value="🎓 Komunitas & Edukasi">🎓 Komunitas & Edukasi</option>
-                <option value="🌧️ Cuaca & Bencana Alam">🌧️ Cuaca & Bencana Alam</option>
-                <option value="🐾 Barang & Hewan Hilang">🐾 Barang & Hewan Hilang</option>
+                <option value="🎓 Edukasi">🎓 Edukasi</option>
                 <option value="🧑‍🤝‍🧑 Sosial & Kopdar">🧑‍🤝‍🧑 Sosial & Kopdar</option>
+                <option value="🤝 Jual-Beli Barang">🤝 Jual-Beli Barang</option>
+                <option value="🐾 Barang & Hewan Hilang">🐾 Barang & Hewan Hilang</option>
+                <option value="🚦 Lalu Lintas & Kecelakaan">🚦 Lalu Lintas & Kecelakaan</option>
+                <option value="🌧️ Cuaca & Bencana Alam">🌧️ Cuaca & Bencana Alam</option>
                 <option value="💡 Lain-lain">💡 Lain-lain</option>
             </select>
             <select id="lifetime-select" required>
@@ -92,9 +105,10 @@
             <p> </p>
             <p><b>Terima kasih dan selamat berselancar, Warga 🏄‍♀️🌊</b></p>
             <p><i>Silahkan email <a href="mailto:contact@petalytix.id">contact@petalytix.id</a> jika ingin kontak dengan developer</i></p>
-            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 1.2.0 </div>
+            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 1.3.0 </div>
         </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="app.js"></script>
 </body>
 </html>
