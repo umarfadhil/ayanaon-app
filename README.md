@@ -88,3 +88,12 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 *   **Reset Recenter Logic:** Resetting filters recenters the map on your detected location and falls back to Jakarta when location access is unavailable.
 *   **Navigation Polishing:** Navigation deep links now properly fall back without lingering timers, keeping the bottom-sheet experience snappy.
 
+---
+
+## What's New in v1.5.0
+
+*   **Performance Tune-Up:** Marker refreshes clean up old overlays, cached search text speeds up filtering, and periodic pin reloads now trigger only when counts change.
+*   **Metric Enhancements:** Visitor and active-pin counters refresh every three minutes and animate when values change.
+*   **Mobile UX:** Disabled accidental page zooming, streamlined geolocation watching, and added a PWA install button with native prompt support.
+*   **PWA Readiness:** Added a web app manifest, service worker with precaching, and install logging so Chrome on Android surfaces the “Install App” prompt.
+

@@ -1,5 +1,3 @@
-console.log('app.js loaded');
-
 const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
 
 let map;
@@ -7,6 +5,14 @@ let temporaryMarker;
 let userMarker;
 let userCity;
 let markers = [];
+let isFetchingPins = false;
+let pendingPinsRefresh = false;
+let lastKnownPinsCount = null;
+let refreshPins = () => Promise.resolve();
+let lastKnownVisitorCount = null;
+let isFetchingVisitorCount = false;
+let lastKnownActivePinsCount = null;
+let deferredInstallPrompt = null;
 let userIp;
 let editingPinId = null;
 let currentSearchQuery = '';
@@ -16,6 +22,110 @@ let selectedEndDate = '';
 let navigationModal;
 let navigationOptionsContainer;
 let navigationCancelBtn;
+
+const DEBUG_LOGGER = (() => {
+    let enabled = true;
+    try {
+        const stored = localStorage.getItem('ayan_debug');
+        if (stored === 'false') {
+            enabled = false;
+        } else if (stored === 'true') {
+            enabled = true;
+        }
+    } catch (error) {
+        enabled = true;
+    }
+    const emit = (...args) => {
+        if (enabled) {
+            console.log('[AyaNaon]', ...args);
+        }
+    };
+    const api = {
+        enable() {
+            enabled = true;
+            try {
+                localStorage.setItem('ayan_debug', 'true');
+            } catch (error) {
+                emit('Unable to persist debug flag:', error);
+            }
+            emit('Debug logging enabled');
+        },
+        disable() {
+            enabled = false;
+            try {
+                localStorage.setItem('ayan_debug', 'false');
+            } catch (error) {
+                emit('Unable to clear debug flag:', error);
+            }
+            console.log('[AyaNaon]', 'Debug logging disabled');
+        },
+        log: emit,
+        isEnabled: () => enabled
+    };
+    try {
+        window.ayanaonDebug = api;
+    } catch (error) {
+        emit('Unable to expose debug API:', error);
+    }
+    return api;
+})();
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+            .then((registration) => {
+                DEBUG_LOGGER.log('Service worker registered', { scope: registration.scope });
+            })
+            .catch((error) => {
+                console.error('Service worker registration failed:', error);
+                DEBUG_LOGGER.log('Service worker registration failed', error);
+            });
+    });
+}
+
+function clearMarkers() {
+    if (!Array.isArray(markers) || !markers.length) {
+        return;
+    }
+    markers.forEach(marker => {
+        if (marker.infoWindow && typeof marker.infoWindow.setMap === 'function') {
+            marker.infoWindow.setMap(null);
+        }
+        marker.map = null;
+    });
+    markers = [];
+}
+
+function animateMetricChange(element) {
+    if (!element) {
+        return;
+    }
+    element.classList.remove('metric-updated');
+    void element.offsetWidth;
+    element.classList.add('metric-updated');
+    setTimeout(() => element.classList.remove('metric-updated'), 600);
+}
+
+window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    DEBUG_LOGGER.log('beforeinstallprompt captured');
+    const installButton = document.getElementById('install-app-btn');
+    if (installButton) {
+        installButton.hidden = false;
+        installButton.disabled = false;
+    }
+});
+
+window.addEventListener('appinstalled', () => {
+    DEBUG_LOGGER.log('PWA installed');
+    deferredInstallPrompt = null;
+    const installButton = document.getElementById('install-app-btn');
+    if (installButton) {
+        installButton.hidden = true;
+        installButton.disabled = false;
+    }
+});
 
 function toLatLngLiteral(position) {
     if (!position) {
@@ -313,6 +423,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const infoBtn = document.getElementById('info-btn');
     const locateMeBtn = document.getElementById('locate-me-btn');
     const filterBtn = document.getElementById('filter-btn');
+    const installAppBtn = document.getElementById('install-app-btn');
     const filterDropdown = document.getElementById('filter-dropdown');
     const selectAllCategories = document.getElementById('select-all-categories');
     const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
@@ -323,6 +434,42 @@ document.addEventListener('DOMContentLoaded', () => {
     let filterDatePicker = null;
 
     initializeNavigationModal();
+
+    if (installAppBtn) {
+        if (deferredInstallPrompt) {
+            installAppBtn.hidden = false;
+            installAppBtn.disabled = false;
+        }
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+        if (isStandalone) {
+            installAppBtn.hidden = true;
+        }
+        installAppBtn.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) {
+                DEBUG_LOGGER.log('Install prompt not available');
+                alert('Untuk memasang aplikasi, buka menu browser dan pilih "Add to Home Screen" atau "Install".');
+                return;
+            }
+            installAppBtn.disabled = true;
+            try {
+                deferredInstallPrompt.prompt();
+                const choiceResult = await deferredInstallPrompt.userChoice;
+                DEBUG_LOGGER.log('Install prompt choice', choiceResult);
+                if (choiceResult.outcome === 'accepted') {
+                    installAppBtn.hidden = true;
+                } else {
+                    installAppBtn.disabled = false;
+                }
+            } catch (error) {
+                DEBUG_LOGGER.log('Install prompt error', error);
+                installAppBtn.disabled = false;
+            } finally {
+                deferredInstallPrompt = null;
+                installAppBtn.disabled = false;
+                installAppBtn.hidden = true;
+            }
+        });
+    }
 
     const hasVisited = localStorage.getItem('hasVisited');
 
@@ -455,7 +602,11 @@ document.addEventListener('DOMContentLoaded', () => {
         markers.forEach(marker => {
             const matchesCategory = selectedCategories.includes(marker.category);
             const pin = marker.pin || {};
-            const searchableText = buildSearchableBlob(pin);
+            let searchableText = marker.searchText;
+            if (typeof searchableText !== 'string') {
+                searchableText = buildSearchableBlob(pin);
+                marker.searchText = searchableText;
+            }
             const matchesSearch = currentSearchTokens.length === 0 ||
                 currentSearchTokens.every(token => searchableText.includes(token));
             const pinDate = getPinDateForFilter(pin);
@@ -645,6 +796,7 @@ async function initMap() {
         markerElement.textContent = icon;
         markerElement.style.fontSize = '24px';
     
+        const searchableText = buildSearchableBlob(pin);
         const marker = new google.maps.marker.AdvancedMarkerElement({
             position: { lat: pin.lat, lng: pin.lng },
             map: map,
@@ -655,6 +807,7 @@ async function initMap() {
         // Store category on marker object
         marker.category = pin.category;
         marker.pin = pin;
+        marker.searchText = searchableText;
     
         let linkElement = '';
         if (pin.link) {
@@ -705,6 +858,7 @@ async function initMap() {
     
         const infowindow = new CustomInfoWindow(pin, contentString);
         infowindow.setMap(map);
+        marker.infoWindow = infowindow;
     
         // Attach event listeners programmatically
         const upvoteButton = infowindow.container.querySelector(`#upvote-btn-${pin._id}`);
@@ -742,20 +896,36 @@ async function initMap() {
     }
 
     function fetchPins() {
-        // Clear existing markers
-        // markers.forEach(marker => marker.map = null);
-        // markers = [];
-    
-        let url = '/api/pins';
-        fetch(url)
+        if (isFetchingPins) {
+            pendingPinsRefresh = true;
+            return Promise.resolve();
+        }
+        isFetchingPins = true;
+        DEBUG_LOGGER.log('Fetching pins from server');
+        const url = '/api/pins';
+        return fetch(url)
         .then(response => response.json())
         .then(pins => {
-            console.log(pins);
-            pins.forEach(pin => {
+            clearMarkers();
+            (Array.isArray(pins) ? pins : []).forEach(pin => {
                 addPinToMap(pin);
             });
+            lastKnownPinsCount = Array.isArray(pins) ? pins.length : 0;
+            DEBUG_LOGGER.log('Pins synchronized', { count: lastKnownPinsCount });
+        })
+        .catch(error => {
+            console.error('Error fetching pins:', error);
+            DEBUG_LOGGER.log('Failed to fetch pins', error);
+        })
+        .finally(() => {
+            isFetchingPins = false;
+            if (pendingPinsRefresh) {
+                pendingPinsRefresh = false;
+                fetchPins();
+            }
         });
     }
+    refreshPins = fetchPins;
 
     function submitPin(e) {
         e.preventDefault();
@@ -816,7 +986,6 @@ async function initMap() {
             if (temporaryMarker) {
                 temporaryMarker.map = null;
             }
-            console.log('Adding new pin to map:', data);
             addPinToMap(data);
             document.getElementById('add-pin-form').reset();
             removeDeveloperOnlyCategoryOptions();
@@ -850,6 +1019,33 @@ async function initMap() {
         mapViewBtn.classList.remove('active');
     });
 
+    let locationWatchId = null;
+
+    function stopLocationWatch() {
+        if (locationWatchId !== null && navigator.geolocation && typeof navigator.geolocation.clearWatch === 'function') {
+            navigator.geolocation.clearWatch(locationWatchId);
+            locationWatchId = null;
+        }
+    }
+
+    function startLocationWatch() {
+        if (!navigator.geolocation || locationWatchId !== null) {
+            return;
+        }
+        locationWatchId = navigator.geolocation.watchPosition(position => {
+            const userLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+            if (userMarker) {
+                userMarker.position = userLocation;
+            }
+        }, () => {
+            handleLocationError(false);
+            stopLocationWatch();
+        }, { maximumAge: 30000, timeout: 10000 });
+    }
+
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(position => {
             const userLocation = {
@@ -877,17 +1073,7 @@ async function initMap() {
         });
 
         // Watch user's location
-        navigator.geolocation.watchPosition(position => {
-            const userLocation = {
-                lat: position.coords.latitude,
-                lng: position.coords.longitude
-            };
-            if (userMarker) {
-                userMarker.position = userLocation;
-            }
-        }, () => {
-            handleLocationError(false);
-        });
+        startLocationWatch();
     } else {
         // Browser doesn't support Geolocation
         handleLocationError(false);
@@ -916,14 +1102,7 @@ async function initMap() {
     fetchPins();
     getUserIp();
     fetchActivePinsCount(); // Call the new function
-    setInterval(fetchActivePinsCount, 30000); // Update every 30 seconds
-    // setInterval(fetchPins, 30000);
-    setInterval(() => {
-        const selectAllCheckbox = document.getElementById('select-all-categories');
-        if (selectAllCheckbox && selectAllCheckbox.checked) {
-            fetchPins();
-        }
-    }, 30000); // Refresh pins every 30 seconds
+    setInterval(() => fetchActivePinsCount({ checkForChanges: true, enableAnimation: true }), 180000); // Check for changes every 3 minutes
 }
 
 function upvotePin(id) {
@@ -1055,25 +1234,40 @@ function updatePin(id) {
             removeDeveloperOnlyCategoryOptions();
         document.getElementById('pin-form').classList.add('hidden');
         editingPinId = null;
-        fetchPins();
+        refreshPins();
     });
 }
 
-function fetchActivePinsCount() {
+function fetchActivePinsCount(options = {}) {
+    const { checkForChanges = false, enableAnimation = false } = options;
+    DEBUG_LOGGER.log('Fetching active pin count');
     fetch('/api/pins/count')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('active-pins-count').textContent = `Lokasi Aktif  : ${data.count} Pin`;
+            const count = data.count;
+            const activePinsElement = document.getElementById('active-pins-count');
+            if (activePinsElement) {
+                activePinsElement.textContent = `Lokasi Aktif  : ${count} Pin`;
+                if (enableAnimation && lastKnownActivePinsCount !== null && count !== lastKnownActivePinsCount) {
+                    animateMetricChange(activePinsElement);
+                }
+            }
+            lastKnownActivePinsCount = count;
+            DEBUG_LOGGER.log('Active pin count', { count });
+            if (checkForChanges && lastKnownPinsCount !== null && count !== lastKnownPinsCount) {
+                refreshPins();
+            }
         })
-        .catch(error => console.error('Error fetching active pins count:', error));
+        .catch(error => {
+            console.error('Error fetching active pins count:', error);
+            DEBUG_LOGGER.log('Active pin count fetch failed', error);
+        });
 }
 
-console.log('Fetching API key...');
 // Fetch the API key and load the Google Maps script
 fetch('/api/config')
     .then(response => response.json())
     .then(config => {
-        console.log('API key fetched, loading map...');
             const script = document.createElement('script');
             script.src = `https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=marker&loading=async`;
             script.async = true;
@@ -1092,17 +1286,38 @@ function scheduleDailyRefresh() {
 
 scheduleDailyRefresh();
 
-function fetchUniqueIpCount() {
-    fetch('/api/unique-ips')
+function fetchUniqueIpCount(options = {}) {
+    const { enableAnimation = false } = options;
+    if (isFetchingVisitorCount) {
+        return Promise.resolve();
+    }
+    isFetchingVisitorCount = true;
+    DEBUG_LOGGER.log('Fetching visitor count');
+    return fetch('/api/unique-ips')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('unique-ips-count').textContent = `Pengunjung : ${data.count} Warga`;
+            const count = data.count;
+            const visitorElement = document.getElementById('unique-ips-count');
+            if (visitorElement) {
+                visitorElement.textContent = `Pengunjung : ${count} Warga`;
+                if (enableAnimation && lastKnownVisitorCount !== null && count !== lastKnownVisitorCount) {
+                    animateMetricChange(visitorElement);
+                }
+            }
+            lastKnownVisitorCount = count;
+            DEBUG_LOGGER.log('Visitor count', { count });
         })
-        .catch(error => console.error('Error fetching unique IP count:', error));
+        .catch(error => {
+            console.error('Error fetching unique IP count:', error);
+            DEBUG_LOGGER.log('Visitor count fetch failed', error);
+        })
+        .finally(() => {
+            isFetchingVisitorCount = false;
+        });
 }
 
 // Call initially
 fetchUniqueIpCount();
 
-// Call every 5 seconds
-// setInterval(fetchUniqueIpCount, 5000);
+// Check for visitor changes every 3 minutes
+setInterval(() => fetchUniqueIpCount({ enableAnimation: true }), 180000);
