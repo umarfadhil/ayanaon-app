@@ -1057,7 +1057,7 @@ async function initMap() {
             userMarkerDiv.style.width = '14px';
             userMarkerDiv.style.height = '14px';
             userMarkerDiv.style.borderRadius = '50%';
-            userMarkerDiv.style.backgroundColor = '#4285F4';
+            userMarkerDiv.style.backgroundColor = '#fffafa';
             userMarkerDiv.style.border = '2px solid white';
             userMarker = new AdvancedMarkerElement({
                 position: userLocation,
