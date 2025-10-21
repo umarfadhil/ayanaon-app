@@ -95,5 +95,14 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 *   **Performance Tune-Up:** Marker refreshes clean up old overlays, cached search text speeds up filtering, and periodic pin reloads now trigger only when counts change.
 *   **Metric Enhancements:** Visitor and active-pin counters refresh every three minutes and animate when values change.
 *   **Mobile UX:** Disabled accidental page zooming, streamlined geolocation watching, and added a PWA install button with native prompt support.
-*   **PWA Readiness:** Added a web app manifest, service worker with precaching, and install logging so Chrome on Android surfaces the “Install App” prompt.
+*   **PWA Readiness:** Added a web app manifest, service worker with precaching, and install logging so Chrome on Android surfaces the Install App prompt.
 
+---
+
+## What's New in v1.6.0
+
+- Date range for events: Users can now select either a single date or a start�end range when creating or editing a pin.
+- Info-window display: Single dates render normally; ranges show as "Start - End"; "Hari ini" still supported.
+- Filtering respects ranges: Pins appear if their date range overlaps the filter range.
+- Expiration handling: Pins with ranges expire at the end of the last day selected.
+- PWA polish: Dark theme color refined in HTML, manifest set to light for smoother splash; service worker updated to stale-while-revalidate with a bumped cache version to reduce stale assets.

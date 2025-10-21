@@ -409,6 +409,50 @@ function getPinDateForFilter(pin) {
     return null;
 }
 
+function getPinDateRangeForFilter(pin) {
+    if (!pin) {
+        return null;
+    }
+    const { lifetime } = pin;
+    if (lifetime) {
+        if (lifetime.type === 'date') {
+            if (lifetime.start || lifetime.end) {
+                const start = lifetime.start ? parseDateInput(lifetime.start) : null;
+                const end = parseDateInput(lifetime.end || lifetime.start || lifetime.value, true);
+                if (start && end) {
+                    return { start, end };
+                }
+            }
+            if (lifetime.value) {
+                const start = parseDateInput(lifetime.value);
+                const end = parseDateInput(lifetime.value, true);
+                if (start && end) {
+                    return { start, end };
+                }
+            }
+        }
+        if (lifetime.type === 'today') {
+            const today = new Date();
+            const y = today.getFullYear();
+            const m = String(today.getMonth() + 1).padStart(2, '0');
+            const d = String(today.getDate()).padStart(2, '0');
+            const ymd = `${y}-${m}-${d}`;
+            const start = parseDateInput(ymd);
+            const end = parseDateInput(ymd, true);
+            if (start && end) {
+                return { start, end };
+            }
+        }
+    }
+    const single = getPinDateForFilter(pin);
+    if (single) {
+        const end = new Date(single);
+        end.setHours(23, 59, 59, 999);
+        return { start: single, end };
+    }
+    return null;
+}
+
 function removeDeveloperOnlyCategoryOptions() {
     const categorySelect = document.getElementById('category');
     if (!categorySelect) {
@@ -609,18 +653,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const matchesSearch = currentSearchTokens.length === 0 ||
                 currentSearchTokens.every(token => searchableText.includes(token));
-            const pinDate = getPinDateForFilter(pin);
+            const pinRange = getPinDateRangeForFilter(pin);
             const matchesDate = (() => {
                 if (!startDateBoundary && !endDateBoundary) {
                     return true;
                 }
-                if (!pinDate) {
+                if (!pinRange) {
                     return false;
                 }
-                if (startDateBoundary && pinDate < startDateBoundary) {
+                if (startDateBoundary && pinRange.end < startDateBoundary) {
                     return false;
                 }
-                if (endDateBoundary && pinDate > endDateBoundary) {
+                if (endDateBoundary && pinRange.start > endDateBoundary) {
                     return false;
                 }
                 return true;
@@ -719,17 +763,37 @@ document.addEventListener('DOMContentLoaded', () => {
     // Lifetime options logic
     const lifetimeSelect = document.getElementById('lifetime-select');
     const lifetimeDatePicker = document.getElementById('lifetime-date-picker');
+    let lifetimePicker = null;
+
+    if (lifetimeDatePicker && typeof flatpickr === 'function') {
+        lifetimePicker = flatpickr(lifetimeDatePicker, {
+            mode: 'range',
+            dateFormat: 'Y-m-d',
+            allowInput: false
+        });
+        lifetimeDatePicker.setAttribute('readonly', 'readonly');
+    }
 
     // Hide date picker by default
-    lifetimeDatePicker.style.display = 'none';
+    if (lifetimeDatePicker) {
+        lifetimeDatePicker.style.display = 'none';
+    }
 
-    lifetimeSelect.addEventListener('change', (e) => {
-        if (e.target.value === 'date') {
-            lifetimeDatePicker.style.display = 'block';
-        } else {
-            lifetimeDatePicker.style.display = 'none';
-        }
-    });
+    if (lifetimeSelect) {
+        lifetimeSelect.addEventListener('change', (e) => {
+            if (!lifetimeDatePicker) return;
+            if (e.target.value === 'date') {
+                lifetimeDatePicker.style.display = 'block';
+            } else {
+                lifetimeDatePicker.style.display = 'none';
+                if (lifetimePicker) {
+                    lifetimePicker.clear();
+                } else {
+                    lifetimeDatePicker.value = '';
+                }
+            }
+        });
+    }
 });
 
 async function initMap() {
@@ -823,8 +887,14 @@ async function initMap() {
         if (pin.lifetime) {
             if (pin.lifetime.type === 'today') {
                 when = 'Hari ini';
-            } else if (pin.lifetime.type === 'date' && pin.lifetime.value) {
-                when = formatDate(pin.lifetime.value);
+            } else if (pin.lifetime.type === 'date') {
+                if (pin.lifetime.start && pin.lifetime.end && pin.lifetime.start !== pin.lifetime.end) {
+                    when = `${formatDate(pin.lifetime.start)} - ${formatDate(pin.lifetime.end)}`;
+                } else if (pin.lifetime.value) {
+                    when = formatDate(pin.lifetime.value);
+                } else if (pin.lifetime.start) {
+                    when = formatDate(pin.lifetime.start);
+                }
             }
         }
     
@@ -940,16 +1010,44 @@ async function initMap() {
         const category = document.getElementById('category').value;
         const link = document.getElementById('link').value;
         const lifetimeType = document.getElementById('lifetime-select').value;
-        const lifetimeValue = document.getElementById('lifetime-date-picker').value;
+        const lifetimeInputEl = document.getElementById('lifetime-date-picker');
     
         if (!title || !description || !category || !lifetimeType) {
             alert('Please fill out all fields');
             return;
         }
-    
-        if (lifetimeType === 'date' && !lifetimeValue) {
-            alert('Please select an expiration date.');
-            return;
+        
+        // Build lifetime payload supporting single date or range
+        let lifetime = { type: lifetimeType };
+        if (lifetimeType === 'date') {
+            let startStr = '';
+            let endStr = '';
+            if (typeof flatpickr === 'function' && lifetimeInputEl && lifetimeInputEl._flatpickr) {
+                const dates = lifetimeInputEl._flatpickr.selectedDates || [];
+                if (dates.length === 1) {
+                    startStr = endStr = formatDateToYMD(dates[0]);
+                } else if (dates.length >= 2) {
+                    startStr = formatDateToYMD(dates[0]);
+                    endStr = formatDateToYMD(dates[1]);
+                }
+            } else if (lifetimeInputEl && lifetimeInputEl.value) {
+                const raw = lifetimeInputEl.value.trim();
+                const parts = raw.split(/\s*(?:to|–|-|—)\s*/);
+                const first = parts[0] ? parts[0].trim() : '';
+                const second = parts[1] ? parts[1].trim() : '';
+                startStr = first;
+                endStr = second || first;
+            }
+            if (!startStr) {
+                alert('Please select a date or date range.');
+                return;
+            }
+            if (startStr && endStr && startStr !== endStr) {
+                lifetime.start = startStr;
+                lifetime.end = endStr;
+            } else {
+                lifetime.value = startStr;
+            }
         }
     
         if (!temporaryMarker) {
@@ -964,10 +1062,7 @@ async function initMap() {
             link,
             lat: temporaryMarker.position.lat,
             lng: temporaryMarker.position.lng,
-            lifetime: {
-                type: lifetimeType,
-                value: lifetimeValue
-            }
+            lifetime
         };
     
         fetch('/api/pins', {
@@ -1186,11 +1281,30 @@ function editPin(id) {
     }
     document.getElementById('link').value = pin.link;
     document.getElementById('lifetime-select').value = pin.lifetime.type;
+    const lifetimeInputEl = document.getElementById('lifetime-date-picker');
     if (pin.lifetime.type === 'date') {
-        document.getElementById('lifetime-date-picker').style.display = 'block';
-        document.getElementById('lifetime-date-picker').value = pin.lifetime.value.split('T')[0];
+        lifetimeInputEl.style.display = 'block';
+        const fp = lifetimeInputEl && lifetimeInputEl._flatpickr ? lifetimeInputEl._flatpickr : null;
+        if (pin.lifetime.start && pin.lifetime.end) {
+            if (fp) {
+                fp.setDate([pin.lifetime.start, pin.lifetime.end], true);
+            } else {
+                lifetimeInputEl.value = `${pin.lifetime.start} to ${pin.lifetime.end}`;
+            }
+        } else if (pin.lifetime.value) {
+            if (fp) {
+                fp.setDate([pin.lifetime.value], true);
+            } else {
+                lifetimeInputEl.value = pin.lifetime.value.split('T')[0];
+            }
+        }
     } else {
-        document.getElementById('lifetime-date-picker').style.display = 'none';
+        lifetimeInputEl.style.display = 'none';
+        if (lifetimeInputEl && lifetimeInputEl._flatpickr) {
+            lifetimeInputEl._flatpickr.clear();
+        } else if (lifetimeInputEl) {
+            lifetimeInputEl.value = '';
+        }
     }
 
     editingPinId = id;
@@ -1210,10 +1324,34 @@ function updatePin(id) {
         description,
         category,
         link,
-        lifetime: {
-            type: lifetimeType,
-            value: lifetimeValue
-        }
+        lifetime: (() => {
+            const lifetimeInputEl = document.getElementById('lifetime-date-picker');
+            if (lifetimeType !== 'date') {
+                return { type: lifetimeType };
+            }
+            let startStr = '';
+            let endStr = '';
+            if (typeof flatpickr === 'function' && lifetimeInputEl && lifetimeInputEl._flatpickr) {
+                const dates = lifetimeInputEl._flatpickr.selectedDates || [];
+                if (dates.length === 1) {
+                    startStr = endStr = formatDateToYMD(dates[0]);
+                } else if (dates.length >= 2) {
+                    startStr = formatDateToYMD(dates[0]);
+                    endStr = formatDateToYMD(dates[1]);
+                }
+            } else if (lifetimeInputEl && lifetimeInputEl.value) {
+                const raw = lifetimeInputEl.value.trim();
+                const parts = raw.split(/\s*(?:to|–|-|—)\s*/);
+                const first = parts[0] ? parts[0].trim() : '';
+                const second = parts[1] ? parts[1].trim() : '';
+                startStr = first;
+                endStr = second || first;
+            }
+            if (startStr && endStr && startStr !== endStr) {
+                return { type: 'date', start: startStr, end: endStr };
+            }
+            return { type: 'date', value: startStr || endStr };
+        })()
     };
 
     fetch(`/api/pins/${id}`, {

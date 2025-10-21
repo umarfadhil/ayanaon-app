@@ -4,8 +4,8 @@
     "description": "Peta komunitas untuk berbagi informasi warga sekitar.",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "aliceblue",
-    "theme_color": "aliceblue",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
     "icons": [
         {
             "src": "favicon.svg",

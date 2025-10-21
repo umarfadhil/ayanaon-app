@@ -93,14 +93,21 @@ router.post('/pins', async (req, res) => {
     pin.upvoterIps = [];
     pin.downvoterIps = [];
 
-    // Calculate expiresAt
+    // Calculate expiresAt (support single date or range)
     if (pin.lifetime) {
-        let expiresAt = new Date();
+        let expiresAt = null;
         if (pin.lifetime.type === 'today') {
+            expiresAt = new Date();
             expiresAt.setHours(23, 59, 59, 999);
-        } else if (pin.lifetime.type === 'date' && pin.lifetime.value) {
-            expiresAt = new Date(pin.lifetime.value);
-            expiresAt.setHours(23, 59, 59, 999);
+        } else if (pin.lifetime.type === 'date') {
+            if (pin.lifetime.end) {
+                expiresAt = new Date(pin.lifetime.end);
+                expiresAt.setHours(23, 59, 59, 999);
+            } else if (pin.lifetime.value || pin.lifetime.start) {
+                const basis = pin.lifetime.value || pin.lifetime.start;
+                expiresAt = new Date(basis);
+                expiresAt.setHours(23, 59, 59, 999);
+            }
         }
         pin.expiresAt = expiresAt;
     } else {

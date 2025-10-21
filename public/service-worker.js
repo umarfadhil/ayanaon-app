@@ -1,4 +1,5 @@
-const CACHE_NAME = 'ayanaon-static-v1';
+// Bump this to force clients to fetch fresh assets after deploys
+const CACHE_NAME = 'ayanaon-static-v2';
 const PRECACHE_URLS = [
     './',
     './index.html',
@@ -32,12 +33,17 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') {
         return;
     }
+    // Stale-while-revalidate: serve cache first, then update cache in background
     event.respondWith(
-        caches.match(event.request).then((cachedResponse) => {
-            if (cachedResponse) {
-                return cachedResponse;
-            }
-            return fetch(event.request).catch(() => cachedResponse);
+        caches.match(event.request).then((cached) => {
+            const networkFetch = fetch(event.request)
+                .then((response) => {
+                    const responseClone = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone)).catch(() => {});
+                    return response;
+                })
+                .catch(() => cached);
+            return cached || networkFetch;
         })
     );
 });
