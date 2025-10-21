@@ -2,7 +2,7 @@
 
 Welcome to AyaNaon-app! This is a community-driven map application designed to help you share and discover local information, promotions, and reports within your area. Think of it as a digital bulletin board powered by your community!
 
-LINK: ayanaon.netlify.app (temporary)
+LINK: ayanaon.app
 
 ## What is AyaNaon-app?
 
