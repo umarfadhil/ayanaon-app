@@ -1243,6 +1243,7 @@ function getIconForCategory(category) {
         '🐾 Barang & Hewan Hilang': '🐾',
         '🚦 Lalu Lintas & Kecelakaan': '🚦',
         '🌧️ Cuaca & Bencana Alam': '🌧️',
+        '⛽ SPBU/SPBG': '⛽',
         '💡 Lain-lain': '💡'
     };
     return icons[category] || '💡';
