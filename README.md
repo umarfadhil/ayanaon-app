@@ -69,7 +69,7 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 *   **Traffic Information:** Integrated a real-time traffic layer onto the map for improved navigation.
 *   **Performance Optimization:** Implemented best practices for Google Maps API loading, resolving console warnings and enhancing application performance.
-*   **Enhanced Welcome Message:** Added a 📍 emoji to the welcome pop-up for a more engaging user experience.
+*   **Enhanced Welcome Message:** Added a ðŸ“ emoji to the welcome pop-up for a more engaging user experience.
 *   **Improved Info Window Display:** Adjusted the spacing between marker icons and pop-up descriptions for better visual clarity.
 *   **Interactive Markers:** Enabled toggling of info window visibility by clicking the marker icon, allowing users to open and close pop-ups with a single click.
 ---
@@ -77,7 +77,7 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 ## What's New in v1.3.0
 
 *   **Smart Filter Search:** Added keyword, single-date, and date-range filters inside the map drawer for faster pin discovery.
-*   **Navigation Shortcuts:** Introduced the “Get Me Here” button with an app selector that surfaces Google Maps, Apple Maps, Waze, or the browser based on your device.
+*   **Navigation Shortcuts:** Introduced the â€œGet Me Hereâ€ button with an app selector that surfaces Google Maps, Apple Maps, Waze, or the browser based on your device.
 *   **Streamlined Pin Actions:** Reworked the info-window layout so voting and navigation controls sit together, with edit actions highlighted above when available.
 *   **Mobile-Friendly Controls:** Refined floating buttons (including the reset icon) to stay legible and consistent across devices.
 ---
@@ -101,15 +101,15 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 ## What's New in v1.6.0
 
-- Date range for events: Users can now select either a single date or a start�end range when creating or editing a pin.
-- Info-window display: Single dates render normally; ranges show as "Start - End"; "Hari ini" still supported.
-- Filtering respects ranges: Pins appear if their date range overlaps the filter range.
-- Expiration handling: Pins with ranges expire at the end of the last day selected.
-- PWA polish: Dark theme color refined in HTML, manifest set to light for smoother splash; service worker updated to stale-while-revalidate with a bumped cache version to reduce stale assets.
+- **Date range for events**: Users can now select either a single date or a start–end range when creating or editing a pin.
+- **Info-window display**: Single dates render normally; ranges show as "Start - End"; "Hari ini" still supported.
+- **Filtering respects ranges**: Pins appear if their date range overlaps the filter range.
+- **Expiration handling**: Pins with ranges expire at the end of the last day selected.
+- **PWA polish**: Dark theme color refined in HTML, manifest set to light for smoother splash; service worker updated to stale-while-revalidate with a bumped cache version to reduce stale assets.
 
 ---
 
 ## What's New in v1.6.1
 
-- Pulsing user location marker for clearer presence without distraction.
-- Service worker cache bump to ensure updated assets load.
+- **User Marker Improvement**: Pulsing user location marker for clearer presence without distraction.
+- **Push update to users device**: Service worker cache bump to ensure updated assets load.
