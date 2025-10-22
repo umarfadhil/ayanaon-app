@@ -113,3 +113,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 - **User Marker Improvement**: Pulsing user location marker for clearer presence without distraction.
 - **Push update to users device**: Service worker cache bump to ensure updated assets load.
+
+---
+
+## What's New in v1.6.2
+
+- **Category refresh**: Replaced the old traffic/weather categories with `🏡 Akomodasi Pilihan` and `⚡ SPKLU`, including updated icons.
+- **Curated submissions**: Restricted categories remain visible in filters and existing pins but are omitted from the public submission form.
+- **Docs & build**: Version bump and cache version update to deliver the latest assets.

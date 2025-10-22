@@ -1241,8 +1241,8 @@ function getIconForCategory(category) {
         '🧑‍🤝‍🧑 Sosial & Kopdar': '🧑‍🤝‍🧑',
         '🤝 Jual-Beli Barang': '🤝',
         '🐾 Barang & Hewan Hilang': '🐾',
-        '🚦 Lalu Lintas & Kecelakaan': '🚦',
-        '🌧️ Cuaca & Bencana Alam': '🌧️',
+        '🏡 Akomodasi Pilihan': '🏡',
+        '⚡ SPKLU': '⚡',
         '⛽ SPBU/SPBG': '⛽',
         '💡 Lain-lain': '💡'
     };
