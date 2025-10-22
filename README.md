@@ -121,3 +121,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Category refresh**: Replaced the old traffic/weather categories with `🏡 Akomodasi Pilihan` and `⚡ SPKLU`, including updated icons.
 - **Curated submissions**: Restricted categories remain visible in filters and existing pins but are omitted from the public submission form.
 - **Docs & build**: Version bump and cache version update to deliver the latest assets.
+
+---
+
+## What's New in v1.6.3
+
+- **Lazy detail loading**: Info-window content now loads on demand via `/api/pins/:id`, trimming the initial payload for smoother panning on mobile.
+- **API support**: `/api/pins?fields=summary` returns a lightweight dataset so the map only renders essential fields first.
+- **Cache refresh**: Service worker bumped to `ayanaon-static-v5` so clients pick up the latest scripts after a reload.

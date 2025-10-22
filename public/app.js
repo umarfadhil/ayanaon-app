@@ -22,6 +22,7 @@ let selectedEndDate = '';
 let navigationModal;
 let navigationOptionsContainer;
 let navigationCancelBtn;
+const PIN_DETAILS_CACHE = new Map();
 
 const DEBUG_LOGGER = (() => {
     let enabled = true;
@@ -179,6 +180,7 @@ function tokenizeSearchQuery(query) {
 function buildSearchableBlob(pin) {
     return [
         pin.title,
+        pin.summaryText,
         pin.description,
         pin.category,
         pin.link
@@ -809,6 +811,7 @@ async function initMap() {
             this.container = document.createElement('div');
             this.container.classList.add('custom-info-window');
             this.container.innerHTML = content;
+            this.isVisible = false;
     
             this.container.style.position = 'absolute';
             this.container.style.display = 'none';
@@ -833,10 +836,21 @@ async function initMap() {
     
         show() {
             this.container.style.display = 'block';
+            this.isVisible = true;
         }
     
         hide() {
             this.container.style.display = 'none';
+            this.isVisible = false;
+        }
+
+        setContent(content) {
+            this.content = content;
+            this.container.innerHTML = content;
+        }
+
+        isOpen() {
+            return this.isVisible;
         }
     }
 
@@ -854,61 +868,68 @@ async function initMap() {
     const trafficLayer = new google.maps.TrafficLayer();
     trafficLayer.setMap(map);
 
-    function addPinToMap(pin) {
-        const icon = getIconForCategory(pin.category);
-        const markerElement = document.createElement('div');
-        markerElement.textContent = icon;
-        markerElement.style.fontSize = '24px';
-    
-        const searchableText = buildSearchableBlob(pin);
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-            position: { lat: pin.lat, lng: pin.lng },
-            map: map,
-            title: pin.title,
-            content: markerElement
-        });
-    
-        // Store category on marker object
-        marker.category = pin.category;
-        marker.pin = pin;
-        marker.searchText = searchableText;
-    
+    function getLifetimeLabel(lifetime) {
+        if (!lifetime) {
+            return 'N/A';
+        }
+        if (lifetime.type === 'today') {
+            return 'Hari ini';
+        }
+        if (lifetime.type === 'date') {
+            if (lifetime.start && lifetime.end && lifetime.start !== lifetime.end) {
+                return formatDate(lifetime.start) + ' - ' + formatDate(lifetime.end);
+            }
+            if (lifetime.value) {
+                return formatDate(lifetime.value);
+            }
+            if (lifetime.start) {
+                return formatDate(lifetime.start);
+            }
+        }
+        return 'N/A';
+    }
+
+    function buildInfoWindowContent(pin, options = {}) {
+        const isLoading = options.loading === true;
+        const title = pin.title || 'Detail Pin';
+        const safeTitleForData = title.replace(/"/g, '&quot;');
+        let descriptionHtml;
+        if (isLoading) {
+            descriptionHtml = '<em>Memuat detail pin...</em>';
+        } else if (pin.description) {
+            descriptionHtml = pin.description.replace(/\n/g, '<br>');
+        } else if (pin.summaryDescription) {
+            descriptionHtml = pin.summaryDescription.replace(/\n/g, '<br>');
+        } else if (pin.isSummary) {
+            descriptionHtml = '<em>Detail lengkap akan ditampilkan setelah dimuat.</em>';
+        } else {
+            descriptionHtml = '<em>Belum ada deskripsi.</em>';
+        }
+
+        const when = getLifetimeLabel(pin.lifetime);
+
         let linkElement = '';
-        if (pin.link) {
-            linkElement = `<div class="info-window-link"><a href="${pin.link}" target="_blank" style="text-decoration: none; color: #90f2a8">${pin.link}</a></div>`;
+        if (!pin.isSummary && !isLoading && pin.link) {
+            const safeLink = pin.link;
+            linkElement = `<div class="info-window-link"><a href="${safeLink}" target="_blank" style="text-decoration: none; color: #90f2a8">${safeLink}</a></div>`;
         }
 
         let editButton = '';
-        if (userIp === pin.reporter) {
+        if (!pin.isSummary && !isLoading && userIp === pin.reporter) {
             editButton = `<button class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
         }
-    
-        let when = 'N/A';
-        if (pin.lifetime) {
-            if (pin.lifetime.type === 'today') {
-                when = 'Hari ini';
-            } else if (pin.lifetime.type === 'date') {
-                if (pin.lifetime.start && pin.lifetime.end && pin.lifetime.start !== pin.lifetime.end) {
-                    when = `${formatDate(pin.lifetime.start)} - ${formatDate(pin.lifetime.end)}`;
-                } else if (pin.lifetime.value) {
-                    when = formatDate(pin.lifetime.value);
-                } else if (pin.lifetime.start) {
-                    when = formatDate(pin.lifetime.start);
-                }
-            }
-        }
-    
-        const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
-        const safeTitleForData = (pin.title || '').replace(/"/g, '&quot;');
 
-        const contentString = `
+        const upvotes = typeof pin.upvotes === 'number' ? pin.upvotes : 0;
+        const downvotes = typeof pin.downvotes === 'number' ? pin.downvotes : 0;
+
+        return `
             <div class="info-window-content">
                 <div class="info-window-header">
-                    <div class="info-window-category">${pin.category}</div>
+                    <div class="info-window-category">${pin.category || ''}</div>
                     <button class="close-info-window">&times;</button>
                 </div>
-                <div class="info-window-title">${pin.title}</div>
-                <div class="info-window-description">${descriptionWithBreaks}</div>
+                <div class="info-window-title">${title}</div>
+                <div class="info-window-description">${descriptionHtml}</div>
                 <div class="info-window-when">${when}</div>
                 ${linkElement}
                 <div class="info-window-actions">
@@ -916,49 +937,143 @@ async function initMap() {
                 </div>
                 <div class="info-window-vote-actions">
                     <div class="info-window-vote">
-                        <button id="upvote-btn-${pin._id}">👍</button>
-                        <span id="upvotes-${pin._id}">${pin.upvotes}</span>
-                        <button id="downvote-btn-${pin._id}">👎</button>
-                        <span id="downvotes-${pin._id}">${pin.downvotes}</span>
+                        <button id="upvote-btn-${pin._id}">dY`?</button>
+                        <span id="upvotes-${pin._id}">${upvotes}</span>
+                        <button id="downvote-btn-${pin._id}">dY`Z</button>
+                        <span id="downvotes-${pin._id}">${downvotes}</span>
                     </div>
                     <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Arahkan</button>
                 </div>
             </div>
         `;
-    
-        const infowindow = new CustomInfoWindow(pin, contentString);
-        infowindow.setMap(map);
-        marker.infoWindow = infowindow;
-    
-        // Attach event listeners programmatically
-        const upvoteButton = infowindow.container.querySelector(`#upvote-btn-${pin._id}`);
+    }
+
+    function attachInfoWindowEventHandlers(infoWindow, pin) {
+        const container = infoWindow.container;
+        if (!container) {
+            return;
+        }
+
+        const upvoteButton = container.querySelector(`#upvote-btn-${pin._id}`);
         if (upvoteButton) {
             upvoteButton.addEventListener('click', () => upvotePin(pin._id));
         }
 
-        const downvoteButton = infowindow.container.querySelector(`#downvote-btn-${pin._id}`);
+        const downvoteButton = container.querySelector(`#downvote-btn-${pin._id}`);
         if (downvoteButton) {
             downvoteButton.addEventListener('click', () => downvotePin(pin._id));
         }
 
-        const navigateButton = infowindow.container.querySelector('.navigate-btn');
+        const navigateButton = container.querySelector('.navigate-btn');
         if (navigateButton) {
             navigateButton.addEventListener('click', () => showNavigationOptions(pin));
         }
 
-        const closeButton = infowindow.container.querySelector('.close-info-window');
-        closeButton.addEventListener('click', () => {
-            infowindow.hide();
+        const closeButton = container.querySelector('.close-info-window');
+        if (closeButton) {
+            closeButton.addEventListener('click', () => {
+                infoWindow.hide();
+            });
+        }
+    }
+
+    async function fetchPinDetailsById(id) {
+        const response = await fetch(`/api/pins/${id}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch pin details for ${id}`);
+        }
+        return response.json();
+    }
+
+    async function ensurePinDetails(pin) {
+        if (!pin || !pin.isSummary) {
+            return pin;
+        }
+        const cacheKey = pin._id;
+        if (PIN_DETAILS_CACHE.has(cacheKey)) {
+            const cached = PIN_DETAILS_CACHE.get(cacheKey);
+            Object.assign(pin, cached);
+            pin.isSummary = false;
+            pin.summaryText = [pin.title, pin.description, pin.category].filter(Boolean).join(' ');
+            return pin;
+        }
+        if (pin.__detailLoadingPromise) {
+            await pin.__detailLoadingPromise;
+            return pin;
+        }
+        pin.__detailLoadingPromise = fetchPinDetailsById(cacheKey)
+            .then(details => {
+                PIN_DETAILS_CACHE.set(cacheKey, details);
+                Object.assign(pin, details);
+                pin.isSummary = false;
+                pin.summaryText = [pin.title, pin.description, pin.category].filter(Boolean).join(' ');
+                return pin;
+            })
+            .catch(error => {
+                throw error;
+            })
+            .finally(() => {
+                delete pin.__detailLoadingPromise;
+            });
+        await pin.__detailLoadingPromise;
+        return pin;
+    }
+
+    function addPinToMap(pin) {
+        const icon = getIconForCategory(pin.category);
+        const markerElement = document.createElement('div');
+        markerElement.textContent = icon;
+        markerElement.style.fontSize = '24px';
+
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+            position: { lat: pin.lat, lng: pin.lng },
+            map: map,
+            title: pin.title,
+            content: markerElement
         });
-    
-        marker.addListener('gmp-click', () => {
-            if (infowindow.container.style.display === 'block') {
-                infowindow.hide();
-            } else {
-                infowindow.show();
+
+        marker.category = pin.category;
+        marker.pin = pin;
+        marker.searchText = buildSearchableBlob(pin);
+
+        const infoWindow = new CustomInfoWindow(pin, buildInfoWindowContent(pin, { loading: Boolean(pin.isSummary) }));
+        infoWindow.setMap(map);
+        marker.infoWindow = infoWindow;
+
+        if (!pin.isSummary) {
+            attachInfoWindowEventHandlers(infoWindow, pin);
+        }
+
+        marker.addListener('gmp-click', async () => {
+            if (marker.infoWindow.isOpen()) {
+                marker.infoWindow.hide();
+                return;
             }
+
+            if (pin.isSummary) {
+                marker.infoWindow.setContent(buildInfoWindowContent(pin, { loading: true }));
+                marker.infoWindow.show();
+                try {
+                    await ensurePinDetails(pin);
+                    marker.pin = pin;
+                    marker.category = pin.category;
+                    marker.searchText = buildSearchableBlob(pin);
+                    marker.infoWindow.setContent(buildInfoWindowContent(pin));
+                    attachInfoWindowEventHandlers(marker.infoWindow, pin);
+                    marker.infoWindow.show();
+                } catch (error) {
+                    DEBUG_LOGGER.log('Failed to load pin details', error);
+                    marker.infoWindow.setContent('<div class="info-window-content"><p>Gagal memuat detail pin.</p></div>');
+                    marker.infoWindow.show();
+                }
+                return;
+            }
+
+            marker.infoWindow.setContent(buildInfoWindowContent(pin));
+            attachInfoWindowEventHandlers(marker.infoWindow, pin);
+            marker.infoWindow.show();
         });
-    
+
         markers.push(marker);
         if (typeof window.applyFilters === 'function') {
             window.applyFilters();
@@ -972,15 +1087,24 @@ async function initMap() {
         }
         isFetchingPins = true;
         DEBUG_LOGGER.log('Fetching pins from server');
-        const url = '/api/pins';
+        const url = '/api/pins?fields=summary';
         return fetch(url)
         .then(response => response.json())
         .then(pins => {
             clearMarkers();
-            (Array.isArray(pins) ? pins : []).forEach(pin => {
+            const normalizedPins = Array.isArray(pins) ? pins : [];
+            normalizedPins.forEach(pin => {
+                pin.isSummary = Boolean(pin.isSummary);
+                pin.summaryText = pin.summaryText || [pin.title, pin.category].filter(Boolean).join(' ');
+                if (typeof pin.upvotes !== 'number') {
+                    pin.upvotes = 0;
+                }
+                if (typeof pin.downvotes !== 'number') {
+                    pin.downvotes = 0;
+                }
                 addPinToMap(pin);
             });
-            lastKnownPinsCount = Array.isArray(pins) ? pins.length : 0;
+            lastKnownPinsCount = normalizedPins.length;
             DEBUG_LOGGER.log('Pins synchronized', { count: lastKnownPinsCount });
         })
         .catch(error => {
@@ -1081,6 +1205,8 @@ async function initMap() {
             if (temporaryMarker) {
                 temporaryMarker.map = null;
             }
+            data.isSummary = false;
+            data.summaryText = [data.title, data.category].filter(Boolean).join(' ');
             addPinToMap(data);
             document.getElementById('add-pin-form').reset();
             removeDeveloperOnlyCategoryOptions();
