@@ -83,6 +83,12 @@ router.get('/pins', async (req, res) => {
     res.json(pins);
 });
 
+router.get('/pins/count', async (req, res) => {
+    const db = await connectToDatabase();
+    const count = await db.collection('pins').countDocuments({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] });
+    res.json({ count: count });
+});
+
 router.get('/pins/:id', async (req, res) => {
     const db = await connectToDatabase();
     const { id } = req.params;
@@ -99,12 +105,6 @@ router.get('/pins/:id', async (req, res) => {
     }
 
     res.json(pin);
-});
-
-router.get('/pins/count', async (req, res) => {
-    const db = await connectToDatabase();
-    const count = await db.collection('pins').countDocuments({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] });
-    res.json({ count: count });
 });
 
 router.get('/unique-ips', async (req, res) => {
