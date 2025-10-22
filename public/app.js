@@ -1148,17 +1148,21 @@ async function initMap() {
                 lng: position.coords.longitude
             };
             map.setCenter(userLocation);
-            const userMarkerDiv = document.createElement('div');
-            userMarkerDiv.style.width = '14px';
-            userMarkerDiv.style.height = '14px';
-            userMarkerDiv.style.borderRadius = '50%';
-            userMarkerDiv.style.backgroundColor = '#fffafa';
-            userMarkerDiv.style.border = '2px solid white';
+            // Build animated pulsing marker
+            const userMarkerContainer = document.createElement('div');
+            userMarkerContainer.className = 'user-marker';
+            const userPulse = document.createElement('div');
+            userPulse.className = 'user-marker__pulse';
+            const userDot = document.createElement('div');
+            userDot.className = 'user-marker__dot';
+            userMarkerContainer.appendChild(userPulse);
+            userMarkerContainer.appendChild(userDot);
+
             userMarker = new AdvancedMarkerElement({
                 position: userLocation,
                 map: map,
                 title: 'Your Location',
-                content: userMarkerDiv,
+                content: userMarkerContainer,
             });
 
 

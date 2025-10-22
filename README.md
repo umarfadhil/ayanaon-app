@@ -106,3 +106,10 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - Filtering respects ranges: Pins appear if their date range overlaps the filter range.
 - Expiration handling: Pins with ranges expire at the end of the last day selected.
 - PWA polish: Dark theme color refined in HTML, manifest set to light for smoother splash; service worker updated to stale-while-revalidate with a bumped cache version to reduce stale assets.
+
+---
+
+## What's New in v1.6.1
+
+- Pulsing user location marker for clearer presence without distraction.
+- Service worker cache bump to ensure updated assets load.
