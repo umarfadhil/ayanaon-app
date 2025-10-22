@@ -937,9 +937,9 @@ async function initMap() {
                 </div>
                 <div class="info-window-vote-actions">
                     <div class="info-window-vote">
-                        <button id="upvote-btn-${pin._id}">dY`?</button>
+                        <button id="upvote-btn-${pin._id}">👍</button>
                         <span id="upvotes-${pin._id}">${upvotes}</span>
-                        <button id="downvote-btn-${pin._id}">dY`Z</button>
+                        <button id="downvote-btn-${pin._id}">👎</button>
                         <span id="downvotes-${pin._id}">${downvotes}</span>
                     </div>
                     <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Arahkan</button>
