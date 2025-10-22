@@ -44,42 +44,15 @@ router.get('/pins', async (req, res) => {
     const ip = req.headers['x-nf-client-connection-ip'];
     await recordIpAddress(ip);
 
-    const { city, fields } = req.query;
+    const { city } = req.query;
     let query = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
 
     if (city) {
         query.city = city;
     }
 
-    console.log('Executing pins query:', query, fields ? `(fields: ${fields})` : '');
-
-    let projection = undefined;
-    if (fields === 'summary') {
-        projection = {
-            title: 1,
-            category: 1,
-            lat: 1,
-            lng: 1,
-            lifetime: 1,
-            expiresAt: 1,
-            upvotes: 1,
-            downvotes: 1,
-            reporter: 1,
-            createdAt: 1
-        };
-    }
-
-    const cursor = db.collection('pins').find(query, projection ? { projection } : undefined);
-    const pins = await cursor.toArray();
-
-    if (fields === 'summary') {
-        pins.forEach(pin => {
-            pin.isSummary = true;
-            const parts = [pin.title, pin.category].filter(Boolean);
-            pin.summaryText = parts.join(' ');
-        });
-    }
-
+    console.log('Executing pins query:', query);
+    const pins = await db.collection('pins').find(query).toArray();
     res.json(pins);
 });
 
@@ -87,24 +60,6 @@ router.get('/pins/count', async (req, res) => {
     const db = await connectToDatabase();
     const count = await db.collection('pins').countDocuments({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] });
     res.json({ count: count });
-});
-
-router.get('/pins/:id', async (req, res) => {
-    const db = await connectToDatabase();
-    const { id } = req.params;
-
-    let pin;
-    try {
-        pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
-    } catch (error) {
-        return res.status(400).json({ message: 'Invalid pin id.' });
-    }
-
-    if (!pin) {
-        return res.status(404).json({ message: 'Pin not found.' });
-    }
-
-    res.json(pin);
 });
 
 router.get('/unique-ips', async (req, res) => {

@@ -124,8 +124,9 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 ---
 
-## What's New in v1.6.3
+## What's New in v1.7.0
 
-- **Lazy detail loading**: Info-window content now loads on demand via `/api/pins/:id`, trimming the initial payload for smoother panning on mobile.
-- **API support**: `/api/pins?fields=summary` returns a lightweight dataset so the map only renders essential fields first.
-- **Cache refresh**: Service worker bumped to `ayanaon-static-v5` so clients pick up the latest scripts after a reload.
+- **Fuel vs EV toggle**: Added a dedicated switch so users can focus on `⛽ SPBU/SPBG` or `⚡ SPKLU` locations with a single tap.
+- **Location-aware filtering**: Fuel/EV pins only display when location access is granted and the station is within 30 km of the user.
+- **Marker clustering**: Integrated Google MarkerClusterer with a zoom threshold so high-density areas stay responsive while still supporting full-text search.
+- **Map polish**: Toggle styling aligned with map controls, fullscreen shortcut removed, and service worker cache bumped to deliver the latest assets reliably.

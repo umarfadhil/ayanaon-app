@@ -1,4 +1,4 @@
-const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
+﻿const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
 
 let map;
 let temporaryMarker;
@@ -22,7 +22,20 @@ let selectedEndDate = '';
 let navigationModal;
 let navigationOptionsContainer;
 let navigationCancelBtn;
-const PIN_DETAILS_CACHE = new Map();
+let markerClusterer;
+let userLocation = null;
+let fuelToggle;
+let fuelToggleFuelLabel;
+let fuelToggleEvLabel;
+let fuelToggleContainer;
+let fuelCheckbox;
+let evCheckbox;
+let suppressSpecialCategorySync = false;
+let fuelToggleMode = 'fuel';
+
+const FUEL_CATEGORY = '⛽ SPBU/SPBG';
+const EV_CATEGORY = '⚡ SPKLU';
+const SPECIAL_CATEGORY_DISTANCE_KM = 30;
 
 const DEBUG_LOGGER = (() => {
     let enabled = true;
@@ -85,16 +98,119 @@ if ('serviceWorker' in navigator) {
 }
 
 function clearMarkers() {
+    if (markerClusterer && typeof markerClusterer.clearMarkers === 'function') {
+        markerClusterer.clearMarkers();
+    }
     if (!Array.isArray(markers) || !markers.length) {
+        markers = [];
         return;
     }
     markers.forEach(marker => {
         if (marker.infoWindow && typeof marker.infoWindow.setMap === 'function') {
             marker.infoWindow.setMap(null);
         }
-        marker.map = null;
+        if (marker.infoWindow && marker.infoWindow.container) {
+            marker.infoWindow.container.style.display = 'none';
+        }
+        marker.isVisible = false;
+        if (marker.map) {
+            marker.map = null;
+        }
     });
     markers = [];
+}
+
+function refreshMarkerCluster(visibleMarkers) {
+    if (markerClusterer && typeof markerClusterer.clearMarkers === 'function') {
+        markerClusterer.clearMarkers();
+        if (Array.isArray(visibleMarkers) && visibleMarkers.length) {
+            visibleMarkers.forEach(marker => {
+                if (marker.map) {
+                    marker.map = null;
+                }
+            });
+            markerClusterer.addMarkers(visibleMarkers);
+        }
+    } else if (map) {
+        markers.forEach(marker => {
+            marker.map = marker.isVisible ? map : null;
+        });
+    }
+}
+
+function isSpecialCategory(category) {
+    return category === FUEL_CATEGORY || category === EV_CATEGORY;
+}
+
+function passesSpecialCategoryRules(marker) {
+    const category = marker.category;
+    if (!isSpecialCategory(category)) {
+        return true;
+    }
+    if (!userLocation) {
+        return false;
+    }
+    const pinData = marker.pin || {};
+    const hasPinCoordinates = typeof pinData.lat === 'number' && typeof pinData.lng === 'number';
+    const markerPosition = hasPinCoordinates ? { lat: pinData.lat, lng: pinData.lng } : toLatLngLiteral(marker.position);
+    if (!markerPosition) {
+        return false;
+    }
+    const distanceKm = calculateDistanceKm(userLocation, markerPosition);
+    if (!Number.isFinite(distanceKm) || distanceKm > SPECIAL_CATEGORY_DISTANCE_KM) {
+        return false;
+    }
+    if (fuelToggleMode === 'fuel' && category !== FUEL_CATEGORY) {
+        return false;
+    }
+    if (fuelToggleMode === 'ev' && category !== EV_CATEGORY) {
+        return false;
+    }
+    return true;
+}
+
+function updateFuelToggleUI() {
+    if (fuelToggleContainer) {
+        fuelToggleContainer.dataset.mode = fuelToggleMode;
+        fuelToggleContainer.dataset.disabled = fuelToggle && fuelToggle.disabled ? 'true' : 'false';
+    }
+    if (fuelToggle) {
+        fuelToggle.checked = fuelToggleMode === 'ev';
+    }
+    if (fuelToggleFuelLabel) {
+        fuelToggleFuelLabel.classList.toggle('active', fuelToggleMode === 'fuel');
+    }
+    if (fuelToggleEvLabel) {
+        fuelToggleEvLabel.classList.toggle('active', fuelToggleMode === 'ev');
+    }
+    if (!suppressSpecialCategorySync) {
+        suppressSpecialCategorySync = true;
+        if (fuelCheckbox) {
+            fuelCheckbox.checked = fuelToggleMode === 'fuel';
+        }
+        if (evCheckbox) {
+            evCheckbox.checked = fuelToggleMode === 'ev';
+        }
+        suppressSpecialCategorySync = false;
+    }
+}
+
+function handleLocationEnabled() {
+    if (fuelToggle) {
+        fuelToggle.disabled = false;
+    }
+    updateFuelToggleUI();
+}
+
+function handleLocationDisabled() {
+    userLocation = null;
+    if (fuelToggle) {
+        fuelToggle.disabled = true;
+    }
+    updateFuelToggleUI();
+    if (typeof window.applyFilters === 'function') {
+        window.applyFilters();
+    }
 }
 
 function animateMetricChange(element) {
@@ -147,6 +263,23 @@ function getDistanceSquared(origin, target) {
     return latDiff * latDiff + lngDiff * lngDiff;
 }
 
+function calculateDistanceKm(origin, target) {
+    if (!origin || !target) {
+        return Number.POSITIVE_INFINITY;
+    }
+    const toRadians = (value) => value * Math.PI / 180;
+    const R = 6371; // Earth radius in km
+    const dLat = toRadians(target.lat - origin.lat);
+    const dLng = toRadians(target.lng - origin.lng);
+    const lat1 = toRadians(origin.lat);
+    const lat2 = toRadians(target.lat);
+
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
 function formatDateToYMD(date) {
     if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
         return '';
@@ -180,7 +313,6 @@ function tokenizeSearchQuery(query) {
 function buildSearchableBlob(pin) {
     return [
         pin.title,
-        pin.summaryText,
         pin.description,
         pin.category,
         pin.link
@@ -473,13 +605,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterDropdown = document.getElementById('filter-dropdown');
     const selectAllCategories = document.getElementById('select-all-categories');
     const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
+    const categoryCheckboxList = Array.from(categoryCheckboxes);
     const filterSearchInput = document.getElementById('filter-search-input');
     const filterSearchButton = document.getElementById('filter-search-btn');
     const filterDateRangeInput = document.getElementById('filter-date-range-input');
     const resetFilterBtn = document.getElementById('reset-filter-btn');
+    fuelToggleContainer = document.getElementById('fuel-toggle-container');
+    fuelToggle = document.getElementById('fuel-toggle');
+    fuelToggleFuelLabel = document.querySelector('#fuel-toggle-container .toggle-label-fuel');
+    fuelToggleEvLabel = document.querySelector('#fuel-toggle-container .toggle-label-ev');
+    fuelCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === FUEL_CATEGORY) || null;
+    evCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === EV_CATEGORY) || null;
     let filterDatePicker = null;
 
     initializeNavigationModal();
+
+    if (fuelToggle) {
+        fuelToggle.disabled = true;
+        fuelToggle.addEventListener('change', () => {
+            fuelToggleMode = fuelToggle.checked ? 'ev' : 'fuel';
+            updateFuelToggleUI();
+            filterMarkers();
+        });
+    }
+
+    updateFuelToggleUI();
 
     if (installAppBtn) {
         if (deferredInstallPrompt) {
@@ -546,14 +696,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     selectAllCategories.addEventListener('change', (e) => {
+        const shouldCheck = e.target.checked;
         categoryCheckboxes.forEach(checkbox => {
-            checkbox.checked = e.target.checked;
+            if (isSpecialCategory(checkbox.value)) {
+                suppressSpecialCategorySync = true;
+                checkbox.checked = fuelToggleMode === 'ev'
+                    ? checkbox.value === EV_CATEGORY
+                    : checkbox.value === FUEL_CATEGORY;
+                suppressSpecialCategorySync = false;
+            } else {
+                checkbox.checked = shouldCheck;
+            }
         });
         filterMarkers();
     });
 
     categoryCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', () => {
+            const value = checkbox.value;
+            if (isSpecialCategory(value)) {
+                if (suppressSpecialCategorySync) {
+                    filterMarkers();
+                    return;
+                }
+                if (!checkbox.checked) {
+                    suppressSpecialCategorySync = true;
+                    checkbox.checked = true;
+                    suppressSpecialCategorySync = false;
+                    return;
+                }
+                fuelToggleMode = value === EV_CATEGORY ? 'ev' : 'fuel';
+                updateFuelToggleUI();
+                filterMarkers();
+                return;
+            }
             if (!checkbox.checked) {
                 selectAllCategories.checked = false;
             }
@@ -645,6 +821,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const startDateBoundary = parseDateInput(selectedStartDate);
         const endDateBoundary = parseDateInput(selectedEndDate, true);
 
+        const visibleMarkers = [];
+
         markers.forEach(marker => {
             const matchesCategory = selectedCategories.includes(marker.category);
             const pin = marker.pin || {};
@@ -672,12 +850,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 return true;
             })();
 
-            if (matchesCategory && matchesSearch && matchesDate) {
-                marker.map = map;
+            const passesSpecialCategory = passesSpecialCategoryRules(marker);
+
+            if (matchesCategory && matchesSearch && matchesDate && passesSpecialCategory) {
+                marker.isVisible = true;
+                visibleMarkers.push(marker);
             } else {
-                marker.map = null;
+                marker.isVisible = false;
+                if (marker.infoWindow && typeof marker.infoWindow.hide === 'function') {
+                    marker.infoWindow.hide();
+                } else if (marker.infoWindow && marker.infoWindow.container) {
+                    marker.infoWindow.container.style.display = 'none';
+                }
             }
         });
+
+        refreshMarkerCluster(visibleMarkers);
     }
 
     function executeSearch() {
@@ -696,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const visibleMarkers = markers.filter(marker => marker.map === map);
+        const visibleMarkers = markers.filter(marker => marker.isVisible);
 
         if (!visibleMarkers.length) {
             alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
@@ -801,6 +989,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initMap() {
     const { Map } = await google.maps.importLibrary("maps");
     const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+    const { MarkerClusterer, SuperClusterAlgorithm } = await import('https://esm.run/@googlemaps/markerclusterer@2.5.3?deps=fast-deep-equal@3.1.3');
 
     class CustomInfoWindow extends google.maps.OverlayView {
         constructor(pin, content) {
@@ -811,7 +1000,6 @@ async function initMap() {
             this.container = document.createElement('div');
             this.container.classList.add('custom-info-window');
             this.container.innerHTML = content;
-            this.isVisible = false;
     
             this.container.style.position = 'absolute';
             this.container.style.display = 'none';
@@ -836,21 +1024,10 @@ async function initMap() {
     
         show() {
             this.container.style.display = 'block';
-            this.isVisible = true;
         }
     
         hide() {
             this.container.style.display = 'none';
-            this.isVisible = false;
-        }
-
-        setContent(content) {
-            this.content = content;
-            this.container.innerHTML = content;
-        }
-
-        isOpen() {
-            return this.isVisible;
         }
     }
 
@@ -861,75 +1038,90 @@ async function initMap() {
         gestureHandling: 'greedy',
         disableDefaultUI: true,
         zoomControl: false,
-        fullscreenControl: true
+        fullscreenControl: false
     });
 
     // Add Traffic Layer
     const trafficLayer = new google.maps.TrafficLayer();
     trafficLayer.setMap(map);
 
-    function getLifetimeLabel(lifetime) {
-        if (!lifetime) {
-            return 'N/A';
+    const clusterRenderer = {
+        render({ count, position }) {
+            const clusterElement = document.createElement('div');
+            clusterElement.className = 'cluster-marker';
+            clusterElement.textContent = String(count);
+            return new google.maps.marker.AdvancedMarkerElement({
+                position,
+                content: clusterElement
+            });
         }
-        if (lifetime.type === 'today') {
-            return 'Hari ini';
-        }
-        if (lifetime.type === 'date') {
-            if (lifetime.start && lifetime.end && lifetime.start !== lifetime.end) {
-                return formatDate(lifetime.start) + ' - ' + formatDate(lifetime.end);
-            }
-            if (lifetime.value) {
-                return formatDate(lifetime.value);
-            }
-            if (lifetime.start) {
-                return formatDate(lifetime.start);
-            }
-        }
-        return 'N/A';
-    }
+    };
 
-    function buildInfoWindowContent(pin, options = {}) {
-        const isLoading = options.loading === true;
-        const title = pin.title || 'Detail Pin';
-        const safeTitleForData = title.replace(/"/g, '&quot;');
-        let descriptionHtml;
-        if (isLoading) {
-            descriptionHtml = '<em>Memuat detail pin...</em>';
-        } else if (pin.description) {
-            descriptionHtml = pin.description.replace(/\n/g, '<br>');
-        } else if (pin.summaryDescription) {
-            descriptionHtml = pin.summaryDescription.replace(/\n/g, '<br>');
-        } else if (pin.isSummary) {
-            descriptionHtml = '<em>Detail lengkap akan ditampilkan setelah dimuat.</em>';
-        } else {
-            descriptionHtml = '<em>Belum ada deskripsi.</em>';
-        }
+    markerClusterer = new MarkerClusterer({
+        map,
+        markers: [],
+        renderer: clusterRenderer,
+        algorithm: new SuperClusterAlgorithm({
+            maxZoom: 10
+        })
+    });
+    refreshMarkerCluster(markers);
 
-        const when = getLifetimeLabel(pin.lifetime);
-
+    function addPinToMap(pin) {
+        const icon = getIconForCategory(pin.category);
+        const markerElement = document.createElement('div');
+        markerElement.textContent = icon;
+        markerElement.style.fontSize = '24px';
+    
+        const searchableText = buildSearchableBlob(pin);
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+            position: { lat: pin.lat, lng: pin.lng },
+            title: pin.title,
+            content: markerElement
+        });
+    
+        // Store category on marker object
+        marker.category = pin.category;
+        marker.pin = pin;
+        marker.searchText = searchableText;
+        marker.isVisible = true;
+    
         let linkElement = '';
-        if (!pin.isSummary && !isLoading && pin.link) {
-            const safeLink = pin.link;
-            linkElement = `<div class="info-window-link"><a href="${safeLink}" target="_blank" style="text-decoration: none; color: #90f2a8">${safeLink}</a></div>`;
+        if (pin.link) {
+            linkElement = `<div class="info-window-link"><a href="${pin.link}" target="_blank" style="text-decoration: none; color: #90f2a8">${pin.link}</a></div>`;
         }
 
         let editButton = '';
-        if (!pin.isSummary && !isLoading && userIp === pin.reporter) {
+        if (userIp === pin.reporter) {
             editButton = `<button class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
         }
+    
+        let when = 'N/A';
+        if (pin.lifetime) {
+            if (pin.lifetime.type === 'today') {
+                when = 'Hari ini';
+            } else if (pin.lifetime.type === 'date') {
+                if (pin.lifetime.start && pin.lifetime.end && pin.lifetime.start !== pin.lifetime.end) {
+                    when = `${formatDate(pin.lifetime.start)} - ${formatDate(pin.lifetime.end)}`;
+                } else if (pin.lifetime.value) {
+                    when = formatDate(pin.lifetime.value);
+                } else if (pin.lifetime.start) {
+                    when = formatDate(pin.lifetime.start);
+                }
+            }
+        }
+    
+        const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
+        const safeTitleForData = (pin.title || '').replace(/"/g, '&quot;');
 
-        const upvotes = typeof pin.upvotes === 'number' ? pin.upvotes : 0;
-        const downvotes = typeof pin.downvotes === 'number' ? pin.downvotes : 0;
-
-        return `
+        const contentString = `
             <div class="info-window-content">
                 <div class="info-window-header">
-                    <div class="info-window-category">${pin.category || ''}</div>
+                    <div class="info-window-category">${pin.category}</div>
                     <button class="close-info-window">&times;</button>
                 </div>
-                <div class="info-window-title">${title}</div>
-                <div class="info-window-description">${descriptionHtml}</div>
+                <div class="info-window-title">${pin.title}</div>
+                <div class="info-window-description">${descriptionWithBreaks}</div>
                 <div class="info-window-when">${when}</div>
                 ${linkElement}
                 <div class="info-window-actions">
@@ -937,147 +1129,50 @@ async function initMap() {
                 </div>
                 <div class="info-window-vote-actions">
                     <div class="info-window-vote">
-                        <button id="upvote-btn-${pin._id}">👍</button>
-                        <span id="upvotes-${pin._id}">${upvotes}</span>
-                        <button id="downvote-btn-${pin._id}">👎</button>
-                        <span id="downvotes-${pin._id}">${downvotes}</span>
+                        <button id="upvote-btn-${pin._id}">&#128077;</button>
+                        <span id="upvotes-${pin._id}">${pin.upvotes}</span>
+                        <button id="downvote-btn-${pin._id}">&#128078;</button>
+                        <span id="downvotes-${pin._id}">${pin.downvotes}</span>
                     </div>
                     <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Arahkan</button>
                 </div>
             </div>
         `;
-    }
-
-    function attachInfoWindowEventHandlers(infoWindow, pin) {
-        const container = infoWindow.container;
-        if (!container) {
-            return;
-        }
-
-        const upvoteButton = container.querySelector(`#upvote-btn-${pin._id}`);
+    
+        const infowindow = new CustomInfoWindow(pin, contentString);
+        infowindow.setMap(map);
+        marker.infoWindow = infowindow;
+    
+        // Attach event listeners programmatically
+        const upvoteButton = infowindow.container.querySelector(`#upvote-btn-${pin._id}`);
         if (upvoteButton) {
             upvoteButton.addEventListener('click', () => upvotePin(pin._id));
         }
 
-        const downvoteButton = container.querySelector(`#downvote-btn-${pin._id}`);
+        const downvoteButton = infowindow.container.querySelector(`#downvote-btn-${pin._id}`);
         if (downvoteButton) {
             downvoteButton.addEventListener('click', () => downvotePin(pin._id));
         }
 
-        const navigateButton = container.querySelector('.navigate-btn');
+        const navigateButton = infowindow.container.querySelector('.navigate-btn');
         if (navigateButton) {
             navigateButton.addEventListener('click', () => showNavigationOptions(pin));
         }
 
-        const closeButton = container.querySelector('.close-info-window');
-        if (closeButton) {
-            closeButton.addEventListener('click', () => {
-                infoWindow.hide();
-            });
-        }
-    }
-
-    async function fetchPinDetailsById(id) {
-        const response = await fetch(`/api/pins/${id}`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch pin details for ${id}`);
-        }
-        return response.json();
-    }
-
-    async function ensurePinDetails(pin) {
-        if (!pin || !pin.isSummary) {
-            return pin;
-        }
-        const cacheKey = pin._id;
-        if (PIN_DETAILS_CACHE.has(cacheKey)) {
-            const cached = PIN_DETAILS_CACHE.get(cacheKey);
-            Object.assign(pin, cached);
-            pin.isSummary = false;
-            pin.summaryText = [pin.title, pin.description, pin.category].filter(Boolean).join(' ');
-            return pin;
-        }
-        if (pin.__detailLoadingPromise) {
-            await pin.__detailLoadingPromise;
-            return pin;
-        }
-        pin.__detailLoadingPromise = fetchPinDetailsById(cacheKey)
-            .then(details => {
-                PIN_DETAILS_CACHE.set(cacheKey, details);
-                Object.assign(pin, details);
-                pin.isSummary = false;
-                pin.summaryText = [pin.title, pin.description, pin.category].filter(Boolean).join(' ');
-                return pin;
-            })
-            .catch(error => {
-                throw error;
-            })
-            .finally(() => {
-                delete pin.__detailLoadingPromise;
-            });
-        await pin.__detailLoadingPromise;
-        return pin;
-    }
-
-    function addPinToMap(pin) {
-        const icon = getIconForCategory(pin.category);
-        const markerElement = document.createElement('div');
-        markerElement.textContent = icon;
-        markerElement.style.fontSize = '24px';
-
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-            position: { lat: pin.lat, lng: pin.lng },
-            map: map,
-            title: pin.title,
-            content: markerElement
+        const closeButton = infowindow.container.querySelector('.close-info-window');
+        closeButton.addEventListener('click', () => {
+            infowindow.hide();
         });
-
-        marker.category = pin.category;
-        marker.pin = pin;
-        marker.searchText = buildSearchableBlob(pin);
-
-        const infoWindow = new CustomInfoWindow(pin, buildInfoWindowContent(pin, { loading: Boolean(pin.isSummary) }));
-        infoWindow.setMap(map);
-        marker.infoWindow = infoWindow;
-
-        if (!pin.isSummary) {
-            attachInfoWindowEventHandlers(infoWindow, pin);
-        }
-
-        marker.addListener('gmp-click', async () => {
-            if (marker.infoWindow.isOpen()) {
-                marker.infoWindow.hide();
-                return;
+    
+        marker.addListener('gmp-click', () => {
+            if (infowindow.container.style.display === 'block') {
+                infowindow.hide();
+            } else {
+                infowindow.show();
             }
-
-            if (pin.isSummary) {
-                marker.infoWindow.setContent(buildInfoWindowContent(pin, { loading: true }));
-                marker.infoWindow.show();
-                try {
-                    await ensurePinDetails(pin);
-                    marker.pin = pin;
-                    marker.category = pin.category;
-                    marker.searchText = buildSearchableBlob(pin);
-                    marker.infoWindow.setContent(buildInfoWindowContent(pin));
-                    attachInfoWindowEventHandlers(marker.infoWindow, pin);
-                    marker.infoWindow.show();
-                } catch (error) {
-                    DEBUG_LOGGER.log('Failed to load pin details', error);
-                    marker.infoWindow.setContent('<div class="info-window-content"><p>Gagal memuat detail pin.</p></div>');
-                    marker.infoWindow.show();
-                }
-                return;
-            }
-
-            marker.infoWindow.setContent(buildInfoWindowContent(pin));
-            attachInfoWindowEventHandlers(marker.infoWindow, pin);
-            marker.infoWindow.show();
         });
 
         markers.push(marker);
-        if (typeof window.applyFilters === 'function') {
-            window.applyFilters();
-        }
     }
 
     function fetchPins() {
@@ -1087,23 +1182,18 @@ async function initMap() {
         }
         isFetchingPins = true;
         DEBUG_LOGGER.log('Fetching pins from server');
-        const url = '/api/pins?fields=summary';
+        const url = '/api/pins';
         return fetch(url)
         .then(response => response.json())
         .then(pins => {
             clearMarkers();
             const normalizedPins = Array.isArray(pins) ? pins : [];
             normalizedPins.forEach(pin => {
-                pin.isSummary = Boolean(pin.isSummary);
-                pin.summaryText = pin.summaryText || [pin.title, pin.category].filter(Boolean).join(' ');
-                if (typeof pin.upvotes !== 'number') {
-                    pin.upvotes = 0;
-                }
-                if (typeof pin.downvotes !== 'number') {
-                    pin.downvotes = 0;
-                }
                 addPinToMap(pin);
             });
+            if (typeof window.applyFilters === 'function') {
+                window.applyFilters();
+            }
             lastKnownPinsCount = normalizedPins.length;
             DEBUG_LOGGER.log('Pins synchronized', { count: lastKnownPinsCount });
         })
@@ -1205,9 +1295,10 @@ async function initMap() {
             if (temporaryMarker) {
                 temporaryMarker.map = null;
             }
-            data.isSummary = false;
-            data.summaryText = [data.title, data.category].filter(Boolean).join(' ');
             addPinToMap(data);
+            if (typeof window.applyFilters === 'function') {
+                window.applyFilters();
+            }
             document.getElementById('add-pin-form').reset();
             removeDeveloperOnlyCategoryOptions();
             document.getElementById('lifetime-date-picker').style.display = 'none';
@@ -1215,12 +1306,13 @@ async function initMap() {
         });
     }
 
-    function handleLocationError(browserHasGeolocation) {
-        // You can handle the error here, e.g., show a message to the user
-        console.error(browserHasGeolocation ?
-            'Error: The Geolocation service failed.' :
-            'Error: Your browser\'s doesn\'t support geolocation.');
-    }
+function handleLocationError(browserHasGeolocation) {
+    // You can handle the error here, e.g., show a message to the user
+    console.error(browserHasGeolocation ?
+        'Error: The Geolocation service failed.' :
+        'Error: Your browser\'s doesn\'t support geolocation.');
+    handleLocationDisabled();
+}
 
     // Get user's current location
 
@@ -1254,12 +1346,17 @@ async function initMap() {
             return;
         }
         locationWatchId = navigator.geolocation.watchPosition(position => {
-            const userLocation = {
+            const newLocation = {
                 lat: position.coords.latitude,
                 lng: position.coords.longitude
             };
+            userLocation = newLocation;
             if (userMarker) {
-                userMarker.position = userLocation;
+                userMarker.position = newLocation;
+            }
+            handleLocationEnabled();
+            if (typeof window.applyFilters === 'function') {
+                window.applyFilters();
             }
         }, () => {
             handleLocationError(false);
@@ -1269,11 +1366,12 @@ async function initMap() {
 
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(position => {
-            const userLocation = {
+            const newLocation = {
                 lat: position.coords.latitude,
                 lng: position.coords.longitude
             };
-            map.setCenter(userLocation);
+            userLocation = newLocation;
+            map.setCenter(newLocation);
             // Build animated pulsing marker
             const userMarkerContainer = document.createElement('div');
             userMarkerContainer.className = 'user-marker';
@@ -1285,7 +1383,7 @@ async function initMap() {
             userMarkerContainer.appendChild(userDot);
 
             userMarker = new AdvancedMarkerElement({
-                position: userLocation,
+                position: newLocation,
                 map: map,
                 title: 'Your Location',
                 content: userMarkerContainer,
@@ -1293,6 +1391,10 @@ async function initMap() {
 
 
 
+            handleLocationEnabled();
+            if (typeof window.applyFilters === 'function') {
+                window.applyFilters();
+            }
         }, () => {
             handleLocationError(true);
         });
