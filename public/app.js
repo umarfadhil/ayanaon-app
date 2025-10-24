@@ -33,6 +33,9 @@ let evCheckbox;
 let suppressSpecialCategorySync = false;
 let fuelToggleMode = 'fuel';
 
+let specialCategoryOffButton;
+let showSpecialCategories = true;
+
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
 const SPECIAL_CATEGORY_DISTANCE_KM = 30;
@@ -147,6 +150,9 @@ function passesSpecialCategoryRules(marker) {
     if (!isSpecialCategory(category)) {
         return true;
     }
+    if (!showSpecialCategories) {
+        return false;
+    }
     if (!userLocation) {
         return false;
     }
@@ -170,43 +176,46 @@ function passesSpecialCategoryRules(marker) {
 }
 
 function updateFuelToggleUI() {
-    if (fuelToggleContainer) {
-        fuelToggleContainer.dataset.mode = fuelToggleMode;
-        fuelToggleContainer.dataset.disabled = fuelToggle && fuelToggle.disabled ? 'true' : 'false';
-    }
+    const allowSpecialSelection = showSpecialCategories && Boolean(userLocation);
+
     if (fuelToggle) {
+        fuelToggle.disabled = !allowSpecialSelection;
         fuelToggle.checked = fuelToggleMode === 'ev';
     }
+    if (fuelToggleContainer) {
+        fuelToggleContainer.dataset.mode = fuelToggleMode;
+        fuelToggleContainer.dataset.disabled = allowSpecialSelection ? 'false' : 'true';
+    }
     if (fuelToggleFuelLabel) {
-        fuelToggleFuelLabel.classList.toggle('active', fuelToggleMode === 'fuel');
+        fuelToggleFuelLabel.classList.toggle('active', allowSpecialSelection && fuelToggleMode === 'fuel');
     }
     if (fuelToggleEvLabel) {
-        fuelToggleEvLabel.classList.toggle('active', fuelToggleMode === 'ev');
+        fuelToggleEvLabel.classList.toggle('active', allowSpecialSelection && fuelToggleMode === 'ev');
     }
+    if (specialCategoryOffButton) {
+        specialCategoryOffButton.classList.toggle('active', !showSpecialCategories);
+    }
+
     if (!suppressSpecialCategorySync) {
         suppressSpecialCategorySync = true;
         if (fuelCheckbox) {
-            fuelCheckbox.checked = fuelToggleMode === 'fuel';
+            fuelCheckbox.disabled = !allowSpecialSelection;
+            fuelCheckbox.checked = allowSpecialSelection && fuelToggleMode === 'fuel';
         }
         if (evCheckbox) {
-            evCheckbox.checked = fuelToggleMode === 'ev';
+            evCheckbox.disabled = !allowSpecialSelection;
+            evCheckbox.checked = allowSpecialSelection && fuelToggleMode === 'ev';
         }
         suppressSpecialCategorySync = false;
     }
 }
 
 function handleLocationEnabled() {
-    if (fuelToggle) {
-        fuelToggle.disabled = false;
-    }
     updateFuelToggleUI();
 }
 
 function handleLocationDisabled() {
     userLocation = null;
-    if (fuelToggle) {
-        fuelToggle.disabled = true;
-    }
     updateFuelToggleUI();
     if (typeof window.applyFilters === 'function') {
         window.applyFilters();
@@ -621,11 +630,25 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeNavigationModal();
 
     if (fuelToggle) {
-        fuelToggle.disabled = true;
         fuelToggle.addEventListener('change', () => {
+            if (!showSpecialCategories || !userLocation) {
+                updateFuelToggleUI();
+                return;
+            }
             fuelToggleMode = fuelToggle.checked ? 'ev' : 'fuel';
             updateFuelToggleUI();
             filterMarkers();
+        });
+    }
+
+    specialCategoryOffButton = document.getElementById('special-category-off-btn');
+    if (specialCategoryOffButton) {
+        specialCategoryOffButton.addEventListener('click', () => {
+            showSpecialCategories = !showSpecialCategories;
+            updateFuelToggleUI();
+            if (typeof window.applyFilters === 'function') {
+                window.applyFilters();
+            }
         });
     }
 
@@ -697,12 +720,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     selectAllCategories.addEventListener('change', (e) => {
         const shouldCheck = e.target.checked;
+        const allowSpecialSelection = showSpecialCategories && Boolean(userLocation);
         categoryCheckboxes.forEach(checkbox => {
             if (isSpecialCategory(checkbox.value)) {
                 suppressSpecialCategorySync = true;
-                checkbox.checked = fuelToggleMode === 'ev'
+                checkbox.checked = allowSpecialSelection && (fuelToggleMode === 'ev'
                     ? checkbox.value === EV_CATEGORY
-                    : checkbox.value === FUEL_CATEGORY;
+                    : checkbox.value === FUEL_CATEGORY);
                 suppressSpecialCategorySync = false;
             } else {
                 checkbox.checked = shouldCheck;
@@ -714,7 +738,14 @@ document.addEventListener('DOMContentLoaded', () => {
     categoryCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', () => {
             const value = checkbox.value;
+            const allowSpecialSelection = showSpecialCategories && Boolean(userLocation);
             if (isSpecialCategory(value)) {
+                if (!allowSpecialSelection) {
+                    suppressSpecialCategorySync = true;
+                    checkbox.checked = false;
+                    suppressSpecialCategorySync = false;
+                    return;
+                }
                 if (suppressSpecialCategorySync) {
                     filterMarkers();
                     return;

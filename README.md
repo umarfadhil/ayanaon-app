@@ -130,3 +130,4 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Location-aware filtering**: Fuel/EV pins only display when location access is granted and the station is within 30 km of the user.
 - **Marker clustering**: Integrated Google MarkerClusterer with a zoom threshold so high-density areas stay responsive while still supporting full-text search.
 - **Map polish**: Toggle styling aligned with map controls, fullscreen shortcut removed, and service worker cache bumped to deliver the latest assets reliably.
+- **Quick hide option**: Added a 🚶 button to temporarily hide both fuel and EV stations with one tap.

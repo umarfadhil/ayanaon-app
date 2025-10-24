@@ -660,13 +660,20 @@ body {
       z-index: 1;
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 6px 12px;
+      gap: 8px;
+      padding: 8px 12px;
       background-color: rgba(255, 255, 255, 0.8);
       border-radius: 5px;
       box-shadow: 0 2px 5px rgba(0,0,0,0.1);
       font-weight: 700;
       text-transform: uppercase;
+      flex-direction: column;
+}
+
+#fuel-toggle-container .fuel-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 #fuel-toggle-container .toggle-label {
@@ -743,6 +750,30 @@ body {
 
 .toggle-switch input:checked + .toggle-slider::before {
     transform: translateX(24px);
+}
+
+#special-category-off-btn {
+    margin-top: 4px;
+    width: 48px;
+    height: 28px;
+    border-radius: 999px;
+    border: none;
+    background: #1f2937;
+    color: #f8fafc;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: background-color 0.2s ease;
+}
+
+#special-category-off-btn.active {
+    background: #6b7280;
+}
+
+#special-category-off-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 #fuel-toggle-container[data-mode="fuel"] .toggle-slider {

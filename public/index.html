@@ -20,12 +20,15 @@
         <button id="satellite-view-btn" class="map-type-btn">Satellite</button>
     </div>
     <div id="fuel-toggle-container" data-mode="fuel" data-disabled="true">
-        <span class="toggle-label toggle-label-fuel">FUEL</span>
-        <label class="toggle-switch">
-            <input type="checkbox" id="fuel-toggle" aria-label="Toggle SPBU/SPBG or SPKLU">
-            <span class="toggle-slider"></span>
-        </label>
-        <span class="toggle-label toggle-label-ev">EV</span>
+        <div class="fuel-toggle-row">
+            <span class="toggle-label toggle-label-fuel">FUEL</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="fuel-toggle" aria-label="Toggle SPBU/SPBG or SPKLU">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label toggle-label-ev">EV</span>
+        </div>
+        <button id="special-category-off-btn" type="button" aria-label="Hide fuel and EV stations">🚶</button>
     </div>
     <button id="add-pin-btn" title="Add Pin" aria-label="Add Pin">+</button>
     <button id="info-btn" title="Info" aria-label="Info">ⓘ</button>
