@@ -34,7 +34,7 @@ let suppressSpecialCategorySync = false;
 let fuelToggleMode = 'fuel';
 
 let specialCategoryOffButton;
-let showSpecialCategories = true;
+let showSpecialCategories = false;
 
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
@@ -180,7 +180,7 @@ function updateFuelToggleUI() {
 
     if (fuelToggle) {
         fuelToggle.disabled = !allowSpecialSelection;
-        fuelToggle.checked = fuelToggleMode === 'ev';
+        fuelToggle.checked = allowSpecialSelection && fuelToggleMode === 'ev';
     }
     if (fuelToggleContainer) {
         fuelToggleContainer.dataset.mode = fuelToggleMode;
@@ -194,6 +194,7 @@ function updateFuelToggleUI() {
     }
     if (specialCategoryOffButton) {
         specialCategoryOffButton.classList.toggle('active', !showSpecialCategories);
+        specialCategoryOffButton.disabled = Boolean(userLocation) ? false : true;
     }
 
     if (!suppressSpecialCategorySync) {
@@ -216,6 +217,17 @@ function handleLocationEnabled() {
 
 function handleLocationDisabled() {
     userLocation = null;
+    updateFuelToggleUI();
+    if (typeof window.applyFilters === 'function') {
+        window.applyFilters();
+    }
+}
+
+function setSpecialCategoryVisibility(enabled) {
+    if (showSpecialCategories === enabled) {
+        return;
+    }
+    showSpecialCategories = enabled;
     updateFuelToggleUI();
     if (typeof window.applyFilters === 'function') {
         window.applyFilters();
@@ -631,9 +643,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (fuelToggle) {
         fuelToggle.addEventListener('change', () => {
-            if (!showSpecialCategories || !userLocation) {
+            if (!userLocation) {
                 updateFuelToggleUI();
                 return;
+            }
+            if (!showSpecialCategories) {
+                setSpecialCategoryVisibility(true);
             }
             fuelToggleMode = fuelToggle.checked ? 'ev' : 'fuel';
             updateFuelToggleUI();
@@ -644,11 +659,7 @@ document.addEventListener('DOMContentLoaded', () => {
     specialCategoryOffButton = document.getElementById('special-category-off-btn');
     if (specialCategoryOffButton) {
         specialCategoryOffButton.addEventListener('click', () => {
-            showSpecialCategories = !showSpecialCategories;
-            updateFuelToggleUI();
-            if (typeof window.applyFilters === 'function') {
-                window.applyFilters();
-            }
+            setSpecialCategoryVisibility(!showSpecialCategories);
         });
     }
 

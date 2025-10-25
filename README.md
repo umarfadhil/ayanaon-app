@@ -1,4 +1,4 @@
-# AyaNaon-app
+﻿# AyaNaon-app
 
 Welcome to AyaNaon-app! This is a community-driven map application designed to help you share and discover local information, promotions, and reports within your area. Think of it as a digital bulletin board powered by your community!
 
@@ -69,7 +69,7 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 *   **Traffic Information:** Integrated a real-time traffic layer onto the map for improved navigation.
 *   **Performance Optimization:** Implemented best practices for Google Maps API loading, resolving console warnings and enhancing application performance.
-*   **Enhanced Welcome Message:** Added a ðŸ“ emoji to the welcome pop-up for a more engaging user experience.
+*   **Enhanced Welcome Message:** Added a Ã°Å¸â€œÂ emoji to the welcome pop-up for a more engaging user experience.
 *   **Improved Info Window Display:** Adjusted the spacing between marker icons and pop-up descriptions for better visual clarity.
 *   **Interactive Markers:** Enabled toggling of info window visibility by clicking the marker icon, allowing users to open and close pop-ups with a single click.
 ---
@@ -77,7 +77,7 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 ## What's New in v1.3.0
 
 *   **Smart Filter Search:** Added keyword, single-date, and date-range filters inside the map drawer for faster pin discovery.
-*   **Navigation Shortcuts:** Introduced the â€œGet Me Hereâ€ button with an app selector that surfaces Google Maps, Apple Maps, Waze, or the browser based on your device.
+*   **Navigation Shortcuts:** Introduced the Ã¢â‚¬Å“Get Me HereÃ¢â‚¬Â button with an app selector that surfaces Google Maps, Apple Maps, Waze, or the browser based on your device.
 *   **Streamlined Pin Actions:** Reworked the info-window layout so voting and navigation controls sit together, with edit actions highlighted above when available.
 *   **Mobile-Friendly Controls:** Refined floating buttons (including the reset icon) to stay legible and consistent across devices.
 ---
@@ -101,7 +101,7 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 ## What's New in v1.6.0
 
-- **Date range for events**: Users can now select either a single date or a start–end range when creating or editing a pin.
+- **Date range for events**: Users can now select either a single date or a startâ€“end range when creating or editing a pin.
 - **Info-window display**: Single dates render normally; ranges show as "Start - End"; "Hari ini" still supported.
 - **Filtering respects ranges**: Pins appear if their date range overlaps the filter range.
 - **Expiration handling**: Pins with ranges expire at the end of the last day selected.
@@ -118,7 +118,7 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 ## What's New in v1.6.2
 
-- **Category refresh**: Replaced the old traffic/weather categories with `🏡 Akomodasi Pilihan` and `⚡ SPKLU`, including updated icons.
+- **Category refresh**: Replaced the old traffic/weather categories with `ðŸ¡ Akomodasi Pilihan` and `âš¡ SPKLU`, including updated icons.
 - **Curated submissions**: Restricted categories remain visible in filters and existing pins but are omitted from the public submission form.
 - **Docs & build**: Version bump and cache version update to deliver the latest assets.
 
@@ -126,8 +126,17 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 ## What's New in v1.7.0
 
-- **Fuel vs EV toggle**: Added a dedicated switch so users can focus on `⛽ SPBU/SPBG` or `⚡ SPKLU` locations with a single tap.
-- **Location-aware filtering**: Fuel/EV pins only display when location access is granted and the station is within 30 km of the user.
+- **Fuel vs EV toggle**: Added a dedicated switch so users can focus on `â›½ SPBU/SPBG` or `âš¡ SPKLU` locations with a single tap.
+- **Location-aware filtering**: Fuel/EV pins only display when location access is granted and the station is within 30â€¯km of the user.
 - **Marker clustering**: Integrated Google MarkerClusterer with a zoom threshold so high-density areas stay responsive while still supporting full-text search.
 - **Map polish**: Toggle styling aligned with map controls, fullscreen shortcut removed, and service worker cache bumped to deliver the latest assets reliably.
-- **Quick hide option**: Added a 🚶 button to temporarily hide both fuel and EV stations with one tap.
+- **Quick hide option**: Added a ðŸš¶ button to temporarily hide both fuel and EV stations with one tap.
+
+
+---
+
+## What's New in v1.7.1
+
+- **Default quick-hide**: The 🚶 button now starts enabled, keeping the map clutter-free until users opt into fuel or EV stations.
+- **Toggle improvements**: Fuel/EV switch stays disabled until stations are available; clicking it automatically reveals stations when possible.
+- **UI separation**: Fuel/EV toggle and walking button have distinct positions with cohesive styling.
