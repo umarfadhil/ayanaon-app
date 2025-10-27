@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Masuk Warga Terdaftar | AyaNaon?</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+    <main class="auth-container">
+        <header class="auth-header">
+            <h1 class="auth-title">Masuk Warga Terdaftar</h1>
+            <p class="auth-subtitle">Lihat berapa banyak badge kebaikan yang sudah kamu bagikan ke para penjual.</p>
+        </header>
+        <div id="form-message" class="form-message form-message--hidden" role="status" aria-live="polite"></div>
+        <form id="resident-login-form" class="auth-form" novalidate>
+            <div class="form-field">
+                <label for="resident-login-username">Username</label>
+                <input type="text" id="resident-login-username" name="username" required autocomplete="username" placeholder="Username warga">
+            </div>
+            <div class="form-field">
+                <label for="resident-login-password">Password</label>
+                <input type="password" id="resident-login-password" name="password" required autocomplete="current-password" placeholder="Password">
+            </div>
+            <button type="submit" class="auth-submit-btn">Masuk</button>
+        </form>
+        <footer class="auth-footer">
+            <a href="warga-register.html">Belum punya akun warga? Daftar</a>
+            <a href="index.html">← Kembali ke peta</a>
+        </footer>
+    </main>
+    <script src="resident-session.js"></script>
+    <script src="resident-auth.js"></script>
+</body>
+</html>

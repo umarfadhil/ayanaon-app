@@ -1,4 +1,4 @@
-﻿# AyaNaon-app
+# AyaNaon-app
 
 Welcome to AyaNaon-app! This is a community-driven map application designed to help you share and discover local information, promotions, and reports within your area. Think of it as a digital bulletin board powered by your community!
 
@@ -18,6 +18,7 @@ AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in 
 *   **Pin Management:** Reporters can edit their own pins, ensuring information stays accurate.
 *   **Real-time Updates:** See the number of active pins and unique contributors in real-time.
 *   **Responsive Design:** Enjoy a seamless experience whether you're on your desktop or mobile phone.
+*   **Gerobak Online Mode:** Penjual dapat menyiarkan lokasi live, menampilkan profil lengkap beserta kontak WhatsApp, dan mengumpulkan badge “Verified by Warga” dari vote pelanggan.
 
 ## How It Works (Under the Hood)
 
@@ -40,11 +41,22 @@ To get the app up and running, you'll need to:
     You'll need a `.env` file in your project root with:
     *   `MONGODB_URI`: Your MongoDB connection string.
     *   `GOOGLE_MAPS_API_KEY`: Your Google Maps JavaScript API key.
+    *   `JWT_SECRET`: Secret used to sign seller login tokens.
+    *   `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` *(optional)*: Required to deliver WhatsApp verification codes via Twilio's API. When omitted, codes are surfaced in the API response for local testing.
 3.  **Install dependencies:**
     ```bash
     npm install
     ```
 4.  **Deploy to Netlify:** This app is designed for easy deployment on Netlify. Connect your GitHub repository to Netlify, and it will automatically build and deploy your functions and frontend.
+
+## Gerobak Online Workflow
+
+1. **Registrasi:** Akses `register.html`, isi data toko beserta foto gerobak/jualan (maks. 1MB), lalu setujui syarat untuk mulai siaran.
+2. **Verifikasi WhatsApp:** Sistem mengirim kode 6 digit ke nomor WhatsApp yang didaftarkan (via Twilio jika kredensial tersedia). Untuk lingkungan pengembangan tanpa Twilio, kode juga dikembalikan di response API.
+3. **Masuk & Live:** Login melalui `login.html`, lalu aktifkan Gerobak Online dari panel di peta ketika siap siaran.
+4. **Diverifikasi Warga:** Pelanggan yang puas dapat memberikan vote melalui pop-up lapak untuk menghadiahkan badge Verified by Warga.
+
+Gerobak Online yang aktif akan muncul sebagai marker khusus dengan profil lengkap serta tautan WhatsApp yang dapat dihubungi langsung oleh warga.
 
 ## Contributing
 
@@ -140,3 +152,14 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Default quick-hide**: The 🚶 button now starts enabled, keeping the map clutter-free until users opt into fuel or EV stations.
 - **Toggle improvements**: Fuel/EV switch stays disabled until stations are available; clicking it automatically reveals stations when possible.
 - **UI separation**: Fuel/EV toggle and walking button have distinct positions with cohesive styling.
+
+---
+
+## What's New in v2.0.0
+
+- **Unified Menu Controls**: The UI is now cleaner with a single collapsible top-right menu containing Statistics, the walking button, Fuel/EV toggle, "Gerobak Online," and the new "Warga Terdaftar" (Registered Resident) login/registration access.
+- **Gerobak Online Launch**: Mobile cart vendors can now broadcast their real-time location, allowing residents to discover nearby sellers and their products instantly.
+- **Warga Terdaftar (Registered Resident) System**: Residents can register to help legitimize "Gerobak Online" vendors by awarding a "Verified by Warga" badge, building a trusted community marketplace.
+- **Guaranteed Freshness**: The service worker is updated to ensure all users receive the latest app features and assets immediately.
+
+

@@ -15,19 +15,92 @@
 <body>
     <div id="map"></div>
     <button id="install-app-btn" type="button" hidden>Install App</button>
-    <div id="map-type-control-container">
-        <button id="map-view-btn" class="map-type-btn active">Map</button>
-        <button id="satellite-view-btn" class="map-type-btn">Satellite</button>
+        <div id="action-menu" class="action-menu">
+        <button id="action-menu-toggle" class="action-menu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="action-menu-content">Menu</button>
+        <div id="action-menu-content" class="action-menu-content hidden">
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Statistik</h3>
+                <div id="metrics-container">
+                    <div id="unique-ips-count"></div>
+                    <div id="active-pins-count"></div>
+                </div>
+            </section>
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Tampilan Peta</h3>
+                <div class="action-menu-row map-type-row">
+                    <button id="map-view-btn" class="map-type-btn active">Map</button>
+                    <button id="satellite-view-btn" class="map-type-btn">Satellite</button>
+                </div>
+            </section>
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Mode Perjalanan</h3>
+                <div class="action-menu-row">
+                    <div id="fuel-toggle-wrapper" class="fuel-toggle-wrapper">
+                        <div id="fuel-toggle-container" data-mode="fuel" data-disabled="true">
+                            <span class="toggle-label toggle-label-fuel">FUEL</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="fuel-toggle" aria-label="Toggle SPBU/SPBG or SPKLU">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label toggle-label-ev">EV</span>
+                        </div>
+                    </div>
+                    <button id="special-category-off-btn" type="button" class="menu-pill-btn" aria-label="Hide fuel and EV stations">🚶🏻</button>
+                    <span class="action-menu-row-note">Tampilkan SPBU / EV terdekat atau pilih jalan kaki 🚶🏻 untuk menyembunyikan</span>
+                </div>
+            </section>
+            <section id="menu-gerobak-section" class="action-menu-section">
+                <h3 class="action-menu-heading">Gerobak Online</h3>
+                <div id="live-seller-panel" class="live-seller-panel hidden">
+                    <div class="live-seller-panel-header">
+                        <div class="live-seller-panel-title">
+                            <span id="live-seller-status-text" class="live-seller-status offline">Offline</span>
+                        </div>
+                        <div class="live-seller-panel-actions">
+                            <button id="live-seller-login-btn" type="button" class="live-seller-secondary-btn">Login</button>
+                            <button id="live-seller-logout-btn" type="button" class="live-seller-secondary-btn" hidden>Logout</button>
+                        </div>
+                    </div>
+                    <div id="live-seller-profile" class="live-seller-profile hidden">
+                        <img id="live-seller-photo" class="live-seller-photo hidden" alt="Foto lapak penjual">
+                        <div class="live-seller-profile-text">
+                            <div id="live-seller-name" class="live-seller-name"></div>
+                            <div id="live-seller-brand" class="live-seller-brand hidden"></div>
+                            <div id="live-seller-community-badge" class="live-seller-community-badge hidden">Verified by Warga</div>
+                            <a id="live-seller-phone" class="live-seller-phone hidden" href="#"></a>
+                        </div>
+                    </div>
+                    <button id="live-seller-toggle-btn" type="button" class="live-seller-primary-btn" disabled>Mulai</button>
+                    <div class="live-seller-links live-seller-links-authenticated">
+                        <a href="verify.html" class="menu-pill-btn live-seller-menu-link">Panduan Badge Warga</a>
+                    </div>
+                </div>
+                <div id="live-seller-auth-links" class="live-seller-links live-seller-auth-links">
+                    <a id="live-seller-auth-primary" href="login.html" class="menu-pill-btn live-seller-menu-link">Masuk</a>
+                    <a id="live-seller-auth-secondary" href="register.html" class="menu-pill-btn live-seller-menu-link">Daftar</a>
+                </div>
+            </section>
+            <section id="menu-resident-section" class="action-menu-section">
+                <h3 class="action-menu-heading">Warga Terdaftar</h3>
+                <div id="resident-authenticated" class="resident-authenticated hidden">
+                    <div class="resident-greeting">Halo, <span id="resident-name"></span>!</div>
+                    <div class="resident-kindness">
+                        Badge kebaikan kamu: <span id="resident-badge-count">0</span>
+                    </div>
+                    <div id="resident-share-controls" class="resident-share-controls">
+                        <button id="resident-share-toggle-btn" type="button" class="menu-pill-btn resident-menu-link resident-share-btn">Matikan Berbagi Lokasi</button>
+                        <div id="resident-share-status" class="resident-share-status">Lokasi kamu sedang dibagikan ke Gerobak Online.</div>
+                    </div>
+                    <button id="resident-logout-btn" type="button" class="live-seller-secondary-btn resident-logout-btn">Logout</button>
+                </div>
+                <div id="resident-auth-links" class="resident-auth-links">
+                    <a id="resident-login-link" href="warga-login.html" class="menu-pill-btn resident-menu-link">Masuk</a>
+                    <a id="resident-register-link" href="warga-register.html" class="menu-pill-btn resident-menu-link">Daftar</a>
+                </div>
+                <p id="resident-prompt" class="resident-prompt">Bagikan badge ke penjual favoritmu dan lihat seberapa dermawan kamu.</p>
+            </section>
+        </div>
     </div>
-    <div id="fuel-toggle-container" data-mode="fuel" data-disabled="true">
-        <span class="toggle-label toggle-label-fuel">FUEL</span>
-        <label class="toggle-switch">
-            <input type="checkbox" id="fuel-toggle" aria-label="Toggle SPBU/SPBG or SPKLU">
-            <span class="toggle-slider"></span>
-        </label>
-        <span class="toggle-label toggle-label-ev">EV</span>
-    </div>
-    <button id="special-category-off-btn" type="button" aria-label="Hide fuel and EV stations">🚶</button>
     <button id="add-pin-btn" title="Add Pin" aria-label="Add Pin">+</button>
     <button id="info-btn" title="Info" aria-label="Info">ⓘ</button>
     <button id="filter-btn" title="Filter" aria-label="Filter">🔍︎</button>
@@ -59,10 +132,6 @@
             <label><input type="checkbox" class="category-checkbox" value="⚡ SPKLU" checked> ⚡ SPKLU</label><br>
             <label><input type="checkbox" class="category-checkbox" value="💡 Lain-lain" checked> 💡 Lain-lain</label><br>
         </div>
-    </div>
-    <div id="metrics-container">
-        <div id="unique-ips-count"></div>
-        <div id="active-pins-count"></div>
     </div>
     <div id="pin-form" class="hidden">
         <h2>Aya Naon?</h2>
@@ -128,6 +197,9 @@
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
+    <script src="resident-session.js"></script>
+    <script src="auth.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Masuk Gerobak Online | AyaNaon?</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+    <main class="auth-container">
+        <header class="auth-header">
+            <h1 class="auth-title">Masuk Gerobak Online</h1>
+            <p class="auth-subtitle">Aktifkan Gerobak Online dan bagikan lokasi jualan kamu secara langsung.</p>
+        </header>
+        <div id="form-message" class="form-message form-message--hidden" role="status" aria-live="polite"></div>
+        <form id="login-form" class="auth-form" novalidate>
+            <div class="form-field">
+                <label for="login-username">Username</label>
+                <input type="text" id="login-username" name="username" required autocomplete="username" placeholder="Username Gerobak Online">
+            </div>
+            <div class="form-field">
+                <label for="login-password">Password</label>
+                <input type="password" id="login-password" name="password" required autocomplete="current-password" placeholder="Password">
+            </div>
+            <button type="submit" class="auth-submit-btn">Masuk</button>
+        </form>
+        <footer class="auth-footer">
+            <a href="register.html">Belum punya akun Gerobak Online? Daftar dulu</a>
+            <a href="verify.html">Pelajari cara mendapatkan badge warga</a>
+            <a href="index.html">← Kembali ke peta</a>
+        </footer>
+    </main>
+    <script src="auth.js"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daftar Warga Terdaftar | AyaNaon?</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+    <main class="auth-container">
+        <header class="auth-header">
+            <h1 class="auth-title">Daftar Warga Terdaftar</h1>
+            <p class="auth-subtitle">Buat akun agar lencana kebaikan yang kamu bagikan tercatat otomatis.</p>
+        </header>
+        <div id="form-message" class="form-message form-message--hidden" role="status" aria-live="polite"></div>
+        <form id="resident-register-form" class="auth-form" novalidate>
+            <div class="form-field">
+                <label for="resident-register-name">Nama Tampilan</label>
+                <input type="text" id="resident-register-name" name="displayName" placeholder="Contoh: Warga Tangguh" autocomplete="name">
+            </div>
+            <div class="form-field">
+                <label for="resident-register-username">Username</label>
+                <input type="text" id="resident-register-username" name="username" required minlength="4" placeholder="Contoh: wargahebat" autocomplete="username">
+            </div>
+            <div class="form-field">
+                <label for="resident-register-password">Password</label>
+                <input type="password" id="resident-register-password" name="password" required minlength="4" placeholder="Minimal 4 karakter" autocomplete="new-password">
+            </div>
+            <div class="form-field">
+                <label for="resident-register-confirm">Konfirmasi Password</label>
+                <input type="password" id="resident-register-confirm" name="confirmPassword" required minlength="4" placeholder="Ulangi password" autocomplete="new-password">
+            </div>
+            <button type="submit" class="auth-submit-btn">Daftar</button>
+        </form>
+        <footer class="auth-footer">
+            <a href="warga-login.html">Sudah punya akun warga? Masuk di sini</a>
+            <a href="index.html">← Kembali ke peta</a>
+        </footer>
+    </main>
+    <script src="resident-session.js"></script>
+    <script src="resident-auth.js"></script>
+</body>
+</html>
