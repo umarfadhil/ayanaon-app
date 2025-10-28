@@ -1358,10 +1358,6 @@ body {
     .live-seller-panel-actions {
         flex-wrap: wrap;
     }
-    .live-seller-links {
-        flex-direction: column;
-        align-items: flex-start;
-    }
 }
 
 /* Animated user location marker */
