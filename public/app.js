@@ -177,6 +177,18 @@ if ('serviceWorker' in navigator) {
     });
 }
 
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 function clearMarkers() {
     if (clusterManager && typeof clusterManager.clearMarkers === 'function') {
         clusterManager.clearMarkers();
@@ -1986,17 +1998,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (filterSearchInput) {
-        filterSearchInput.addEventListener('input', (event) => {
-            currentSearchQuery = event.target.value.trim().toLowerCase();
+        const debouncedFilter = debounce(() => {
+            currentSearchQuery = filterSearchInput.value.trim().toLowerCase();
             currentSearchTokens = tokenizeSearchQuery(currentSearchQuery);
             filterMarkers();
-        });
-        filterSearchInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                executeSearch();
-            }
-        });
+        }, 300);
+        
+        filterSearchInput.addEventListener('input', debouncedFilter);
     }
 
     if (filterSearchButton) {
