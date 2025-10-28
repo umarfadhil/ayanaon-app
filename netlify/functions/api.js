@@ -357,7 +357,7 @@ router.post('/residents/share', async (req, res) => {
         if (typeof shareLocation === 'boolean') {
             setFields.shareLocation = shareLocation;
             if (!shareLocation) {
-                unsetFields.lastLocation = '';
+                setFields.lastLocation = null;
             } else if (!locationProvided && (!resident.lastLocation || typeof resident.lastLocation !== 'object')) {
                 return res.status(400).json({ message: 'Lokasi wajib diisi saat menyalakan berbagi lokasi.' });
             }
