@@ -593,23 +593,36 @@ function handleResidentLocationUpdate() {
     }
 }
 
-function toggleResidentLocationSharing() {
+async function toggleResidentLocationSharing() {
     if (typeof window.ResidentSession === 'undefined' || typeof ResidentSession.setShareLocation !== 'function') {
         alert('Fitur warga belum siap. Muat ulang halaman dan coba lagi.');
         return;
     }
     const currentlySharing = Boolean(residentSessionState?.resident?.shareLocation);
-    const sharePayload = {};
-    if (isValidLatLng(userLocation)) {
-        sharePayload.lat = userLocation.lat;
-        sharePayload.lng = userLocation.lng;
+    try {
+        let location = userLocation;
+        if (!currentlySharing && !isValidLatLng(location)) {
+            location = await getLatestUserLocation();
+        }
+        const sharePayload = {};
+        if (isValidLatLng(location)) {
+            sharePayload.lat = location.lat;
+            sharePayload.lng = location.lng;
+        }
+        await ResidentSession.setShareLocation(!currentlySharing, sharePayload);
+        if (!currentlySharing && isValidLatLng(location) && typeof ResidentSession.updateLastLocation === 'function') {
+            await ResidentSession.updateLastLocation(location);
+        }
+    } catch (error) {
+        DEBUG_LOGGER.log('Tidak dapat mengubah status berbagi lokasi', error);
+        alert(error?.message || 'Tidak dapat mengubah status berbagi lokasi.');
+        return;
     }
-    Promise.resolve(ResidentSession.setShareLocation(!currentlySharing, sharePayload))
+
+    Promise.resolve()
         .then(() => {
-            if (!currentlySharing && isValidLatLng(userLocation) && typeof ResidentSession.updateLastLocation === 'function') {
-                return ResidentSession.updateLastLocation(userLocation);
-            }
-            return null;
+            syncResidentShareMarkersFromCache();
+            refreshResidentShareMarkers({ force: true });
         })
         .then(() => {
             syncResidentShareMarkersFromCache();
@@ -1362,9 +1375,11 @@ async function sendLiveSellerHeartbeat() {
         }
         return;
     }
-    if (!latestLocation) {
+
+    if (!isValidLatLng(latestLocation)) {
         return;
     }
+
     lastLiveSellerLocation = latestLocation;
 
     try {
