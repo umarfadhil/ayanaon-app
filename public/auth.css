@@ -106,6 +106,12 @@ body {
     resize: vertical;
 }
 
+.form-field-hint {
+    margin: -4px 0 0;
+    font-size: 12px;
+    color: #64748b;
+}
+
 .form-field input:focus,
 .form-field textarea:focus,
 .form-field select:focus {

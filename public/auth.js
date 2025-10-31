@@ -263,12 +263,36 @@
                 return;
             }
 
+            const menuPhotosInput = form.querySelector('#register-menu-photos');
+            let menuPhotoDataUrls = [];
+            if (menuPhotosInput && menuPhotosInput.files && menuPhotosInput.files.length) {
+                const menuFiles = Array.from(menuPhotosInput.files);
+                if (menuFiles.length > 3) {
+                    showMessage(messageEl, 'error', 'Maksimal unggah 3 foto menu.');
+                    return;
+                }
+                const oversizedMenu = menuFiles.find(file => file.size > 4 * 1024 * 1024);
+                if (oversizedMenu) {
+                    showMessage(messageEl, 'error', 'Setiap foto menu maksimal berukuran 4MB.');
+                    return;
+                }
+                try {
+                    menuPhotoDataUrls = await Promise.all(menuFiles.map(fileToDataUrl));
+                } catch (error) {
+                    showMessage(messageEl, 'error', error.message || 'Gagal memuat foto menu.');
+                    return;
+                }
+            }
+
             showMessage(messageEl, null, 'Mengirim data pendaftaran...');
             ensureSubmitState(submitBtn, true, 'Mendaftarkan...');
 
             try {
                 const photoDataUrl = await fileToDataUrl(photoFile);
                 payload.photo = photoDataUrl;
+                if (menuPhotoDataUrls.length) {
+                    payload.menuPhotos = menuPhotoDataUrls;
+                }
                 const response = await fetch('/api/register-seller', {
                     method: 'POST',
                     headers: {

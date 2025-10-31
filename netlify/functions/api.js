@@ -9,7 +9,7 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const router = express.Router();
 
-app.use(bodyParser.json({ limit: '4mb' }));
+app.use(bodyParser.json({ limit: '20mb' }));
 
 const {
     MONGODB_URI,
@@ -81,14 +81,20 @@ function normalizePhoneNumber(rawPhone) {
     return digits ? `+${digits}` : '';
 }
 
-const MAX_PHOTO_BYTES = 1024 * 1024;
+const MAX_MAIN_PHOTO_BYTES = 1024 * 1024;
+const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
+const MAX_MENU_PHOTO_COUNT = 3;
 
-function parseSellerPhoto(photoPayload) {
+function parseSellerPhoto(photoPayload, options = {}) {
+    const {
+        maxBytes = MAX_MAIN_PHOTO_BYTES,
+        fieldLabel = 'Foto'
+    } = options;
     if (!photoPayload) {
         return null;
     }
     if (typeof photoPayload !== 'string') {
-        throw new Error('Foto tidak valid.');
+        throw new Error(`${fieldLabel} tidak valid.`);
     }
     let base64Segment = photoPayload;
     let contentType = 'image/jpeg';
@@ -99,16 +105,41 @@ function parseSellerPhoto(photoPayload) {
     }
     const buffer = Buffer.from(base64Segment, 'base64');
     if (!buffer.length) {
-        throw new Error('Foto tidak dapat diproses.');
+        throw new Error(`${fieldLabel} tidak dapat diproses.`);
     }
-    if (buffer.length > MAX_PHOTO_BYTES) {
-        throw new Error('Foto melebihi 1MB.');
+    if (buffer.length > maxBytes) {
+        const maxMb = (maxBytes / (1024 * 1024)).toFixed(maxBytes >= 1024 * 1024 ? 0 : 2);
+        throw new Error(`${fieldLabel} melebihi ${maxMb}MB.`);
     }
     return {
         contentType,
         data: base64Segment,
         size: buffer.length
     };
+}
+
+function parseSellerMenuPhotos(menuPayload) {
+    if (!menuPayload) {
+        return [];
+    }
+    if (!Array.isArray(menuPayload)) {
+        throw new Error('Format foto menu tidak valid.');
+    }
+    if (menuPayload.length > MAX_MENU_PHOTO_COUNT) {
+        throw new Error(`Maksimal ${MAX_MENU_PHOTO_COUNT} foto menu.`);
+    }
+    const parsed = [];
+    menuPayload.forEach((item, index) => {
+        if (!item) {
+            return;
+        }
+        const photo = parseSellerPhoto(item, {
+            maxBytes: MAX_MENU_PHOTO_BYTES,
+            fieldLabel: `Foto menu #${index + 1}`
+        });
+        parsed.push(photo);
+    });
+    return parsed;
 }
 
 function sanitizeSeller(doc) {
@@ -131,12 +162,22 @@ function sanitizeSeller(doc) {
             size: sanitized.photo.size
         };
     }
+    if (Array.isArray(sanitized.menuPhotos)) {
+        sanitized.menuPhotos = sanitized.menuPhotos.map((photo) => ({
+            contentType: photo.contentType,
+            data: photo.data,
+            size: photo.size
+        }));
+    } else {
+        sanitized.menuPhotos = [];
+    }
     const votes = Number(communityVerification?.votes) || 0;
     sanitized.communityVerification = {
         votes,
         verifiedAt: communityVerification?.verifiedAt || null
     };
     sanitized.isCommunityVerified = votes > 0;
+    sanitized.showPhone = Boolean(sanitized.showPhone);
     return sanitized;
 }
 
@@ -457,6 +498,7 @@ router.post('/register-seller', async (req, res) => {
             deskripsi,
             phoneNumber,
             photo,
+            menuPhotos,
             consent
         } = req.body || {};
 
@@ -484,7 +526,19 @@ router.post('/register-seller', async (req, res) => {
             return res.status(400).json({ message: 'Nomor WhatsApp tidak valid. Gunakan format dengan kode negara, misal +628xxx.' });
         }
 
-        const sellerPhoto = parseSellerPhoto(photo);
+        let sellerPhoto;
+        try {
+            sellerPhoto = parseSellerPhoto(photo, { fieldLabel: 'Foto gerobak' });
+        } catch (error) {
+            return res.status(400).json({ message: error.message || 'Foto gerobak tidak valid.' });
+        }
+
+        let menuPhotoDocs = [];
+        try {
+            menuPhotoDocs = parseSellerMenuPhotos(menuPhotos || []);
+        } catch (error) {
+            return res.status(400).json({ message: error.message || 'Foto menu tidak valid.' });
+        }
 
         const passwordHash = await bcrypt.hash(password, 12);
         const now = new Date();
@@ -498,7 +552,9 @@ router.post('/register-seller', async (req, res) => {
             deskripsi: String(deskripsi).trim(),
             phoneNumber: normalizedPhone,
             consentAccepted: Boolean(consent),
+            showPhone: false,
             photo: sellerPhoto,
+            menuPhotos: menuPhotoDocs,
             isVerified: true,
             communityVerification: {
                 votes: 0,
@@ -571,6 +627,98 @@ router.get('/sellers/me', async (req, res) => {
     const seller = await authenticateRequest(req, res);
     if (!seller) return;
     res.json({ seller: sanitizeSeller(seller) });
+});
+
+router.put('/sellers/me', async (req, res) => {
+    const seller = await authenticateRequest(req, res);
+    if (!seller) return;
+
+    try {
+        const payload = req.body || {};
+        const { nama, merk, deskripsi, phoneNumber } = payload;
+
+        if (typeof nama !== 'string' || !nama.trim()) {
+            return res.status(400).json({ message: 'Nama gerobak wajib diisi.' });
+        }
+        if (typeof merk !== 'string' || !merk.trim()) {
+            return res.status(400).json({ message: 'Brand atau menu utama wajib diisi.' });
+        }
+        if (typeof deskripsi !== 'string' || !deskripsi.trim()) {
+            return res.status(400).json({ message: 'Deskripsi wajib diisi.' });
+        }
+        if (typeof phoneNumber !== 'string' || !phoneNumber.trim()) {
+            return res.status(400).json({ message: 'Nomor WhatsApp wajib diisi.' });
+        }
+
+        const normalizedPhone = normalizePhoneNumber(phoneNumber);
+        if (!normalizedPhone) {
+            return res.status(400).json({ message: 'Nomor WhatsApp tidak valid.' });
+        }
+
+        const photoProvided = Object.prototype.hasOwnProperty.call(payload, 'photo');
+        let parsedPhoto = null;
+        if (photoProvided && payload.photo) {
+            try {
+                parsedPhoto = parseSellerPhoto(payload.photo);
+            } catch (error) {
+                return res.status(400).json({ message: error.message || 'Foto tidak valid.' });
+            }
+        }
+
+        const sellers = await getSellersCollection();
+        const updateDoc = {
+            $set: {
+                nama: nama.trim(),
+                merk: merk.trim(),
+                deskripsi: deskripsi.trim(),
+                phoneNumber: normalizedPhone,
+                updatedAt: new Date()
+            }
+        };
+        if (typeof payload.showPhone === 'boolean') {
+            updateDoc.$set.showPhone = Boolean(payload.showPhone);
+        }
+        if (photoProvided) {
+            if (parsedPhoto) {
+                updateDoc.$set.photo = parsedPhoto;
+            } else {
+                updateDoc.$unset = { photo: '' };
+            }
+        }
+        if (Object.prototype.hasOwnProperty.call(payload, 'menuPhotos')) {
+            let parsedMenuPhotos = [];
+            try {
+                parsedMenuPhotos = parseSellerMenuPhotos(payload.menuPhotos || []);
+            } catch (error) {
+                return res.status(400).json({ message: error.message || 'Foto menu tidak valid.' });
+            }
+            updateDoc.$set.menuPhotos = parsedMenuPhotos;
+        }
+
+        const sellerObjectId = seller._id instanceof ObjectId
+            ? seller._id
+            : new ObjectId(seller._id);
+
+        const result = await sellers.findOneAndUpdate(
+            { _id: sellerObjectId },
+            updateDoc,
+            { returnDocument: 'after' }
+        );
+        let nextSellerDoc = result.value;
+        if (!nextSellerDoc) {
+            nextSellerDoc = await sellers.findOne({ _id: sellerObjectId });
+            if (!nextSellerDoc) {
+                return res.status(404).json({ message: 'Profil penjual tidak ditemukan.' });
+            }
+        }
+        res.json({
+            seller: sanitizeSeller(nextSellerDoc),
+            message: 'Profil Gerobak berhasil diperbarui.'
+        });
+    } catch (error) {
+        console.error('Failed to update seller profile', error);
+        res.status(500).json({ message: 'Gagal memperbarui profil Gerobak.' });
+    }
 });
 
 router.post('/live-sellers/status', async (req, res) => {
@@ -669,6 +817,8 @@ router.get('/live-sellers', async (req, res) => {
                         merk: 1,
                         deskripsi: 1,
                         phoneNumber: 1,
+                        showPhone: 1,
+                        menuPhotos: 1,
                         photo: 1,
                         liveStatus: 1,
                         communityVerification: 1
@@ -682,6 +832,9 @@ router.get('/live-sellers', async (req, res) => {
             const hasCommunityVoted = Array.isArray(sellerDoc.communityVerification?.voterIps)
                 ? sellerDoc.communityVerification.voterIps.includes(requesterIp)
                 : false;
+            if (!sanitized.showPhone) {
+                delete sanitized.phoneNumber;
+            }
             return {
                 ...sanitized,
                 sellerId: sanitized.id,

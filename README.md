@@ -18,7 +18,7 @@ AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in 
 *   **Pin Management:** Reporters can edit their own pins, ensuring information stays accurate.
 *   **Real-time Updates:** See the number of active pins and unique contributors in real-time.
 *   **Responsive Design:** Enjoy a seamless experience whether you're on your desktop or mobile phone.
-*   **Gerobak Online Mode:** Penjual dapat menyiarkan lokasi live, menampilkan profil lengkap beserta kontak WhatsApp, dan mengumpulkan badge “Verified by Warga” dari vote pelanggan.
+*   **Gerobak Online Mode:** Penjual dapat menyiarkan lokasi live, menampilkan profil lengkap beserta kontak WhatsApp, mengumpulkan badge "Verified by Warga" dari vote pelanggan, serta mengelola profil langsung di peta (edit info, atur privasi nomor, unggah galeri menu).
 
 ## How It Works (Under the Hood)
 
@@ -51,12 +51,13 @@ To get the app up and running, you'll need to:
 
 ## Gerobak Online Workflow
 
-1. **Registrasi:** Akses `register.html`, isi data toko beserta foto gerobak/jualan (maks. 1MB), lalu setujui syarat untuk mulai siaran.
+1. **Registrasi:** Akses `register.html`, isi data toko beserta foto gerobak/jualan (maks. 1MB), dan (opsional) unggah hingga tiga foto menu sebelum menyetujui syarat siaran.
 2. **Verifikasi WhatsApp:** Sistem mengirim kode 6 digit ke nomor WhatsApp yang didaftarkan (via Twilio jika kredensial tersedia). Untuk lingkungan pengembangan tanpa Twilio, kode juga dikembalikan di response API.
-3. **Masuk & Live:** Login melalui `login.html`, lalu aktifkan Gerobak Online dari panel di peta ketika siap siaran.
-4. **Diverifikasi Warga:** Pelanggan yang puas dapat memberikan vote melalui pop-up lapak untuk menghadiahkan badge Verified by Warga.
+3. **Masuk & Live:** Login melalui `login.html`, lalu aktifkan Gerobak Online dari panel di peta ketika siap siaran dan pantau hitungan gerobak live secara real-time.
+4. **Kelola Profil:** Update nama, brand, deskripsi, foto gerobak, galeri menu, serta nyalakan/matikan visibilitas nomor WhatsApp langsung dari peta.
+5. **Diverifikasi Warga:** Pelanggan yang puas dapat memberikan vote melalui pop-up lapak untuk menghadiahkan badge Verified by Warga.
 
-Gerobak Online yang aktif akan muncul sebagai marker khusus dengan profil lengkap serta tautan WhatsApp yang dapat dihubungi langsung oleh warga.
+Gerobak Online yang aktif akan muncul sebagai marker khusus dengan profil lengkap, galeri menu opsional, serta tautan WhatsApp (apabila diaktifkan) yang dapat dihubungi langsung oleh warga.
 
 ## Contributing
 
@@ -161,5 +162,14 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Gerobak Online Launch**: Mobile cart vendors can now broadcast their real-time location, allowing residents to discover nearby sellers and their products instantly.
 - **Warga Terdaftar (Registered Resident) System**: Residents can register to help legitimize "Gerobak Online" vendors by awarding a "Verified by Warga" badge, building a trusted community marketplace.
 - **Guaranteed Freshness**: The service worker is updated to ensure all users receive the latest app features and assets immediately.
+
+---
+
+## What's New in v2.1.0
+
+- **Gerobak Online Profile Editor**: Penjual dapat memperbarui nama, brand, deskripsi, foto utama, serta menyalakan/mematikan visibilitas nomor WhatsApp langsung dari peta; perubahan langsung memutakhirkan marker live.
+- **Galeri Foto Menu**: Form pendaftaran dan editor profil kini mendukung hingga tiga foto menu (maks. 4MB per foto) dan menampilkannya sebagai galeri yang bisa dibuka/tutup oleh warga di pop-up marker.
+- **Statistik Gerobak Live**: Panel statistik menampilkan jumlah Gerobak Online yang sedang live dengan animasi pembaruan, lengkap dengan catatan ketika nomor WhatsApp disembunyikan.
+- **Backend Siap Upload Besar**: Payload JSON diperbesar hingga 20MB dan endpoint baru `PUT /sellers/me` menegakkan validasi foto/menu sekaligus merapikan respons sanitasi untuk privasi penjual.
 
 

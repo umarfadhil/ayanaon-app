@@ -23,6 +23,7 @@
                 <div id="metrics-container">
                     <div id="unique-ips-count"></div>
                     <div id="active-pins-count"></div>
+                    <div id="live-sellers-count"></div>
                 </div>
             </section>
             <section class="action-menu-section">
@@ -68,10 +69,12 @@
                             <div id="live-seller-brand" class="live-seller-brand hidden"></div>
                             <div id="live-seller-community-badge" class="live-seller-community-badge hidden">Verified by Warga</div>
                             <a id="live-seller-phone" class="live-seller-phone hidden" href="#"></a>
+                            <div id="live-seller-phone-note" class="live-seller-phone-note hidden"></div>
                         </div>
                     </div>
                     <button id="live-seller-toggle-btn" type="button" class="live-seller-primary-btn" disabled>Mulai</button>
                     <div class="live-seller-links live-seller-links-authenticated">
+                        <button id="live-seller-edit-profile-btn" type="button" class="menu-pill-btn live-seller-menu-link">Edit Profil Gerobak</button>
                         <a href="verify.html" class="menu-pill-btn live-seller-menu-link">Panduan Badge Warga</a>
                     </div>
                 </div>
@@ -161,6 +164,62 @@
             <input type="text" id="link" placeholder="Link">
             <button type="submit">Bagikan</button>
         </form>
+    </div>
+    <div id="live-seller-edit-modal" class="modal-overlay hidden">
+        <div class="modal-content live-seller-edit-modal">
+            <button id="live-seller-edit-close" type="button" class="close-btn" aria-label="Tutup">&times;</button>
+            <h2>Edit Profil Gerobak Online</h2>
+            <form id="live-seller-edit-form" class="live-seller-edit-form">
+                <div id="live-seller-edit-message" class="live-seller-edit-message"></div>
+                <div class="live-seller-edit-field">
+                    <label for="live-seller-edit-name">Nama Gerobak</label>
+                    <input type="text" id="live-seller-edit-name" name="nama" autocomplete="organization" required maxlength="80">
+                </div>
+                <div class="live-seller-edit-field">
+                    <label for="live-seller-edit-brand">Brand / Menu Utama</label>
+                    <input type="text" id="live-seller-edit-brand" name="merk" autocomplete="organization-title" required maxlength="80">
+                </div>
+                <div class="live-seller-edit-field">
+                    <label for="live-seller-edit-description">Deskripsi</label>
+                    <textarea id="live-seller-edit-description" name="deskripsi" rows="4" required maxlength="500" placeholder="Ceritakan menu favorit, promo, atau lokasi mangkal kamu."></textarea>
+                </div>
+                <div class="live-seller-edit-field">
+                    <label for="live-seller-edit-phone">Nomor WhatsApp</label>
+                    <input type="tel" id="live-seller-edit-phone" name="phoneNumber" autocomplete="tel" required placeholder="+6281234567890">
+                </div>
+                <div class="live-seller-edit-field live-seller-edit-field--toggle">
+                    <label class="live-seller-edit-toggle">
+                        <input type="checkbox" id="live-seller-edit-show-phone">
+                        <span>Tampilkan nomor WhatsApp ke warga</span>
+                    </label>
+                    <p class="live-seller-edit-toggle-hint">Saat dimatikan, warga tidak dapat melihat nomor atau tombol WhatsApp kamu.</p>
+                </div>
+                <div class="live-seller-edit-field">
+                    <label for="live-seller-edit-photo">Foto Gerobak</label>
+                    <div class="live-seller-edit-photo-field">
+                        <div class="live-seller-edit-photo-preview" id="live-seller-edit-photo-preview-container">
+                            <img id="live-seller-edit-photo-preview" alt="Preview foto Gerobak" />
+                            <div id="live-seller-edit-photo-placeholder">Belum ada foto</div>
+                        </div>
+                        <div class="live-seller-edit-photo-controls">
+                            <input type="file" id="live-seller-edit-photo" accept="image/*">
+                            <button type="button" id="live-seller-edit-photo-reset" class="live-seller-secondary-btn">Gunakan Foto Saat Ini</button>
+                        </div>
+                        <p class="live-seller-edit-photo-hint">Format JPG atau PNG, ukuran maksimal 1MB.</p>
+                    </div>
+                </div>
+                <div class="live-seller-edit-field">
+                    <label for="live-seller-edit-menu-photos">Foto Menu</label>
+                    <div id="live-seller-edit-menu-preview" class="live-seller-edit-menu-grid" aria-live="polite"></div>
+                    <div class="live-seller-edit-menu-controls">
+                        <input type="file" id="live-seller-edit-menu-photos" accept="image/*" multiple>
+                        <button type="button" id="live-seller-edit-menu-clear" class="live-seller-secondary-btn">Hapus Semua Foto Menu</button>
+                    </div>
+                    <p class="live-seller-edit-photo-hint">Unggah hingga 3 foto menu, maksimal 4MB per foto.</p>
+                </div>
+                <button type="submit" id="live-seller-edit-submit" class="live-seller-primary-btn">Simpan Perubahan</button>
+            </form>
+        </div>
     </div>
     <div id="welcome-modal" class="modal-overlay hidden">
         <div class="modal-content">

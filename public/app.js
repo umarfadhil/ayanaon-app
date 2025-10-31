@@ -1,4 +1,4 @@
-﻿const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
+const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
 
 let map;
 let temporaryMarker;
@@ -84,7 +84,12 @@ let LiveSellerMarkerCtor = null;
 let isFetchingLiveSellers = false;
 let pendingLiveSellerRefresh = false;
 let activeLiveSellerInfoWindow = null;
-
+let liveSellerEditModalInitialized = false;
+let liveSellerEditMenuState = { existing: [], added: [] };
+let liveSellerEditMenuSequence = 0;
+let liveSellerEditSelectedPhotoDataUrl = null;
+let liveSellerEditSubmitting = false;
+let lastKnownLiveSellerCount = null;
 let actionMenu;
 let actionMenuToggleButton;
 let actionMenuContent;
@@ -112,6 +117,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const LIVE_SELLER_REFRESH_INTERVAL_MS = 30000;
 const LIVE_SELLER_HEARTBEAT_MS = 15000;
+const MAX_LIVE_SELLER_PHOTO_BYTES = 1024 * 1024;
+const MAX_MENU_PHOTO_COUNT = 3;
+const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
 
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
@@ -336,6 +344,18 @@ function animateMetricChange(element) {
     setTimeout(() => element.classList.remove('metric-updated'), 600);
 }
 
+function updateLiveSellersCountDisplay(count, { enableAnimation = false } = {}) {
+    const previousCount = lastKnownLiveSellerCount;
+    lastKnownLiveSellerCount = count;
+    if (!liveSellersCountElement) {
+        return;
+    }
+    liveSellersCountElement.textContent = `Gerobak Online : ${count} Live`;
+    if (enableAnimation && previousCount !== null && count !== previousCount) {
+        animateMetricChange(liveSellersCountElement);
+    }
+}
+
 function initializeLiveSellerControls() {
     if (typeof window.SellerSession === 'undefined' || typeof SellerSession.subscribe !== 'function') {
         DEBUG_LOGGER.log('SellerSession API unavailable; skipping Gerobak Online controls');
@@ -398,6 +418,13 @@ function updateLiveSellerUI(state) {
 
     if (liveSellerAuthLinks) {
         liveSellerAuthLinks.classList.toggle('hidden', isLoggedIn);
+    }
+
+    if (liveSellerEditProfileButton) {
+        liveSellerEditProfileButton.disabled = !isLoggedIn;
+    }
+    if (!isLoggedIn) {
+        closeLiveSellerEditModal();
     }
 
     configureLiveSellerLinks(isLoggedIn);
@@ -743,7 +770,13 @@ function updateLiveSellerProfile(seller, isLoggedIn) {
         if (liveSellerPhoneLink) {
             liveSellerPhoneLink.classList.add('hidden');
             liveSellerPhoneLink.removeAttribute('href');
+            liveSellerPhoneLink.removeAttribute('target');
+            liveSellerPhoneLink.removeAttribute('rel');
             liveSellerPhoneLink.textContent = '';
+        }
+        if (liveSellerPhoneNote) {
+            liveSellerPhoneNote.classList.add('hidden');
+            liveSellerPhoneNote.textContent = '';
         }
         if (liveSellerCommunityBadge) {
             liveSellerCommunityBadge.classList.add('hidden');
@@ -778,17 +811,31 @@ function updateLiveSellerProfile(seller, isLoggedIn) {
         }
     }
 
+    const canShowPhone = Boolean(seller.showPhone);
+    const phoneNumberToUse = seller.phoneNumber || '';
     if (liveSellerPhoneLink) {
-        if (seller.phoneNumber) {
-            const normalizedPhone = seller.phoneNumber.replace(/\s+/g, '');
-            const phoneTarget = seller.phoneNumber.startsWith('http') ? seller.phoneNumber : `tel:${normalizedPhone}`;
-            liveSellerPhoneLink.href = phoneTarget;
-            liveSellerPhoneLink.textContent = seller.phoneNumber;
+        if (phoneNumberToUse && canShowPhone) {
+            const contactHref = buildSellerContactHref(phoneNumberToUse);
+            liveSellerPhoneLink.href = contactHref;
+            liveSellerPhoneLink.target = '_blank';
+            liveSellerPhoneLink.rel = 'noopener noreferrer';
+            liveSellerPhoneLink.textContent = phoneNumberToUse;
             liveSellerPhoneLink.classList.remove('hidden');
         } else {
             liveSellerPhoneLink.classList.add('hidden');
             liveSellerPhoneLink.removeAttribute('href');
+            liveSellerPhoneLink.removeAttribute('target');
+            liveSellerPhoneLink.removeAttribute('rel');
             liveSellerPhoneLink.textContent = '';
+        }
+    }
+    if (liveSellerPhoneNote) {
+        if (!canShowPhone) {
+            liveSellerPhoneNote.textContent = 'Nomor WhatsApp disembunyikan untuk warga.';
+            liveSellerPhoneNote.classList.remove('hidden');
+        } else {
+            liveSellerPhoneNote.textContent = '';
+            liveSellerPhoneNote.classList.add('hidden');
         }
     }
 
@@ -851,6 +898,9 @@ function buildLiveSellerPopupNode(seller, entry) {
 
     body.appendChild(nameRow);
 
+    const sellerId = seller?.sellerId || seller?.id;
+    const isOwner = Boolean(sellerSessionState?.seller && sellerId && sellerSessionState.seller.id === sellerId);
+
     if (seller?.merk) {
         const brand = document.createElement('div');
         brand.className = 'live-seller-popup-brand';
@@ -874,8 +924,38 @@ function buildLiveSellerPopupNode(seller, entry) {
             body.appendChild(sinceElement);
         }
     }
+    if (Array.isArray(seller?.menuPhotos) && seller.menuPhotos.length) {
+        const photos = seller.menuPhotos.slice(0, MAX_MENU_PHOTO_COUNT).filter(photo => photo && photo.data);
+        if (photos.length) {
+            const toggleButton = document.createElement('button');
+            toggleButton.type = 'button';
+            toggleButton.className = 'live-seller-menu-toggle';
+            toggleButton.textContent = 'Lihat Menu';
 
-    if (seller?.phoneNumber) {
+            const gallery = document.createElement('div');
+            gallery.className = 'live-seller-popup-menu hidden';
+
+            photos.forEach((photo, index) => {
+                const img = document.createElement('img');
+                const contentType = photo.contentType || 'image/jpeg';
+                img.src = `data:${contentType};base64,${photo.data}`;
+                img.alt = `${seller?.nama || seller?.username || 'Gerobak Online'} menu ${index + 1}`;
+                gallery.appendChild(img);
+            });
+
+            toggleButton.addEventListener('click', () => {
+                const isHidden = gallery.classList.toggle('hidden');
+                toggleButton.textContent = isHidden ? 'Lihat Menu' : 'Sembunyikan Menu';
+            });
+
+            body.appendChild(toggleButton);
+            body.appendChild(gallery);
+        }
+    }
+
+
+    const canShowContact = Boolean(seller?.showPhone) && Boolean(seller?.phoneNumber);
+    if (canShowContact) {
         const phoneText = document.createElement('div');
         phoneText.className = 'live-seller-popup-phone';
         phoneText.textContent = seller.phoneNumber;
@@ -889,9 +969,15 @@ function buildLiveSellerPopupNode(seller, entry) {
         contactLink.rel = 'noopener noreferrer';
         body.appendChild(contactLink);
     }
+    if (!seller?.showPhone) {
+        const hiddenNote = document.createElement('div');
+        hiddenNote.className = 'live-seller-popup-note';
+        hiddenNote.textContent = isOwner ? '' : '';
+        if (hiddenNote.textContent) {
+            body.appendChild(hiddenNote);
+        }
+    }
 
-    const sellerId = seller?.sellerId || seller?.id;
-    const isOwner = Boolean(sellerSessionState?.seller && sellerId && sellerSessionState.seller.id === sellerId);
     if (sellerId) {
         const verificationSection = document.createElement('div');
         verificationSection.className = 'live-seller-verification';
@@ -928,6 +1014,28 @@ function buildLiveSellerPopupNode(seller, entry) {
         }
         verificationSection.appendChild(verifyButton);
         body.appendChild(verificationSection);
+    }
+
+    if (isOwner) {
+        const actionRow = document.createElement('div');
+        actionRow.className = 'live-seller-popup-actions';
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'live-seller-edit-btn';
+        editButton.textContent = 'Edit Profil Gerobak';
+        editButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (entry && entry.infoWindow && typeof entry.infoWindow.close === 'function') {
+                entry.infoWindow.close();
+                if (activeLiveSellerInfoWindow === entry.infoWindow) {
+                    activeLiveSellerInfoWindow = null;
+                }
+            }
+            openLiveSellerEditModal(seller, { entry });
+        });
+        actionRow.appendChild(editButton);
+        body.appendChild(actionRow);
     }
 
     return container;
@@ -1025,9 +1133,7 @@ function createLiveSellerMarkerEntry(seller) {
         return null;
     }
 
-    const markerElement = document.createElement('div');
-    markerElement.className = 'live-seller-marker';
-    markerElement.textContent = '🛒';
+    const markerElement = createLiveSellerMarkerElement(seller);
 
     const marker = new LiveSellerMarkerCtor({
         map,
@@ -1042,7 +1148,10 @@ function createLiveSellerMarkerEntry(seller) {
         marker,
         infoWindow,
         seller,
-        listener: null
+        element: markerElement,
+        listener: null,
+        searchText: buildLiveSellerSearchBlob(seller),
+        isVisible: true
     };
 
     setLiveSellerInfoWindowContent(entry, seller);
@@ -1070,6 +1179,12 @@ function updateLiveSellerMarker(entry, seller) {
         return;
     }
     entry.seller = seller;
+    entry.searchText = buildLiveSellerSearchBlob(seller);
+    const markerElement = entry.element || (entry.marker ? entry.marker.content : null);
+    if (markerElement) {
+        updateLiveSellerMarkerElement(markerElement, seller);
+        entry.element = markerElement;
+    }
     const position = getLiveSellerPosition(seller);
     if (position && entry.marker) {
         entry.marker.position = position;
@@ -1094,12 +1209,16 @@ function removeLiveSellerMarker(entry) {
     if (entry.marker) {
         entry.marker.map = null;
     }
+    entry.isVisible = false;
+    entry.searchText = '';
+    entry.element = null;
 }
 
 function updateLiveSellerMarkers(sellers) {
     if (!Array.isArray(sellers) || !map || !LiveSellerMarkerCtor) {
         liveSellerMarkers.forEach(removeLiveSellerMarker);
         liveSellerMarkers = [];
+        updateLiveSellersCountDisplay(0, { enableAnimation: lastKnownLiveSellerCount !== null });
         return;
     }
 
@@ -1139,6 +1258,10 @@ function updateLiveSellerMarkers(sellers) {
     });
 
     liveSellerMarkers = nextEntries;
+    updateLiveSellersCountDisplay(nextEntries.length, { enableAnimation: lastKnownLiveSellerCount !== null });
+    if (typeof window.applyFilters === 'function') {
+        window.applyFilters();
+    }
 }
 
 async function fetchLiveSellers() {
@@ -1316,11 +1439,18 @@ async function stopLiveSellerBroadcast(options = {}) {
         return;
     }
 
+    const wasActive = isLiveSellerActive;
+
     liveSellerRequestInFlight = true;
+    if (wasActive) {
+        clearLiveSellerHeartbeat();
+    }
     if (liveSellerToggleButton) {
         liveSellerToggleButton.disabled = true;
         liveSellerToggleButton.textContent = 'Mematikan...';
     }
+
+    let stopSucceeded = false;
 
     try {
         const response = await fetch('/api/live-sellers/status', {
@@ -1332,25 +1462,48 @@ async function stopLiveSellerBroadcast(options = {}) {
         if (!response.ok) {
             throw new Error(payload.message || 'Gagal mematikan Gerobak Online.');
         }
+        stopSucceeded = true;
+        isLiveSellerActive = false;
+        liveSellerHeartbeatFailureCount = 0;
+        lastLiveSellerLocation = null;
+        if (typeof SellerSession !== 'undefined' && typeof SellerSession.updateSeller === 'function') {
+            const offlineStatus = {
+                isLive: false,
+                location: null,
+                since: null,
+                lastPingAt: new Date().toISOString()
+            };
+            try {
+                SellerSession.updateSeller({ liveStatus: offlineStatus });
+            } catch (sessionError) {
+                DEBUG_LOGGER.log('Failed to update local seller session after stopping live', sessionError);
+            }
+        }
     } catch (error) {
         if (!silent) {
             alert(error.message || 'Tidak dapat mematikan Gerobak Online.');
         }
         DEBUG_LOGGER.log('Failed to deactivate live seller', error);
+        if (wasActive) {
+            scheduleLiveSellerHeartbeat();
+        }
     } finally {
-        isLiveSellerActive = false;
-        clearLiveSellerHeartbeat();
-        liveSellerHeartbeatFailureCount = 0;
-        setLiveSellerStatusIndicator(false);
+        if (!isLiveSellerActive) {
+            clearLiveSellerHeartbeat();
+            liveSellerHeartbeatFailureCount = 0;
+        }
+        setLiveSellerStatusIndicator(isLiveSellerActive);
         liveSellerRequestInFlight = false;
         if (liveSellerToggleButton) {
             liveSellerToggleButton.disabled = false;
-            liveSellerToggleButton.textContent = 'Mulai';
+            liveSellerToggleButton.textContent = isLiveSellerActive ? 'Selesai Live' : 'Mulai';
         }
-        if (typeof SellerSession !== 'undefined' && typeof SellerSession.refreshProfile === 'function') {
-            SellerSession.refreshProfile().catch(() => undefined);
+        if (stopSucceeded) {
+            if (typeof SellerSession !== 'undefined' && typeof SellerSession.refreshProfile === 'function') {
+                SellerSession.refreshProfile().catch(() => undefined);
+            }
+            fetchLiveSellers().catch(() => undefined);
         }
-        fetchLiveSellers().catch(() => undefined);
     }
 }
 
@@ -1392,11 +1545,22 @@ async function sendLiveSellerHeartbeat() {
             })
         });
         if (!response.ok) {
+            let payload = null;
+            try {
+                payload = await response.json();
+            } catch (error) {
+                payload = null;
+            }
             if (response.status === 401) {
                 await handleSellerLogout();
                 return;
             }
-            throw new Error('Heartbeat gagal.');
+            if (response.status === 400 && payload?.message === 'Gerobak Online belum diaktifkan.') {
+                liveSellerHeartbeatFailureCount = 0;
+                clearLiveSellerHeartbeat();
+                return;
+            }
+            throw new Error(payload?.message || 'Heartbeat gagal.');
         }
         liveSellerHeartbeatFailureCount = 0;
     } catch (error) {
@@ -1543,6 +1707,562 @@ function buildSearchableBlob(pin) {
         .filter(Boolean)
         .map(normalizeSearchText)
         .join(' ');
+}
+
+function buildLiveSellerSearchBlob(seller = {}) {
+    return [
+        seller.nama,
+        seller.username,
+        seller.merk,
+        seller.deskripsi
+    ]
+        .filter(Boolean)
+        .map(normalizeSearchText)
+        .join(' ');
+}
+
+function updateLiveSellerMarkerElement(element, seller = {}) {
+    if (!element) {
+        return;
+    }
+    element.innerHTML = '';
+    const hasPhoto = seller?.photo && seller.photo.data;
+    if (hasPhoto) {
+        const photoElement = document.createElement('img');
+        const contentType = seller.photo.contentType || 'image/jpeg';
+        photoElement.className = 'live-seller-marker__photo';
+        photoElement.src = `data:${contentType};base64,${seller.photo.data}`;
+        photoElement.alt = `Foto ${seller.nama || seller.username || 'Gerobak Online'}`;
+        element.appendChild(photoElement);
+    } else {
+        const fallbackElement = document.createElement('div');
+        fallbackElement.className = 'live-seller-marker__fallback';
+        const baseNameValue = seller?.nama || seller?.username || 'Gerobak Online';
+        const baseName = String(baseNameValue).trim();
+        let fallbackInitial = baseName.charAt(0);
+        if (fallbackInitial) {
+            fallbackInitial = fallbackInitial.toUpperCase();
+        } else {
+            fallbackInitial = 'G';
+        }
+        fallbackElement.textContent = fallbackInitial;
+        fallbackElement.setAttribute('aria-hidden', 'true');
+        element.appendChild(fallbackElement);
+    }
+}
+
+function createLiveSellerMarkerElement(seller = {}) {
+    const element = document.createElement('div');
+    element.className = 'live-seller-marker';
+    updateLiveSellerMarkerElement(element, seller);
+    return element;
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        if (!file) {
+            reject(new Error('File tidak ditemukan.'));
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Tidak dapat membaca file.'));
+        reader.readAsDataURL(file);
+    });
+}
+
+function setLiveSellerEditMessage(type, text) {
+    if (!liveSellerEditMessageElement) {
+        return;
+    }
+    const message = text || '';
+    liveSellerEditMessageElement.textContent = message;
+    liveSellerEditMessageElement.classList.remove('success', 'error');
+    if (!message) {
+        liveSellerEditMessageElement.style.display = 'none';
+        return;
+    }
+    if (type === 'success' || type === 'error') {
+        liveSellerEditMessageElement.classList.add(type);
+    }
+    liveSellerEditMessageElement.style.display = 'block';
+}
+
+function setLiveSellerEditPhotoPreview(dataUrl, altText) {
+    if (!liveSellerEditPhotoPreview || !liveSellerEditPhotoPlaceholder) {
+        return;
+    }
+    if (dataUrl) {
+        liveSellerEditPhotoPreview.src = dataUrl;
+        liveSellerEditPhotoPreview.alt = altText || 'Foto Gerobak';
+        liveSellerEditPhotoPreview.style.display = 'block';
+        liveSellerEditPhotoPlaceholder.style.display = 'none';
+    } else {
+        liveSellerEditPhotoPreview.src = '';
+        liveSellerEditPhotoPreview.alt = '';
+        liveSellerEditPhotoPreview.style.display = 'none';
+        liveSellerEditPhotoPlaceholder.style.display = 'flex';
+    }
+}
+
+function resetLiveSellerMenuState() {
+    liveSellerEditMenuState = { existing: [], added: [] };
+    liveSellerEditMenuSequence = 0;
+    if (liveSellerEditMenuInput) {
+        liveSellerEditMenuInput.value = '';
+    }
+    renderLiveSellerMenuPreview();
+}
+
+function removeLiveSellerMenuPhoto(source, id) {
+    if (source === 'existing') {
+        liveSellerEditMenuState.existing = liveSellerEditMenuState.existing.filter(photo => photo.id !== id);
+    } else {
+        liveSellerEditMenuState.added = liveSellerEditMenuState.added.filter(photo => photo.id !== id);
+    }
+    renderLiveSellerMenuPreview();
+}
+
+function createMenuPreviewElement({ source, photo }) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'live-seller-edit-menu-item';
+    const img = document.createElement('img');
+    if (source === 'existing') {
+        img.src = `data:${photo.contentType || 'image/jpeg'};base64,${photo.data}`;
+    } else {
+        img.src = photo.dataUrl;
+    }
+    img.alt = 'Foto menu Gerobak';
+    wrapper.appendChild(img);
+
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'live-seller-edit-menu-remove';
+    removeButton.setAttribute('aria-label', 'Hapus foto menu');
+    removeButton.textContent = 'X';
+    removeButton.addEventListener('click', () => removeLiveSellerMenuPhoto(source, photo.id));
+    wrapper.appendChild(removeButton);
+
+    return wrapper;
+}
+
+function renderLiveSellerMenuPreview() {
+    if (!liveSellerEditMenuPreview) {
+        return;
+    }
+    liveSellerEditMenuPreview.innerHTML = '';
+    const combined = [
+        ...liveSellerEditMenuState.existing.map(photo => ({ source: 'existing', photo })),
+        ...liveSellerEditMenuState.added.map(photo => ({ source: 'added', photo }))
+    ];
+    if (!combined.length) {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'live-seller-edit-menu-empty';
+        emptyState.textContent = 'Belum ada foto menu.';
+        liveSellerEditMenuPreview.appendChild(emptyState);
+        if (liveSellerEditMenuClearButton) {
+            liveSellerEditMenuClearButton.disabled = true;
+        }
+        return;
+    }
+    if (liveSellerEditMenuClearButton) {
+        liveSellerEditMenuClearButton.disabled = false;
+    }
+    combined.forEach(item => {
+        liveSellerEditMenuPreview.appendChild(createMenuPreviewElement(item));
+    });
+}
+
+function getLiveSellerMenuPhotosForSubmit() {
+    const existing = liveSellerEditMenuState.existing.map(photo => {
+        const type = photo.contentType || 'image/jpeg';
+        return `data:${type};base64,${photo.data}`;
+    });
+    const added = liveSellerEditMenuState.added.map(photo => photo.dataUrl);
+    return existing.concat(added).slice(0, MAX_MENU_PHOTO_COUNT);
+}
+
+function syncLiveSellerMarkerAfterProfileUpdate(updatedSeller) {
+    if (!updatedSeller) {
+        return null;
+    }
+    const sellerId = updatedSeller?.sellerId || updatedSeller?.id || updatedSeller?.username;
+    if (!sellerId) {
+        return null;
+    }
+    const entry = liveSellerMarkers.find(item => {
+        if (!item) {
+            return false;
+        }
+        return item.sellerId === sellerId ||
+            item?.seller?.sellerId === sellerId ||
+            item?.seller?.id === sellerId ||
+            item?.seller?.username === sellerId;
+    }) || null;
+    if (entry) {
+        const mergedSeller = { ...updatedSeller };
+        if (!mergedSeller.sellerId && mergedSeller.id) {
+            mergedSeller.sellerId = mergedSeller.id;
+        }
+        updateLiveSellerMarker(entry, mergedSeller);
+        setLiveSellerInfoWindowContent(entry, entry.seller);
+        return entry;
+    }
+    return null;
+}
+
+function openLiveSellerEditModal(seller, context = {}) {
+    if (!liveSellerEditModal || !liveSellerEditForm) {
+        return;
+    }
+    const activeSeller = seller ||
+        sellerSessionState?.seller ||
+        (typeof SellerSession !== 'undefined' && typeof SellerSession.getSeller === 'function'
+            ? SellerSession.getSeller()
+            : null);
+    if (!activeSeller) {
+        return;
+    }
+    const sellerId = activeSeller?.sellerId || activeSeller?.id || activeSeller?.username || null;
+    let contextEntry = context?.entry || null;
+    if (!contextEntry && sellerId) {
+        contextEntry = liveSellerMarkers.find(item => item && (item.sellerId === sellerId ||
+            item?.seller?.sellerId === sellerId ||
+            item?.seller?.id === sellerId ||
+            item?.seller?.username === sellerId)) || null;
+    }
+    liveSellerEditContext = { entry: contextEntry, sellerId };
+    liveSellerEditExistingPhotoDataUrl = activeSeller?.photo && activeSeller.photo.data
+        ? `data:${activeSeller.photo.contentType || 'image/jpeg'};base64,${activeSeller.photo.data}`
+        : '';
+    liveSellerEditSelectedPhotoDataUrl = null;
+    liveSellerEditSubmitting = false;
+    liveSellerEditMenuSequence = 0;
+    liveSellerEditMenuState = {
+        existing: Array.isArray(activeSeller?.menuPhotos)
+            ? activeSeller.menuPhotos.slice(0, MAX_MENU_PHOTO_COUNT).map((photo) => ({
+                id: `existing-${liveSellerEditMenuSequence++}`,
+                contentType: photo.contentType || 'image/jpeg',
+                data: photo.data || '',
+                size: photo.size || 0
+            }))
+            : [],
+        added: []
+    };
+    if (liveSellerEditForm) {
+        liveSellerEditForm.reset();
+    }
+    if (liveSellerEditNameInput) {
+        liveSellerEditNameInput.value = activeSeller?.nama || '';
+    }
+    if (liveSellerEditBrandInput) {
+        liveSellerEditBrandInput.value = activeSeller?.merk || '';
+    }
+    if (liveSellerEditDescriptionInput) {
+        liveSellerEditDescriptionInput.value = activeSeller?.deskripsi || '';
+    }
+    if (liveSellerEditPhoneInput) {
+        liveSellerEditPhoneInput.value = activeSeller?.phoneNumber || '';
+    }
+    if (liveSellerEditShowPhoneInput) {
+        liveSellerEditShowPhoneInput.checked = Boolean(activeSeller?.showPhone);
+    }
+    if (liveSellerEditPhotoInput) {
+        liveSellerEditPhotoInput.value = '';
+    }
+    if (liveSellerEditMenuInput) {
+        liveSellerEditMenuInput.value = '';
+    }
+    setLiveSellerEditMessage(null, '');
+    setLiveSellerEditPhotoPreview(
+        liveSellerEditExistingPhotoDataUrl,
+        activeSeller?.nama || activeSeller?.username || 'Foto Gerobak'
+    );
+    renderLiveSellerMenuPreview();
+    if (liveSellerEditSubmitButton) {
+        liveSellerEditSubmitButton.disabled = false;
+        liveSellerEditSubmitButton.textContent = liveSellerEditSubmitDefaultText || liveSellerEditSubmitButton.textContent;
+    }
+    liveSellerEditModal.classList.remove('hidden');
+    setTimeout(() => {
+        if (liveSellerEditNameInput && typeof liveSellerEditNameInput.focus === 'function') {
+            liveSellerEditNameInput.focus();
+        }
+    }, 50);
+}
+
+function closeLiveSellerEditModal() {
+    if (!liveSellerEditModal) {
+        return;
+    }
+    liveSellerEditModal.classList.add('hidden');
+    liveSellerEditContext = null;
+    liveSellerEditSelectedPhotoDataUrl = null;
+    liveSellerEditExistingPhotoDataUrl = null;
+    liveSellerEditSubmitting = false;
+    if (liveSellerEditSubmitButton) {
+        liveSellerEditSubmitButton.disabled = false;
+        liveSellerEditSubmitButton.textContent = liveSellerEditSubmitDefaultText || liveSellerEditSubmitButton.textContent;
+    }
+    if (liveSellerEditShowPhoneInput) {
+        liveSellerEditShowPhoneInput.checked = false;
+    }
+    if (liveSellerEditForm) {
+        liveSellerEditForm.reset();
+    }
+    setLiveSellerEditMessage(null, '');
+    setLiveSellerEditPhotoPreview('', '');
+    resetLiveSellerMenuState();
+}
+
+async function handleLiveSellerEditPhotoChange(event) {
+    const input = event?.target;
+    if (!input || !input.files) {
+        return;
+    }
+    const file = input.files[0];
+    if (!file) {
+        liveSellerEditSelectedPhotoDataUrl = null;
+        setLiveSellerEditPhotoPreview(
+            liveSellerEditExistingPhotoDataUrl,
+            liveSellerEditNameInput?.value || 'Foto Gerobak'
+        );
+        setLiveSellerEditMessage(null, '');
+        return;
+    }
+    if (file.size > MAX_LIVE_SELLER_PHOTO_BYTES) {
+        setLiveSellerEditMessage('error', 'Ukuran foto melebihi 1MB. Silakan kompres terlebih dahulu.');
+        input.value = '';
+        liveSellerEditSelectedPhotoDataUrl = null;
+        setLiveSellerEditPhotoPreview(
+            liveSellerEditExistingPhotoDataUrl,
+            liveSellerEditNameInput?.value || 'Foto Gerobak'
+        );
+        return;
+    }
+    if (file.type && !file.type.toLowerCase().startsWith('image/')) {
+        setLiveSellerEditMessage('error', 'Format foto tidak dikenali. Gunakan JPG atau PNG.');
+        input.value = '';
+        liveSellerEditSelectedPhotoDataUrl = null;
+        setLiveSellerEditPhotoPreview(
+            liveSellerEditExistingPhotoDataUrl,
+            liveSellerEditNameInput?.value || 'Foto Gerobak'
+        );
+        return;
+    }
+    try {
+        const dataUrl = await readFileAsDataUrl(file);
+        liveSellerEditSelectedPhotoDataUrl = dataUrl;
+        setLiveSellerEditPhotoPreview(
+            dataUrl,
+            liveSellerEditNameInput?.value || 'Foto Gerobak'
+        );
+        setLiveSellerEditMessage(null, '');
+    } catch (error) {
+        setLiveSellerEditMessage('error', error.message || 'Tidak dapat memuat foto.');
+        input.value = '';
+        liveSellerEditSelectedPhotoDataUrl = null;
+        setLiveSellerEditPhotoPreview(
+            liveSellerEditExistingPhotoDataUrl,
+            liveSellerEditNameInput?.value || 'Foto Gerobak'
+        );
+    }
+}
+
+async function handleLiveSellerEditSubmit(event) {
+    if (event) {
+        event.preventDefault();
+    }
+    if (liveSellerEditSubmitting) {
+        return;
+    }
+    const nama = liveSellerEditNameInput ? liveSellerEditNameInput.value.trim() : '';
+    const merk = liveSellerEditBrandInput ? liveSellerEditBrandInput.value.trim() : '';
+    const deskripsi = liveSellerEditDescriptionInput ? liveSellerEditDescriptionInput.value.trim() : '';
+    const phoneNumber = liveSellerEditPhoneInput ? liveSellerEditPhoneInput.value.trim() : '';
+    if (!nama || !merk || !deskripsi || !phoneNumber) {
+        setLiveSellerEditMessage('error', 'Semua kolom wajib diisi.');
+        return;
+    }
+    const payload = {
+        nama,
+        merk,
+        deskripsi,
+        phoneNumber
+    };
+    payload.showPhone = Boolean(liveSellerEditShowPhoneInput?.checked);
+    payload.menuPhotos = getLiveSellerMenuPhotosForSubmit();
+    if (liveSellerEditSelectedPhotoDataUrl !== null) {
+        payload.photo = liveSellerEditSelectedPhotoDataUrl;
+    }
+    const token = (typeof SellerSession !== 'undefined' && typeof SellerSession.getToken === 'function')
+        ? SellerSession.getToken()
+        : '';
+    if (!token) {
+        setLiveSellerEditMessage('error', 'Silakan masuk kembali untuk mengedit profil Gerobak.');
+        return;
+    }
+    liveSellerEditSubmitting = true;
+    setLiveSellerEditMessage(null, '');
+    if (liveSellerEditSubmitButton) {
+        liveSellerEditSubmitButton.disabled = true;
+        liveSellerEditSubmitButton.textContent = 'Menyimpan...';
+    }
+    try {
+        const response = await fetch('/api/sellers/me', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(result.message || 'Tidak dapat memperbarui profil Gerobak.');
+        }
+        const updatedSeller = result?.seller || null;
+        if (updatedSeller) {
+            const mergedSeller = { ...updatedSeller };
+            if (!mergedSeller.sellerId && mergedSeller.id) {
+                mergedSeller.sellerId = mergedSeller.id;
+            }
+            if (typeof SellerSession !== 'undefined' && typeof SellerSession.updateSeller === 'function') {
+                SellerSession.updateSeller(mergedSeller);
+            }
+            const matchedEntry = syncLiveSellerMarkerAfterProfileUpdate(mergedSeller);
+            if (liveSellerEditContext) {
+                liveSellerEditContext.entry = matchedEntry || liveSellerEditContext.entry;
+                liveSellerEditContext.sellerId = mergedSeller.sellerId || liveSellerEditContext.sellerId;
+            }
+            liveSellerEditExistingPhotoDataUrl = mergedSeller?.photo && mergedSeller.photo.data
+                ? `data:${mergedSeller.photo.contentType || 'image/jpeg'};base64,${mergedSeller.photo.data}`
+                : '';
+            liveSellerEditSelectedPhotoDataUrl = null;
+            setLiveSellerEditPhotoPreview(
+                liveSellerEditExistingPhotoDataUrl,
+                mergedSeller?.nama || mergedSeller?.username || 'Foto Gerobak'
+            );
+            if (liveSellerEditShowPhoneInput) {
+                liveSellerEditShowPhoneInput.checked = Boolean(mergedSeller.showPhone);
+            }
+            if (Array.isArray(mergedSeller.menuPhotos)) {
+                liveSellerEditMenuSequence = 0;
+                liveSellerEditMenuState = {
+                    existing: mergedSeller.menuPhotos.slice(0, MAX_MENU_PHOTO_COUNT).map((photo) => ({
+                        id: `existing-${liveSellerEditMenuSequence++}`,
+                        contentType: photo.contentType || 'image/jpeg',
+                        data: photo.data || '',
+                        size: photo.size || 0
+                    })),
+                    added: []
+                };
+                renderLiveSellerMenuPreview();
+            } else {
+                resetLiveSellerMenuState();
+            }
+        }
+        setLiveSellerEditMessage('success', result.message || 'Profil Gerobak berhasil diperbarui.');
+        fetchLiveSellers().catch(() => undefined);
+        setTimeout(() => {
+            closeLiveSellerEditModal();
+        }, 900);
+    } catch (error) {
+        setLiveSellerEditMessage('error', error.message || 'Tidak dapat memperbarui profil Gerobak.');
+    } finally {
+        liveSellerEditSubmitting = false;
+        if (liveSellerEditSubmitButton) {
+            liveSellerEditSubmitButton.disabled = false;
+            liveSellerEditSubmitButton.textContent = liveSellerEditSubmitDefaultText || 'Simpan Perubahan';
+        }
+    }
+}
+
+function initializeLiveSellerEditModal() {
+    if (!liveSellerEditModal || liveSellerEditModalInitialized) {
+        return;
+    }
+    liveSellerEditModalInitialized = true;
+    if (liveSellerEditForm) {
+        liveSellerEditForm.addEventListener('submit', (event) => {
+            handleLiveSellerEditSubmit(event).catch(() => undefined);
+        });
+    }
+    if (liveSellerEditPhotoInput) {
+        liveSellerEditPhotoInput.addEventListener('change', (event) => {
+            handleLiveSellerEditPhotoChange(event).catch(() => undefined);
+        });
+    }
+    if (liveSellerEditPhotoResetButton) {
+        liveSellerEditPhotoResetButton.addEventListener('click', () => {
+            if (liveSellerEditPhotoInput) {
+                liveSellerEditPhotoInput.value = '';
+            }
+            liveSellerEditSelectedPhotoDataUrl = null;
+            setLiveSellerEditPhotoPreview(
+                liveSellerEditExistingPhotoDataUrl,
+                liveSellerEditNameInput?.value || 'Foto Gerobak'
+            );
+            setLiveSellerEditMessage(null, '');
+        });
+    }
+    if (liveSellerEditMenuInput) {
+        liveSellerEditMenuInput.addEventListener('change', async (event) => {
+            const files = Array.from(event.target.files || []);
+            if (!files.length) {
+                return;
+            }
+            const currentCount = liveSellerEditMenuState.existing.length + liveSellerEditMenuState.added.length;
+            if (currentCount + files.length > MAX_MENU_PHOTO_COUNT) {
+                setLiveSellerEditMessage('error', `Maksimal ${MAX_MENU_PHOTO_COUNT} foto menu.`);
+                liveSellerEditMenuInput.value = '';
+                return;
+            }
+            const oversized = files.find(file => file.size > MAX_MENU_PHOTO_BYTES);
+            if (oversized) {
+                setLiveSellerEditMessage('error', 'Setiap foto menu maksimal berukuran 4MB.');
+                liveSellerEditMenuInput.value = '';
+                return;
+            }
+            try {
+                const dataUrls = await Promise.all(files.map(readFileAsDataUrl));
+                dataUrls.forEach((dataUrl, index) => {
+                    liveSellerEditMenuState.added.push({
+                        id: `added-${Date.now()}-${liveSellerEditMenuSequence++}`,
+                        dataUrl,
+                        contentType: files[index].type || 'image/jpeg'
+                    });
+                });
+                setLiveSellerEditMessage(null, '');
+                liveSellerEditMenuInput.value = '';
+                renderLiveSellerMenuPreview();
+            } catch (error) {
+                setLiveSellerEditMessage('error', error.message || 'Tidak dapat memuat foto menu.');
+            }
+        });
+    }
+    if (liveSellerEditMenuClearButton) {
+        liveSellerEditMenuClearButton.addEventListener('click', () => {
+            resetLiveSellerMenuState();
+            setLiveSellerEditMessage(null, '');
+        });
+    }
+    if (liveSellerEditSubmitButton) {
+        liveSellerEditSubmitDefaultText = liveSellerEditSubmitButton.textContent || 'Simpan Perubahan';
+    }
+    if (liveSellerEditCloseButton) {
+        liveSellerEditCloseButton.addEventListener('click', () => {
+            closeLiveSellerEditModal();
+        });
+    }
+    liveSellerEditModal.addEventListener('click', (event) => {
+        if (event.target === liveSellerEditModal) {
+            closeLiveSellerEditModal();
+        }
+    });
+    setLiveSellerEditPhotoPreview('', '');
+    setLiveSellerEditMessage(null, '');
+    renderLiveSellerMenuPreview();
 }
 
 function initializeNavigationModal() {
@@ -1838,10 +2558,59 @@ document.addEventListener('DOMContentLoaded', () => {
     liveSellerLoginButton = document.getElementById('live-seller-login-btn');
     liveSellerLogoutButton = document.getElementById('live-seller-logout-btn');
     liveSellerStatusText = document.getElementById('live-seller-status-text');
+    liveSellersCountElement = document.getElementById('live-sellers-count');
+    liveSellerEditProfileButton = document.getElementById('live-seller-edit-profile-btn');
+    liveSellerEditModal = document.getElementById('live-seller-edit-modal');
+    liveSellerEditForm = document.getElementById('live-seller-edit-form');
+    liveSellerEditMessageElement = document.getElementById('live-seller-edit-message');
+    liveSellerEditNameInput = document.getElementById('live-seller-edit-name');
+    liveSellerEditBrandInput = document.getElementById('live-seller-edit-brand');
+    liveSellerEditDescriptionInput = document.getElementById('live-seller-edit-description');
+    liveSellerEditPhoneInput = document.getElementById('live-seller-edit-phone');
+    liveSellerEditShowPhoneInput = document.getElementById('live-seller-edit-show-phone');
+    liveSellerEditPhotoInput = document.getElementById('live-seller-edit-photo');
+    liveSellerEditPhotoPreview = document.getElementById('live-seller-edit-photo-preview');
+    liveSellerEditPhotoPlaceholder = document.getElementById('live-seller-edit-photo-placeholder');
+    liveSellerEditPhotoResetButton = document.getElementById('live-seller-edit-photo-reset');
+    liveSellerEditMenuInput = document.getElementById('live-seller-edit-menu-photos');
+    liveSellerEditMenuPreview = document.getElementById('live-seller-edit-menu-preview');
+    liveSellerEditMenuClearButton = document.getElementById('live-seller-edit-menu-clear');
+    liveSellerEditSubmitButton = document.getElementById('live-seller-edit-submit');
+    liveSellerEditCloseButton = document.getElementById('live-seller-edit-close');
+
+    initializeLiveSellerEditModal();
+    updateLiveSellersCountDisplay(
+        Number.isFinite(lastKnownLiveSellerCount) ? lastKnownLiveSellerCount : 0
+    );
+    if (liveSellerEditProfileButton) {
+        liveSellerEditProfileButton.addEventListener('click', () => {
+            const currentSeller = sellerSessionState?.seller ||
+                (typeof SellerSession !== 'undefined' && typeof SellerSession.getSeller === 'function'
+                    ? SellerSession.getSeller()
+                    : null);
+            if (currentSeller) {
+                openLiveSellerEditModal(currentSeller, {});
+                return;
+            }
+            if (typeof SellerSession !== 'undefined' && typeof SellerSession.refreshProfile === 'function') {
+                SellerSession.refreshProfile()
+                    .then((freshSeller) => {
+                        if (freshSeller) {
+                            openLiveSellerEditModal(freshSeller, {});
+                        }
+                    })
+                    .catch(() => {
+                        alert('Tidak dapat memuat profil Gerobak. Silakan coba lagi.');
+                    });
+            }
+        });
+    }
     liveSellerProfileContainer = document.getElementById('live-seller-profile');
     liveSellerNameLabel = document.getElementById('live-seller-name');
     liveSellerBrandLabel = document.getElementById('live-seller-brand');
     liveSellerPhoneLink = document.getElementById('live-seller-phone');
+    liveSellerPhoneNote = document.getElementById('live-seller-phone-note');
+    liveSellerPhoneNote = document.getElementById('live-seller-phone-note');
     liveSellerPhotoElement = document.getElementById('live-seller-photo');
     liveSellerCommunityBadge = document.getElementById('live-seller-community-badge');
     liveSellerLinksAuthenticated = document.querySelector('.live-seller-links-authenticated');
@@ -2085,6 +2854,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    let lastLiveSellerSearchResults = [];
+
     function filterMarkers() {
         const selectedCategories = Array.from(categoryCheckboxes)
             .filter(checkbox => checkbox.checked)
@@ -2093,6 +2864,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const endDateBoundary = parseDateInput(selectedEndDate, true);
 
         const visibleMarkers = [];
+        const visibleLiveSellerEntries = [];
 
         markers.forEach(marker => {
             const matchesCategory = selectedCategories.includes(marker.category);
@@ -2136,6 +2908,44 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        liveSellerMarkers.forEach(entry => {
+            const seller = entry ? entry.seller : null;
+            let searchableText = entry?.searchText;
+            if (typeof searchableText !== 'string') {
+                searchableText = buildLiveSellerSearchBlob(seller || {});
+                if (entry) {
+                    entry.searchText = searchableText;
+                }
+            }
+            const matchesSearch = currentSearchTokens.length === 0 ||
+                (searchableText && currentSearchTokens.every(token => searchableText.includes(token)));
+
+            if (!entry || !entry.marker) {
+                return;
+            }
+
+            if (matchesSearch) {
+                entry.isVisible = true;
+                visibleLiveSellerEntries.push(entry);
+                if (entry.marker.map !== map) {
+                    entry.marker.map = map;
+                }
+            } else {
+                entry.isVisible = false;
+                if (entry.marker.map) {
+                    entry.marker.map = null;
+                }
+                if (entry.infoWindow && typeof entry.infoWindow.close === 'function') {
+                    entry.infoWindow.close();
+                    if (activeLiveSellerInfoWindow === entry.infoWindow) {
+                        activeLiveSellerInfoWindow = null;
+                    }
+                }
+            }
+        });
+
+        lastLiveSellerSearchResults = visibleLiveSellerEntries;
+
         refreshMarkerCluster(visibleMarkers);
     }
 
@@ -2156,8 +2966,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const visibleMarkers = markers.filter(marker => marker.isVisible);
+        const visibleLiveSellerEntries = lastLiveSellerSearchResults
+            .filter(entry => entry && entry.isVisible && entry.marker);
 
-        if (!visibleMarkers.length) {
+        if (!visibleMarkers.length && !visibleLiveSellerEntries.length) {
             alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
             return;
         }
@@ -2167,21 +2979,56 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         filterDropdown.classList.add('hidden');
 
-        const referencePosition = toLatLngLiteral(userMarker ? userMarker.position : map.getCenter());
-        const nearestMarker = visibleMarkers.reduce((closest, marker) => {
-            const closestDistance = getDistanceSquared(referencePosition, toLatLngLiteral(closest.position));
-            const candidateDistance = getDistanceSquared(referencePosition, toLatLngLiteral(marker.position));
-            return candidateDistance < closestDistance ? marker : closest;
-        }, visibleMarkers[0]);
+        const pinCandidates = visibleMarkers
+            .map(marker => ({
+                type: 'pin',
+                marker,
+                position: toLatLngLiteral(marker.position)
+            }))
+            .filter(candidate => Boolean(candidate.position));
 
-        const targetPosition = toLatLngLiteral(nearestMarker.position);
-        if (targetPosition) {
-            map.panTo(targetPosition);
+        const liveSellerCandidates = visibleLiveSellerEntries
+            .map(entry => ({
+                type: 'liveSeller',
+                entry,
+                position: toLatLngLiteral(entry.marker ? entry.marker.position : null)
+            }))
+            .filter(candidate => Boolean(candidate.position));
+
+        const allCandidates = pinCandidates.concat(liveSellerCandidates);
+        if (!allCandidates.length) {
+            alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
+            return;
+        }
+
+        let referencePosition = toLatLngLiteral(userMarker ? userMarker.position : map.getCenter());
+        if (!referencePosition) {
+            referencePosition = allCandidates[0].position;
+        }
+
+        const nearestCandidate = allCandidates.reduce((closest, candidate) => {
+            const closestDistance = getDistanceSquared(referencePosition, closest.position);
+            const candidateDistance = getDistanceSquared(referencePosition, candidate.position);
+            return candidateDistance < closestDistance ? candidate : closest;
+        }, allCandidates[0]);
+
+        if (nearestCandidate && nearestCandidate.position) {
+            map.panTo(nearestCandidate.position);
             if (typeof map.getZoom === 'function' && typeof map.setZoom === 'function') {
                 const desiredZoom = 15;
                 const currentZoom = map.getZoom();
                 if (!currentZoom || currentZoom < desiredZoom) {
                     map.setZoom(desiredZoom);
+                }
+            }
+
+            if (nearestCandidate.type === 'liveSeller' && nearestCandidate.entry && nearestCandidate.entry.infoWindow) {
+                if (activeLiveSellerInfoWindow && activeLiveSellerInfoWindow !== nearestCandidate.entry.infoWindow) {
+                    activeLiveSellerInfoWindow.close();
+                }
+                if (typeof nearestCandidate.entry.infoWindow.open === 'function') {
+                    nearestCandidate.entry.infoWindow.open({ map, anchor: nearestCandidate.entry.marker });
+                    activeLiveSellerInfoWindow = nearestCandidate.entry.infoWindow;
                 }
             }
         }
