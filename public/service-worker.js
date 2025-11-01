@@ -1,5 +1,5 @@
 // Bump this to force clients to fetch fresh assets after deploys
-const CACHE_NAME = 'ayanaon-static-v8';
+const CACHE_NAME = 'ayanaon-static-v9';
 const PRECACHE_URLS = [
     './',
     './index.html',
@@ -13,6 +13,9 @@ const PRECACHE_URLS = [
     './favicon.svg',
     './manifest.webmanifest'
 ];
+const PRECACHE_PATHS = new Set(
+    PRECACHE_URLS.map((url) => new URL(url, self.location.href).pathname)
+);
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
@@ -38,7 +41,30 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') {
         return;
     }
-    // Stale-while-revalidate: serve cache first, then update cache in background
+
+    // Handle document navigations separately so we always try the network first.
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request).catch(() => caches.match('./'))
+        );
+        return;
+    }
+
+    const requestURL = new URL(event.request.url);
+    const isSameOrigin = requestURL.origin === self.location.origin;
+    const isStaticAsset = isSameOrigin && PRECACHE_PATHS.has(requestURL.pathname);
+
+    if (!isStaticAsset) {
+        if (!isSameOrigin) {
+            return;
+        }
+
+        // Dynamic same-origin GET requests skip the cache to avoid serving stale user data.
+        event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+        return;
+    }
+
+    // Stale-while-revalidate for precached static assets.
     event.respondWith(
         caches.match(event.request).then((cached) => {
             const networkFetch = fetch(event.request)
