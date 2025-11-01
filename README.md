@@ -18,7 +18,7 @@ AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in 
 *   **Pin Management:** Reporters can edit their own pins, ensuring information stays accurate.
 *   **Real-time Updates:** See the number of active pins and unique contributors in real-time.
 *   **Responsive Design:** Enjoy a seamless experience whether you're on your desktop or mobile phone.
-*   **Gerobak Online Mode:** Penjual dapat menyiarkan lokasi live, menampilkan profil lengkap beserta kontak WhatsApp, mengumpulkan badge "Verified by Warga" dari vote pelanggan, serta mengelola profil langsung di peta (edit info, atur privasi nomor, unggah galeri menu).
+*   **Gerobak Online Mode:** Vendors can broadcast a live location, showcase a full profile with optional WhatsApp contact, collect "Verified by Warga" badges from customer votes, and manage their storefront directly on the map (edit details, control phone privacy, upload a menu gallery).
 
 ## How It Works (Under the Hood)
 
@@ -51,13 +51,13 @@ To get the app up and running, you'll need to:
 
 ## Gerobak Online Workflow
 
-1. **Registrasi:** Akses `register.html`, isi data toko beserta foto gerobak/jualan (maks. 1MB), dan (opsional) unggah hingga tiga foto menu sebelum menyetujui syarat siaran.
-2. **Verifikasi WhatsApp:** Sistem mengirim kode 6 digit ke nomor WhatsApp yang didaftarkan (via Twilio jika kredensial tersedia). Untuk lingkungan pengembangan tanpa Twilio, kode juga dikembalikan di response API.
-3. **Masuk & Live:** Login melalui `login.html`, lalu aktifkan Gerobak Online dari panel di peta ketika siap siaran dan pantau hitungan gerobak live secara real-time.
-4. **Kelola Profil:** Update nama, brand, deskripsi, foto gerobak, galeri menu, serta nyalakan/matikan visibilitas nomor WhatsApp langsung dari peta.
-5. **Diverifikasi Warga:** Pelanggan yang puas dapat memberikan vote melalui pop-up lapak untuk menghadiahkan badge Verified by Warga.
+1. **Register:** Visit `register.html`, fill out stall details, upload a main cart photo (max 1 MB), and optionally add up to three menu photos before accepting the broadcast terms.
+2. **Verify WhatsApp:** A 6-digit code is sent to the registered WhatsApp number (via Twilio when credentials are available). In development environments without Twilio, the code also appears in the API response.
+3. **Go Live:** Sign in through `login.html`, enable Gerobak Online from the map panel when you are ready to broadcast, and watch the live cart counter update in real time.
+4. **Manage Profile:** Update the name, brand, description, hero photo, menu gallery, and phone visibility directly from the map interface.
+5. **Earn Community Trust:** Happy customers can vote through the marker popup to award the "Verified by Warga" badge.
 
-Gerobak Online yang aktif akan muncul sebagai marker khusus dengan profil lengkap, galeri menu opsional, serta tautan WhatsApp (apabila diaktifkan) yang dapat dihubungi langsung oleh warga.
+Active Gerobak Online carts appear as dedicated markers with full profiles, optional menu galleries, and a WhatsApp link (when enabled) so residents can reach vendors instantly.
 
 ## Contributing
 
@@ -167,9 +167,16 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 ## What's New in v2.1.0
 
-- **Gerobak Online Profile Editor**: Penjual dapat memperbarui nama, brand, deskripsi, foto utama, serta menyalakan/mematikan visibilitas nomor WhatsApp langsung dari peta; perubahan langsung memutakhirkan marker live.
-- **Galeri Foto Menu**: Form pendaftaran dan editor profil kini mendukung hingga tiga foto menu (maks. 4MB per foto) dan menampilkannya sebagai galeri yang bisa dibuka/tutup oleh warga di pop-up marker.
-- **Statistik Gerobak Live**: Panel statistik menampilkan jumlah Gerobak Online yang sedang live dengan animasi pembaruan, lengkap dengan catatan ketika nomor WhatsApp disembunyikan.
-- **Backend Siap Upload Besar**: Payload JSON diperbesar hingga 20MB dan endpoint baru `PUT /sellers/me` menegakkan validasi foto/menu sekaligus merapikan respons sanitasi untuk privasi penjual.
+- **Gerobak Online Profile Editor**: Vendors can update their name, brand, description, hero photo, and WhatsApp visibility right from the map; live markers refresh instantly with each change.
+- **Menu Photo Gallery**: Registration and profile forms now accept up to three menu photos (max 4 MB each) and display them in an expandable gallery within the marker popup.
+- **Live Cart Statistics**: The stats panel highlights the number of Gerobak Online carts currently live with animated updates, including a reminder when the WhatsApp number is hidden.
+- **Large Upload-Ready Backend**: The JSON payload limit is raised to 20 MB, and the new `PUT /sellers/me` endpoint enforces photo/menu validation while sanitizing responses for seller privacy.
+
+---
+
+## What's New in v2.1.1
+
+- **Reliable Live Toggle**: Initial heartbeats now wait for backend persistence, auto-retry when a session is warming up, and cancel cleanly on logout so going live/offline works the first time.
+- **Cleaner Popups**: Seller descriptions in the live marker popup honor line breaks, improving readability for multi-line bios and menus.
 
 

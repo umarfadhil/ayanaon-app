@@ -40,6 +40,8 @@ let liveSellerMarkers = [];
 let liveSellerRefreshTimer = null;
 let liveSellerWatchId = null;
 let liveSellerHeartbeatTimer = null;
+let liveSellerHeartbeatTimeout = null;
+let liveSellerHeartbeatAbortController = null;
 let lastLiveSellerLocation = null;
 let liveSellerToggleButton;
 let liveSellerLoginButton;
@@ -117,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const LIVE_SELLER_REFRESH_INTERVAL_MS = 30000;
 const LIVE_SELLER_HEARTBEAT_MS = 15000;
+const LIVE_SELLER_HEARTBEAT_INITIAL_DELAY_MS = 1200;
 const MAX_LIVE_SELLER_PHOTO_BYTES = 1024 * 1024;
 const MAX_MENU_PHOTO_COUNT = 3;
 const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
@@ -1535,6 +1538,9 @@ async function sendLiveSellerHeartbeat() {
 
     lastLiveSellerLocation = latestLocation;
 
+    const heartbeatController = new AbortController();
+    liveSellerHeartbeatAbortController = heartbeatController;
+
     try {
         const response = await fetch('/api/live-sellers/heartbeat', {
             method: 'POST',
@@ -1542,7 +1548,8 @@ async function sendLiveSellerHeartbeat() {
             body: JSON.stringify({
                 lat: latestLocation.lat,
                 lng: latestLocation.lng
-            })
+            }),
+            signal: heartbeatController.signal
         });
         if (!response.ok) {
             let payload = null;
@@ -1557,39 +1564,73 @@ async function sendLiveSellerHeartbeat() {
             }
             if (response.status === 400 && payload?.message === 'Gerobak Online belum diaktifkan.') {
                 liveSellerHeartbeatFailureCount = 0;
-                clearLiveSellerHeartbeat();
+                if (isLiveSellerActive) {
+                    scheduleLiveSellerHeartbeat();
+                }
                 return;
             }
             throw new Error(payload?.message || 'Heartbeat gagal.');
         }
         liveSellerHeartbeatFailureCount = 0;
     } catch (error) {
+        if (error?.name === 'AbortError') {
+            return;
+        }
         DEBUG_LOGGER.log('Live seller heartbeat error', error);
         liveSellerHeartbeatFailureCount += 1;
         if (liveSellerHeartbeatFailureCount >= 3) {
             await stopLiveSellerBroadcast({ silent: true });
             alert('Koneksi live terputus. Gerobak Online dimatikan.');
         }
+    } finally {
+        if (liveSellerHeartbeatAbortController === heartbeatController) {
+            liveSellerHeartbeatAbortController = null;
+        }
     }
 }
 
-function scheduleLiveSellerHeartbeat() {
-    clearLiveSellerHeartbeat();
-    if (!isLiveSellerActive) {
-        return;
-    }
-    // Send immediate heartbeat to keep location fresh
-    sendLiveSellerHeartbeat();
-    liveSellerHeartbeatTimer = setInterval(() => {
-        sendLiveSellerHeartbeat();
-    }, LIVE_SELLER_HEARTBEAT_MS);
-}
-
-function clearLiveSellerHeartbeat() {
+function clearLiveSellerHeartbeatTimers() {
     if (liveSellerHeartbeatTimer !== null) {
         clearInterval(liveSellerHeartbeatTimer);
         liveSellerHeartbeatTimer = null;
     }
+    if (liveSellerHeartbeatTimeout !== null) {
+        clearTimeout(liveSellerHeartbeatTimeout);
+        liveSellerHeartbeatTimeout = null;
+    }
+}
+
+function cancelLiveSellerHeartbeatRequest() {
+    if (liveSellerHeartbeatAbortController) {
+        liveSellerHeartbeatAbortController.abort();
+        liveSellerHeartbeatAbortController = null;
+    }
+}
+
+function scheduleLiveSellerHeartbeat(options = {}) {
+    const { immediate = false } = options;
+    clearLiveSellerHeartbeatTimers();
+    if (!isLiveSellerActive) {
+        return;
+    }
+    const startHeartbeatLoop = () => {
+        sendLiveSellerHeartbeat();
+        liveSellerHeartbeatTimer = setInterval(() => {
+            sendLiveSellerHeartbeat();
+        }, LIVE_SELLER_HEARTBEAT_MS);
+    };
+    if (immediate) {
+        startHeartbeatLoop();
+    } else {
+        liveSellerHeartbeatTimeout = setTimeout(() => {
+            startHeartbeatLoop();
+        }, LIVE_SELLER_HEARTBEAT_INITIAL_DELAY_MS);
+    }
+}
+
+function clearLiveSellerHeartbeat() {
+    clearLiveSellerHeartbeatTimers();
+    cancelLiveSellerHeartbeatRequest();
 }
 
 async function handleSellerLogout() {
