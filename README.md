@@ -179,4 +179,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Reliable Live Toggle**: Initial heartbeats now wait for backend persistence, auto-retry when a session is warming up, and cancel cleanly on logout so going live/offline works the first time.
 - **Cleaner Popups**: Seller descriptions in the live marker popup honor line breaks, improving readability for multi-line bios and menus.
 
+---
+
+## What's New in v2.1.2
+
+- **Terms Improvement**: Warga Terdaftar become Warga Ayanaon and Badge become Rekomendasi. 
+- **Incentives**: Gerobak Online can get up to 1 million rupiah by getting recommendations from Warga.
+
 

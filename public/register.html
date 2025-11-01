@@ -11,13 +11,13 @@
     <main class="auth-container">
         <header class="auth-header">
             <h1 class="auth-title">Daftar Gerobak Online</h1>
-            <p class="auth-subtitle">Lengkapi data jualan kamu untuk tampil sebagai Gerobak Online. Warga dapat memberi lencana <em>Verified by Warga</em> setelah mereka bertransaksi denganmu.</p>
+            <p class="auth-subtitle">Lengkapi data jualan kamu untuk tampil sebagai Gerobak Online. Warga dapat memberi rekomendasi <em>Terverifikasi oleh Warga</em> setelah mereka bertransaksi denganmu.</p>
         </header>
         <div id="form-message" class="form-message form-message--hidden" role="status" aria-live="polite"></div>
         <form id="register-form" class="auth-form" novalidate>
             <div class="form-field">
                 <label for="register-username">Username</label>
-                <input type="text" id="register-username" name="username" required minlength="4" autocomplete="username" placeholder="Contoh: pedagangbakso123">
+                <input type="text" id="register-username" name="username" required minlength="4" autocomplete="username" placeholder="Contoh: jaya1945">
             </div>
             <div class="form-field">
                 <label for="register-password">Password</label>
@@ -29,37 +29,37 @@
             </div>
             <div class="form-field">
                 <label for="register-merk">Nama Merk / Jualan</label>
-                <input type="text" id="register-merk" name="merk" required placeholder="Contoh: Bakso Pak Jaya">
+                <input type="text" id="register-merk" name="merk" required placeholder="Contoh: Kopi Jaya">
             </div>
             <div class="form-field">
                 <label for="register-deskripsi">Deskripsi Singkat</label>
-                <textarea id="register-deskripsi" name="deskripsi" required placeholder="Menu, harga spesial, atau lokasi mangkal harian"></textarea>
+                <textarea id="register-deskripsi" name="deskripsi" required placeholder="Kopi Susu: 8rb" ></textarea>
             </div>
             <div class="form-field">
                 <label for="register-phone">Nomor WhatsApp</label>
                 <input type="tel" id="register-phone" name="phone" required placeholder="+6281234567890">
             </div>
             <div class="form-field">
-                <label for="register-photo">Foto Gerobak/Jualan <span style="font-weight:500;color:#64748b;">(maks. 1MB)</span></label>
+                <label for="register-photo">Logo Brand<span style="font-weight:500;color:#64748b;">(Maks. 1MB)</span></label>
                 <input type="file" id="register-photo" name="photo" accept="image/*" required>
             </div>
             <div class="form-field">
-                <label for="register-menu-photos">Foto Menu (opsional)</label>
+                <label for="register-menu-photos">Foto Menu (Opsional)</label>
                 <input type="file" id="register-menu-photos" name="menuPhotos" accept="image/*" multiple>
                 <p class="form-field-hint">Unggah hingga 3 foto, masing-masing maksimal 4MB.</p>
             </div>
             <div class="form-field checkbox-field">
                 <label for="register-consent">
                     <input type="checkbox" id="register-consent" name="consent" required>
-                    <span>Saya bersedia menampilkan informasi jualan saya kepada pengguna AyaNaon? selama mode Gerobak Online aktif.</span>
+                    <span>Saya bersedia menampilkan informasi jualan saya kepada Warga AyaNaon selama mode Gerobak Online aktif.</span>
                 </label>
             </div>
             <button type="submit" class="auth-submit-btn">Daftar Gerobak Online</button>
         </form>
         <footer class="auth-footer">
-            <a href="verify.html">Pelajari tentang verifikasi warga</a>
+            <a href="verify.html">Dapatkan insentif hingga 1 Juta!</a>
             <a href="login.html">Sudah daftar? Masuk sebagai Gerobak Online</a>
-            <a href="index.html">Kembali ke peta</a>
+            <a href="index.html">← embali ke peta</a>
         </footer>
     </main>
     <script src="auth.js"></script>

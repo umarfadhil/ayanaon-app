@@ -3,38 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Daftar Warga Terdaftar | AyaNaon?</title>
+    <title>Daftar Warga Ayanaon | AyaNaon?</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="auth.css">
 </head>
 <body>
     <main class="auth-container">
         <header class="auth-header">
-            <h1 class="auth-title">Daftar Warga Terdaftar</h1>
-            <p class="auth-subtitle">Buat akun agar lencana kebaikan yang kamu bagikan tercatat otomatis.</p>
+            <h1 class="auth-title">Daftar Warga Ayanaon</h1>
+            <p class="auth-subtitle">Buat akun untuk memberikan rekomendasi kepada Gerobak Online dan akan tercatat secara otomatis.</p>
         </header>
         <div id="form-message" class="form-message form-message--hidden" role="status" aria-live="polite"></div>
         <form id="resident-register-form" class="auth-form" novalidate>
             <div class="form-field">
                 <label for="resident-register-name">Nama Tampilan</label>
-                <input type="text" id="resident-register-name" name="displayName" placeholder="Contoh: Warga Tangguh" autocomplete="name">
+                <input type="text" id="resident-register-name" name="displayName" placeholder="Kang Mansur" autocomplete="name">
             </div>
             <div class="form-field">
                 <label for="resident-register-username">Username</label>
-                <input type="text" id="resident-register-username" name="username" required minlength="4" placeholder="Contoh: wargahebat" autocomplete="username">
+                <input type="text" id="resident-register-username" name="username" required minlength="4" placeholder="mansur777" autocomplete="username">
             </div>
             <div class="form-field">
                 <label for="resident-register-password">Password</label>
-                <input type="password" id="resident-register-password" name="password" required minlength="4" placeholder="Minimal 4 karakter" autocomplete="new-password">
+                <input type="password" id="resident-register-password" name="password" required minlength="6" placeholder="Minimal 6 karakter" autocomplete="new-password">
             </div>
             <div class="form-field">
                 <label for="resident-register-confirm">Konfirmasi Password</label>
-                <input type="password" id="resident-register-confirm" name="confirmPassword" required minlength="4" placeholder="Ulangi password" autocomplete="new-password">
+                <input type="password" id="resident-register-confirm" name="confirmPassword" required minlength="6" placeholder="Ulangi password" autocomplete="new-password">
             </div>
             <button type="submit" class="auth-submit-btn">Daftar</button>
         </form>
         <footer class="auth-footer">
-            <a href="warga-login.html">Sudah punya akun warga? Masuk di sini</a>
+            <a href="warga-login.html">Sudah punya akun Warga? Masuk di sini</a>
             <a href="index.html">← Kembali ke peta</a>
         </footer>
     </main>

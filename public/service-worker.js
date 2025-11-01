@@ -1,17 +1,22 @@
 // Bump this to force clients to fetch fresh assets after deploys
-const CACHE_NAME = 'ayanaon-static-v9';
+const CACHE_NAME = 'ayanaon-static-v10';
 const PRECACHE_URLS = [
     './',
-    './index.html',
-    './login.html',
-    './register.html',
-    './verify.html',
-    './style.css',
-    './auth.css',
     './app.js',
+    './auth.css',
     './auth.js',
     './favicon.svg',
-    './manifest.webmanifest'
+    './index.html',
+    './login.html',
+    './manifest.webmanifest',
+    './register.html',
+    './resident-auth.js',
+    './resident-session.js',
+    './style.css',
+    './verify.html',
+    './warga-login.html',
+    './warga-register.html',
+    
 ];
 const PRECACHE_PATHS = new Set(
     PRECACHE_URLS.map((url) => new URL(url, self.location.href).pathname)

@@ -429,6 +429,11 @@ function updateLiveSellerUI(state) {
     if (!isLoggedIn) {
         closeLiveSellerEditModal();
     }
+    if (liveSellerPromptText) {
+        liveSellerPromptText.textContent = isLoggedIn
+            ? 'Terima kasih sudah berkontribusi sebagai Gerobak Online.'
+            : 'Daftar Gerobak Online dan dapatkan insentif hingga 1 Juta!';
+    }
 
     configureLiveSellerLinks(isLoggedIn);
 
@@ -719,7 +724,7 @@ function updateResidentUI(state) {
     if (residentPromptText) {
         residentPromptText.textContent = isLoggedIn
             ? 'Terima kasih sudah menebarkan badge kebaikan ke sesama warga.'
-            : 'Bagikan badge ke penjual favoritmu dan lihat seberapa dermawan kamu.';
+            : 'Bagikan rekomendasi ke penjual favoritmu untuk membantu Gerobak Online.';
     }
     if (residentNameLabel) {
         residentNameLabel.textContent = resident?.displayName || resident?.username || '';
@@ -2658,6 +2663,7 @@ document.addEventListener('DOMContentLoaded', () => {
     liveSellerAuthLinks = document.getElementById('live-seller-auth-links');
     liveSellerAuthPrimaryLink = document.getElementById('live-seller-auth-primary');
     liveSellerAuthSecondaryLink = document.getElementById('live-seller-auth-secondary');
+    liveSellerPromptText = document.getElementById('liveSeller-prompt');
     gerobakMenuSection = document.getElementById('menu-gerobak-section');
     residentMenuSection = document.getElementById('menu-resident-section');
     residentAuthenticatedContainer = document.getElementById('resident-authenticated');
