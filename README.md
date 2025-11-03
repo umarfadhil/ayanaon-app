@@ -186,4 +186,13 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Terms Improvement**: Warga Terdaftar become Warga Ayanaon and Badge become Rekomendasi. 
 - **Incentives**: Gerobak Online can get up to 1 million rupiah by getting recommendations from Warga.
 
+---
+
+## What's New in v2.2.0
+
+- **Resident Profile Enhancements**: Warga can now attach a profile photo during sign-up or via the new `PUT /api/residents/me` endpoint, and manage a 30-character status message that travels with their profile.
+- **Unified Live Controls**: The Warga "Live" panel adopts the same layout and styling as Gerobak Online, including matching primary/secondary buttons, a live/offline badge, and a status input that sits alongside the share toggle.
+- **Avatar-Only Map Markers**: Resident markers (including the current user while sharing location) are rendered as breathing circular avatars with optional photos and status bubbles, replacing the previous dot-style pin for a clearer map experience.
+- **Backend Status Support**: Resident share payloads now include the saved status message so it persists between refreshes and appears consistently whenever a Warga is live.
+
 

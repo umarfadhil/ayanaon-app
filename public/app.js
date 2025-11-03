@@ -74,6 +74,27 @@ let residentMenuSection;
 let residentShareControlsContainer;
 let residentShareToggleButton;
 let residentShareStatusLabel;
+let residentLiveIndicator;
+let residentEditToggleButton;
+let residentEditForm;
+let residentEditDisplayNameInput;
+let residentEditPhotoInput;
+let residentEditPhotoPreview;
+let residentEditMessageElement;
+let residentEditCancelButton;
+let residentEditRemoveButton;
+let residentEditSubmitButton;
+let residentEditSubmitting = false;
+let residentEditFormOpen = false;
+let residentEditFormDirty = false;
+let residentEditSelectedPhotoDataUrl = null;
+let residentEditExistingPhotoDataUrl = null;
+let residentEditRemovePhoto = false;
+let userMarkerComponents = null;
+let residentStatusInput;
+let residentStatusSaveButton;
+let residentStatusMessageElement;
+let residentStatusSubmitting = false;
 const residentShareMarkers = new Map();
 let residentShareRefreshTimer = null;
 let residentShareRefreshInFlight = false;
@@ -123,6 +144,7 @@ const LIVE_SELLER_HEARTBEAT_INITIAL_DELAY_MS = 1200;
 const MAX_LIVE_SELLER_PHOTO_BYTES = 1024 * 1024;
 const MAX_MENU_PHOTO_COUNT = 3;
 const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
+const RESIDENT_MAX_PHOTO_BYTES = 1024 * 1024;
 
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
@@ -446,7 +468,7 @@ function updateLiveSellerUI(state) {
     setLiveSellerStatusIndicator(isCurrentlyLive);
 
     if (liveSellerToggleButton && !liveSellerRequestInFlight) {
-        liveSellerToggleButton.textContent = isCurrentlyLive ? 'Selesai Live' : 'Mulai';
+        liveSellerToggleButton.textContent = isCurrentlyLive ? 'Stop Live' : 'Start Live';
     }
 
     updateLiveSellerProfile(seller, isLoggedIn);
@@ -511,6 +533,204 @@ function isValidLatLng(value) {
     return Number.isFinite(lat) && Number.isFinite(lng);
 }
 
+function getResidentMarkerInitial(resident) {
+    const baseValue = resident?.displayName || resident?.username || 'Warga';
+    const text = String(baseValue || '').trim();
+    if (!text) {
+        return 'W';
+    }
+    return text.charAt(0).toUpperCase();
+}
+
+function createResidentShareMarkerComponents(resident) {
+    const element = document.createElement('div');
+    element.className = 'resident-share-marker';
+    const pulse = document.createElement('div');
+    pulse.className = 'resident-share-marker__pulse';
+    element.appendChild(pulse);
+    const avatar = document.createElement('div');
+    avatar.className = 'resident-share-marker__avatar';
+    const photoElement = document.createElement('img');
+    photoElement.className = 'resident-share-marker__photo';
+    photoElement.alt = '';
+    avatar.appendChild(photoElement);
+    const fallbackElement = document.createElement('div');
+    fallbackElement.className = 'resident-share-marker__fallback';
+    fallbackElement.setAttribute('aria-hidden', 'true');
+    avatar.appendChild(fallbackElement);
+    element.appendChild(avatar);
+    const statusElement = document.createElement('div');
+    statusElement.className = 'resident-share-marker__status';
+    statusElement.hidden = true;
+    element.appendChild(statusElement);
+    updateResidentShareMarkerComponents({ element, photoElement, fallbackElement, statusElement }, resident);
+    return { element, photoElement, fallbackElement, statusElement };
+}
+
+function updateResidentShareMarkerComponents(components, resident) {
+    if (!components) {
+        return;
+    }
+    const { element, photoElement, fallbackElement, statusElement } = components;
+    const photoUrl = resident?.photoUrl || null;
+    const statusText = typeof resident?.statusMessage === 'string' ? resident.statusMessage : '';
+    if (photoElement) {
+        if (photoUrl) {
+            if (photoElement.src !== photoUrl) {
+                photoElement.src = photoUrl;
+            }
+        } else if (photoElement.getAttribute('src')) {
+            photoElement.removeAttribute('src');
+        }
+    }
+    if (photoUrl) {
+        element.classList.add('resident-share-marker--with-photo');
+    } else {
+        element.classList.remove('resident-share-marker--with-photo');
+    }
+    if (fallbackElement) {
+        fallbackElement.textContent = getResidentMarkerInitial(resident);
+    }
+    if (statusElement) {
+        if (statusText) {
+            statusElement.textContent = statusText;
+            statusElement.hidden = false;
+            element.classList.add('resident-share-marker--with-status');
+        } else {
+            statusElement.textContent = '';
+            statusElement.hidden = true;
+            element.classList.remove('resident-share-marker--with-status');
+        }
+    }
+}
+
+function createSelfResidentMarkerComponents(resident) {
+    const components = createResidentShareMarkerComponents(resident);
+    if (components?.element) {
+        components.element.classList.add('resident-share-marker--self');
+    }
+    return components;
+}
+
+function updateUserMarkerAppearance() {
+    if (!userMarker) {
+        return;
+    }
+    const resident = residentSessionState?.resident || null;
+    const isLive = Boolean(residentSessionState?.isLoggedIn && resident?.shareLocation);
+    const residentMarkerData = resident
+        ? {
+              ...resident,
+              photoUrl: getResidentPhotoDataUrl(resident),
+              statusMessage: typeof resident.statusMessage === 'string' ? resident.statusMessage : ''
+          }
+        : null;
+    if (isLive) {
+        if (!userMarkerComponents) {
+            userMarkerComponents = createSelfResidentMarkerComponents(residentMarkerData || {});
+            if (userMarkerComponents?.element) {
+                userMarker.content = userMarkerComponents.element;
+            }
+        }
+        if (userMarkerComponents) {
+            updateResidentShareMarkerComponents(userMarkerComponents, residentMarkerData || {});
+        }
+    } else {
+        userMarkerComponents = null;
+        const currentContent = userMarker.content;
+        if (!(currentContent instanceof HTMLElement && currentContent.classList.contains('user-marker'))) {
+            const userMarkerContainer = document.createElement('div');
+            userMarkerContainer.className = 'user-marker';
+            const userPulse = document.createElement('div');
+            userPulse.className = 'user-marker__pulse';
+            const userDot = document.createElement('div');
+            userDot.className = 'user-marker__dot';
+            userMarkerContainer.appendChild(userPulse);
+            userMarkerContainer.appendChild(userDot);
+            userMarker.content = userMarkerContainer;
+        }
+    }
+}
+
+function setResidentStatusMessage(type, text) {
+    if (!residentStatusMessageElement) {
+        return;
+    }
+    residentStatusMessageElement.textContent = text || '';
+    residentStatusMessageElement.classList.remove(
+        'resident-status-message--visible',
+        'resident-status-message--success',
+        'resident-status-message--error'
+    );
+    if (!text) {
+        return;
+    }
+    residentStatusMessageElement.classList.add('resident-status-message--visible');
+    if (type === 'success') {
+        residentStatusMessageElement.classList.add('resident-status-message--success');
+    } else if (type === 'error') {
+        residentStatusMessageElement.classList.add('resident-status-message--error');
+    }
+}
+
+function setResidentStatusControlsDisabled(disabled) {
+    if (residentStatusInput) {
+        residentStatusInput.disabled = disabled;
+    }
+    if (residentStatusSaveButton) {
+        residentStatusSaveButton.disabled = disabled;
+    }
+}
+
+function syncResidentStatusInput(resident) {
+    if (!residentStatusInput) {
+        return;
+    }
+    const value = resident?.statusMessage ? String(resident.statusMessage) : '';
+    if (residentStatusInput.value !== value) {
+        residentStatusInput.value = value;
+    }
+}
+
+async function submitResidentStatusUpdate() {
+    if (residentStatusSubmitting || !residentStatusInput) {
+        return;
+    }
+    const resident = residentSessionState?.resident || null;
+    if (!residentSessionState?.isLoggedIn || !resident) {
+        setResidentStatusMessage('error', 'Masuk sebagai warga untuk mengatur status.');
+        return;
+    }
+    let status = residentStatusInput.value.trim();
+    if (status.length > 30) {
+        status = status.slice(0, 30);
+        residentStatusInput.value = status;
+        setResidentStatusMessage('error', 'Status maksimal 30 karakter.');
+        return;
+    }
+    const currentStatus = typeof resident.statusMessage === 'string' ? resident.statusMessage : '';
+    if (status === currentStatus) {
+        setResidentStatusMessage(null, '');
+        return;
+    }
+    residentStatusSubmitting = true;
+    setResidentStatusControlsDisabled(true);
+    setResidentStatusMessage(null, 'Menyimpan status...');
+    try {
+        await ResidentSession.updateResidentProfile({ statusMessage: status });
+        setResidentStatusMessage('success', status ? 'Status diperbarui.' : 'Status dihapus.');
+    } catch (error) {
+        setResidentStatusMessage('error', error.message || 'Gagal memperbarui status.');
+        const fallback = typeof resident.statusMessage === 'string' ? resident.statusMessage : '';
+        if (residentStatusInput.value !== fallback) {
+            residentStatusInput.value = fallback;
+        }
+    } finally {
+        residentStatusSubmitting = false;
+        setResidentStatusControlsDisabled(!residentSessionState?.isLoggedIn);
+    }
+}
+
 function applyResidentShareMarkerSnapshot(residents) {
     if (!map || typeof google === 'undefined' || !google.maps) {
         return;
@@ -542,23 +762,25 @@ function applyResidentShareMarkerSnapshot(residents) {
                     existingEntry.marker.title = title;
                 }
                 existingEntry.displayName = resident.displayName || username;
+                updateResidentShareMarkerComponents(existingEntry.components, resident);
+                existingEntry.photoUrl = resident.photoUrl || null;
+                existingEntry.statusMessage = resident.statusMessage || '';
                 return;
             }
-            const markerElement = document.createElement('div');
-            markerElement.className = 'resident-share-marker';
-            const pulse = document.createElement('div');
-            pulse.className = 'resident-share-marker__pulse';
-            const dot = document.createElement('div');
-            dot.className = 'resident-share-marker__dot';
-            markerElement.appendChild(pulse);
-            markerElement.appendChild(dot);
+            const components = createResidentShareMarkerComponents(resident);
             const marker = new MarkerCtor({
                 map,
                 position,
                 title: `Lokasi ${resident.displayName || username}`,
-                content: markerElement
+                content: components.element
             });
-            residentShareMarkers.set(key, { marker, displayName: resident.displayName || username });
+            residentShareMarkers.set(key, {
+                marker,
+                displayName: resident.displayName || username,
+                photoUrl: resident.photoUrl || null,
+                statusMessage: resident.statusMessage || '',
+                components
+            });
         });
     }
     Array.from(residentShareMarkers.keys()).forEach((key) => {
@@ -699,6 +921,107 @@ function initializeResidentControls() {
         });
     }
 
+    if (residentStatusInput) {
+        residentStatusInput.addEventListener('input', () => {
+            if (residentStatusInput.value.length > 30) {
+                residentStatusInput.value = residentStatusInput.value.slice(0, 30);
+            }
+            setResidentStatusMessage(null, '');
+        });
+        residentStatusInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                submitResidentStatusUpdate();
+            }
+        });
+    }
+
+    if (residentStatusSaveButton) {
+        residentStatusSaveButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            submitResidentStatusUpdate();
+        });
+    }
+
+    syncResidentStatusInput(residentSessionState?.resident || null);
+    setResidentStatusControlsDisabled(!residentSessionState?.isLoggedIn || residentStatusSubmitting);
+    if (!residentSessionState?.isLoggedIn) {
+        setResidentStatusMessage(null, '');
+    }
+    updateUserMarkerAppearance();
+
+    if (residentEditToggleButton) {
+        residentEditToggleButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleResidentEditForm();
+        });
+    }
+
+    if (residentEditCancelButton) {
+        residentEditCancelButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            closeResidentEditForm();
+        });
+    }
+
+    if (residentEditForm) {
+        residentEditForm.addEventListener('submit', handleResidentEditFormSubmit);
+        residentEditSubmitButton = residentEditForm.querySelector('button[type="submit"]');
+    }
+
+    if (residentEditDisplayNameInput) {
+        residentEditDisplayNameInput.addEventListener('input', () => {
+            residentEditFormDirty = true;
+            setResidentEditMessage(null, '');
+        });
+    }
+
+    if (residentEditPhotoInput) {
+        residentEditPhotoInput.addEventListener('change', async () => {
+            if (!residentEditPhotoInput.files || !residentEditPhotoInput.files[0]) {
+                if (!residentEditFormDirty) {
+                    updateResidentEditPhotoPreview(residentEditExistingPhotoDataUrl);
+                }
+                return;
+            }
+            const file = residentEditPhotoInput.files[0];
+            if (file.size > RESIDENT_MAX_PHOTO_BYTES) {
+                setResidentEditMessage('error', 'Foto maksimal 1MB.');
+                residentEditPhotoInput.value = '';
+                return;
+            }
+            try {
+                const dataUrl = await readFileAsDataUrl(file);
+                residentEditSelectedPhotoDataUrl = dataUrl;
+                residentEditRemovePhoto = false;
+                residentEditFormDirty = true;
+                updateResidentEditPhotoPreview(dataUrl);
+                setResidentEditMessage(null, '');
+            } catch (error) {
+                setResidentEditMessage('error', 'Tidak dapat membaca foto profil.');
+                residentEditPhotoInput.value = '';
+            }
+        });
+    }
+
+    if (residentEditRemoveButton) {
+        residentEditRemoveButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            if (!residentEditExistingPhotoDataUrl && !residentEditSelectedPhotoDataUrl) {
+                setResidentEditMessage(null, 'Tidak ada foto yang perlu dihapus.');
+                return;
+            }
+            residentEditSelectedPhotoDataUrl = null;
+            residentEditRemovePhoto = true;
+            residentEditFormDirty = true;
+            if (residentEditPhotoInput) {
+                residentEditPhotoInput.value = '';
+            }
+            updateResidentEditPhotoPreview(null);
+            setResidentEditMessage(null, '');
+        });
+    }
+
     if (residentSessionUnsubscribe) {
         residentSessionUnsubscribe();
     }
@@ -709,6 +1032,211 @@ function handleResidentSessionChange(state) {
     residentSessionState = state || { isLoggedIn: false, resident: null };
     updateResidentUI(residentSessionState);
     syncMenuVisibility();
+}
+
+function setResidentEditMessage(type, text) {
+    if (!residentEditMessageElement) {
+        return;
+    }
+    residentEditMessageElement.textContent = text || '';
+    residentEditMessageElement.classList.remove(
+        'resident-edit-message--visible',
+        'resident-edit-message--success',
+        'resident-edit-message--error'
+    );
+    if (!text) {
+        return;
+    }
+    residentEditMessageElement.classList.add('resident-edit-message--visible');
+    if (type === 'success') {
+        residentEditMessageElement.classList.add('resident-edit-message--success');
+    } else if (type === 'error') {
+        residentEditMessageElement.classList.add('resident-edit-message--error');
+    }
+}
+
+function getResidentPhotoDataUrl(resident) {
+    const photo = resident?.photo;
+    if (photo && photo.data) {
+        const contentType = photo.contentType || 'image/jpeg';
+        return `data:${contentType};base64,${photo.data}`;
+    }
+    return null;
+}
+
+function updateResidentEditPhotoPreview(dataUrl) {
+    if (!residentEditPhotoPreview) {
+        return;
+    }
+    const imageElement = residentEditPhotoPreview.querySelector('.resident-edit-photo-preview__image');
+    const placeholderElement = residentEditPhotoPreview.querySelector('.resident-edit-photo-preview__placeholder');
+    if (dataUrl) {
+        if (imageElement && imageElement.src !== dataUrl) {
+            imageElement.src = dataUrl;
+        }
+        if (placeholderElement) {
+            placeholderElement.setAttribute('aria-hidden', 'true');
+        }
+        residentEditPhotoPreview.dataset.hasImage = 'true';
+    } else {
+        if (imageElement && imageElement.getAttribute('src')) {
+            imageElement.removeAttribute('src');
+        }
+        if (placeholderElement) {
+            placeholderElement.removeAttribute('aria-hidden');
+        }
+        delete residentEditPhotoPreview.dataset.hasImage;
+    }
+}
+
+function updateResidentEditToggleState() {
+    if (!residentEditToggleButton) {
+        return;
+    }
+    residentEditToggleButton.textContent = residentEditFormOpen ? 'Tutup Edit Profil' : 'Edit Profil';
+}
+
+function refreshResidentEditForm(resident, { force = false } = {}) {
+    if (!residentEditForm) {
+        return;
+    }
+    const currentResident = resident || null;
+    const shouldReset =
+        force ||
+        !residentEditFormOpen ||
+        !residentEditFormDirty;
+    if (!shouldReset) {
+        return;
+    }
+    const displayName = currentResident?.displayName || currentResident?.username || '';
+    if (residentEditDisplayNameInput) {
+        residentEditDisplayNameInput.value = displayName;
+    }
+    residentEditExistingPhotoDataUrl = currentResident ? getResidentPhotoDataUrl(currentResident) : null;
+    if (force || !residentEditFormDirty || !residentEditFormOpen) {
+        residentEditSelectedPhotoDataUrl = null;
+        residentEditRemovePhoto = false;
+        updateResidentEditPhotoPreview(residentEditExistingPhotoDataUrl);
+        if (residentEditPhotoInput) {
+            residentEditPhotoInput.value = '';
+        }
+    }
+    residentEditFormDirty = false;
+}
+
+function setResidentEditFormDisabled(disabled) {
+    if (residentEditDisplayNameInput) {
+        residentEditDisplayNameInput.disabled = disabled;
+    }
+    if (residentEditPhotoInput) {
+        residentEditPhotoInput.disabled = disabled;
+    }
+    if (residentEditRemoveButton) {
+        residentEditRemoveButton.disabled = disabled;
+    }
+    if (residentEditSubmitButton) {
+        residentEditSubmitButton.disabled = disabled;
+    }
+    if (residentEditCancelButton) {
+        residentEditCancelButton.disabled = disabled;
+    }
+    if (residentEditToggleButton) {
+        residentEditToggleButton.disabled = disabled || !residentSessionState?.isLoggedIn;
+    }
+}
+
+function openResidentEditForm() {
+    if (!residentEditForm || residentEditSubmitting) {
+        return;
+    }
+    residentEditForm.classList.remove('hidden');
+    residentEditFormOpen = true;
+    refreshResidentEditForm(residentSessionState?.resident || null, { force: true });
+    updateResidentEditToggleState();
+}
+
+function closeResidentEditForm({ reset = true } = {}) {
+    if (!residentEditForm) {
+        return;
+    }
+    residentEditForm.classList.add('hidden');
+    residentEditFormOpen = false;
+    setResidentEditMessage(null, '');
+    if (reset) {
+        residentEditSelectedPhotoDataUrl = null;
+        residentEditRemovePhoto = false;
+        if (residentEditPhotoInput) {
+            residentEditPhotoInput.value = '';
+        }
+        refreshResidentEditForm(residentSessionState?.resident || null, { force: true });
+    }
+    updateResidentEditToggleState();
+}
+
+function toggleResidentEditForm() {
+    if (residentEditSubmitting) {
+        return;
+    }
+    if (residentEditFormOpen) {
+        closeResidentEditForm();
+    } else {
+        openResidentEditForm();
+    }
+}
+
+async function handleResidentEditFormSubmit(event) {
+    event.preventDefault();
+    if (residentEditSubmitting) {
+        return;
+    }
+    const resident = residentSessionState?.resident;
+    if (!resident) {
+        setResidentEditMessage('error', 'Masuk sebagai warga untuk mengubah profil.');
+        return;
+    }
+    const updates = {};
+    const trimmedName = residentEditDisplayNameInput ? residentEditDisplayNameInput.value.trim() : '';
+    if (residentEditDisplayNameInput) {
+        if (!trimmedName) {
+            setResidentEditMessage('error', 'Nama tampilan tidak boleh kosong.');
+            return;
+        }
+        if (trimmedName !== (resident.displayName || resident.username || '')) {
+            updates.displayName = trimmedName;
+        }
+    }
+    if (residentEditSelectedPhotoDataUrl) {
+        updates.photo = residentEditSelectedPhotoDataUrl;
+    } else if (residentEditRemovePhoto) {
+        updates.removePhoto = true;
+    }
+    if (!Object.keys(updates).length) {
+        setResidentEditMessage(null, 'Tidak ada perubahan untuk disimpan.');
+        return;
+    }
+    residentEditSubmitting = true;
+    setResidentEditFormDisabled(true);
+    setResidentEditMessage(null, 'Menyimpan perubahan...');
+    try {
+        const updatedResident = await ResidentSession.updateResidentProfile(updates);
+        const effectiveResident = updatedResident || residentSessionState?.resident || resident;
+        residentEditExistingPhotoDataUrl = getResidentPhotoDataUrl(effectiveResident);
+        residentEditSelectedPhotoDataUrl = null;
+        residentEditRemovePhoto = false;
+        residentEditFormDirty = false;
+        if (residentEditPhotoInput) {
+            residentEditPhotoInput.value = '';
+        }
+        updateResidentEditPhotoPreview(residentEditExistingPhotoDataUrl);
+        refreshResidentEditForm(effectiveResident, { force: true });
+        setResidentEditMessage('success', 'Profil berhasil diperbarui.');
+    } catch (error) {
+        setResidentEditMessage('error', error.message || 'Gagal memperbarui profil.');
+    } finally {
+        residentEditSubmitting = false;
+        setResidentEditFormDisabled(false);
+        updateResidentEditToggleState();
+    }
 }
 
 function updateResidentUI(state) {
@@ -723,7 +1251,7 @@ function updateResidentUI(state) {
     }
     if (residentPromptText) {
         residentPromptText.textContent = isLoggedIn
-            ? 'Terima kasih sudah menebarkan badge kebaikan ke sesama warga.'
+            ? 'Terima kasih sudah membantu memberikan rekomendasi ke Gerobak Online!'
             : 'Bagikan rekomendasi ke penjual favoritmu untuk membantu Gerobak Online.';
     }
     if (residentNameLabel) {
@@ -738,15 +1266,45 @@ function updateResidentUI(state) {
     }
     const isSharing = Boolean(resident?.shareLocation);
     if (residentShareToggleButton) {
-        residentShareToggleButton.textContent = isSharing ? 'Matikan Berbagi Lokasi' : 'Bagikan Lokasi Saya';
+        residentShareToggleButton.textContent = isSharing ? 'Stop Live' : 'Start Live';
         residentShareToggleButton.classList.toggle('resident-share-btn--off', !isSharing);
     }
     if (residentShareStatusLabel) {
         residentShareStatusLabel.textContent = isSharing
-            ? 'Lokasi kamu sedang dibagikan ke Gerobak Online.'
-            : 'Lokasi kamu tidak sedang dibagikan.';
+            ? 'Kamu sedang berbagi lokasi dengan Warga.'
+            : 'Kamu sedang tidak berbagi lokasi.';
         residentShareStatusLabel.classList.toggle('resident-share-status--off', !isSharing);
     }
+    if (residentLiveIndicator) {
+        residentLiveIndicator.textContent = isSharing ? 'Live' : 'Offline';
+        residentLiveIndicator.classList.toggle('online', isSharing);
+        residentLiveIndicator.classList.toggle('offline', !isSharing);
+    }
+    if (residentStatusInput || residentStatusSaveButton) {
+        if (isLoggedIn && !residentStatusSubmitting) {
+            syncResidentStatusInput(resident);
+        } else if (!isLoggedIn && residentStatusInput) {
+            residentStatusInput.value = '';
+        }
+        setResidentStatusControlsDisabled(!isLoggedIn || residentStatusSubmitting);
+        if (!isLoggedIn) {
+            setResidentStatusMessage(null, '');
+        }
+    }
+    if (residentEditToggleButton) {
+        residentEditToggleButton.disabled = !isLoggedIn || residentEditSubmitting;
+    }
+    if (!isLoggedIn) {
+        closeResidentEditForm({ reset: true });
+        refreshResidentEditForm(null, { force: true });
+    } else {
+        refreshResidentEditForm(resident, { force: !residentEditFormDirty || !residentEditFormOpen });
+    }
+    if (!residentEditFormOpen) {
+        setResidentEditMessage(null, '');
+    }
+
+    updateUserMarkerAppearance();
     syncResidentShareMarkersFromCache();
     refreshResidentShareMarkers(isLoggedIn ? { force: true } : {});
 }
@@ -964,11 +1522,6 @@ function buildLiveSellerPopupNode(seller, entry) {
 
     const canShowContact = Boolean(seller?.showPhone) && Boolean(seller?.phoneNumber);
     if (canShowContact) {
-        const phoneText = document.createElement('div');
-        phoneText.className = 'live-seller-popup-phone';
-        phoneText.textContent = seller.phoneNumber;
-        body.appendChild(phoneText);
-
         const contactLink = document.createElement('a');
         contactLink.className = 'live-seller-popup-contact';
         contactLink.textContent = 'Hubungi via WhatsApp';
@@ -992,13 +1545,13 @@ function buildLiveSellerPopupNode(seller, entry) {
 
         const voteCount = document.createElement('div');
         voteCount.className = 'live-seller-vote-count';
-        voteCount.textContent = votes > 0 ? `Badge Warga: ${votes}` : 'Belum ada badge dari warga';
+        voteCount.textContent = votes > 0 ? `Rekomendasi Warga: ${votes}` : 'Belum ada rekomendasi dari warga';
         verificationSection.appendChild(voteCount);
 
         const statusElement = document.createElement('div');
         statusElement.className = 'live-seller-vote-status';
         if (seller.hasCommunityVoted) {
-            statusElement.textContent = 'Kamu sudah memberi badge.';
+            statusElement.textContent = 'Kamu sudah memberi rekomendasi.';
         } else {
             statusElement.style.display = 'none';
         }
@@ -1007,7 +1560,7 @@ function buildLiveSellerPopupNode(seller, entry) {
         const verifyButton = document.createElement('button');
         verifyButton.type = 'button';
         verifyButton.className = 'live-seller-verify-btn';
-        verifyButton.textContent = 'Kasih Badge Warga';
+        verifyButton.textContent = 'Kasih Rekomendasi Warga';
         if (seller.hasCommunityVoted || isOwner) {
             verifyButton.disabled = true;
             verifyButton.textContent = seller.hasCommunityVoted ? 'Terima kasih!' : 'Gerobak milik kamu';
@@ -1076,16 +1629,16 @@ async function handleLiveSellerVerification(entry, seller, context = {}) {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error(payload.message || 'Gagal memberi badge warga.');
+            throw new Error(payload.message || 'Gagal memberi rekomendasi warga.');
         }
 
         const previousVotes = Number(seller?.communityVerification?.votes) || 0;
         const newVotes = previousVotes + 1;
         if (voteCountElement) {
-            voteCountElement.textContent = newVotes > 0 ? `Badge Warga: ${newVotes}` : 'Belum ada badge dari warga';
+            voteCountElement.textContent = newVotes > 0 ? `Rekomendasi Warga: ${newVotes}` : 'Belum ada rekomendasi dari warga';
         }
         if (statusElement) {
-            statusElement.textContent = payload.message || 'Terima kasih! Badge berhasil diberikan.';
+            statusElement.textContent = payload.message || 'Terima kasih! Rekomendasi berhasil diberikan.';
             statusElement.style.display = '';
         }
 
@@ -1099,7 +1652,7 @@ async function handleLiveSellerVerification(entry, seller, context = {}) {
                     refreshResidentShareMarkers();
                 })
                 .catch((error) => {
-                    DEBUG_LOGGER.log('Tidak dapat menambah hitungan badge warga', error);
+                    DEBUG_LOGGER.log('Tidak dapat menambah hitungan rekomendasi warga', error);
                 });
         }
 
@@ -1116,7 +1669,7 @@ async function handleLiveSellerVerification(entry, seller, context = {}) {
     } catch (error) {
         button.disabled = false;
         button.textContent = originalText;
-        alert(error.message || 'Tidak dapat memberi badge warga. Coba lagi nanti.');
+        alert(error.message || 'Tidak dapat memberi rekomendasi warga. Coba lagi nanti.');
     }
 }
 
@@ -1426,7 +1979,7 @@ async function startLiveSellerBroadcast() {
         if (liveSellerToggleButton) {
             liveSellerToggleButton.disabled = false;
             if (!isLiveSellerActive) {
-                liveSellerToggleButton.textContent = 'Mulai';
+                liveSellerToggleButton.textContent = 'Start Live';
             }
         }
     }
@@ -1504,7 +2057,7 @@ async function stopLiveSellerBroadcast(options = {}) {
         liveSellerRequestInFlight = false;
         if (liveSellerToggleButton) {
             liveSellerToggleButton.disabled = false;
-            liveSellerToggleButton.textContent = isLiveSellerActive ? 'Selesai Live' : 'Mulai';
+            liveSellerToggleButton.textContent = isLiveSellerActive ? 'Stop Live' : 'Start Live';
         }
         if (stopSucceeded) {
             if (typeof SellerSession !== 'undefined' && typeof SellerSession.refreshProfile === 'function') {
@@ -2673,8 +3226,21 @@ document.addEventListener('DOMContentLoaded', () => {
     residentShareControlsContainer = document.getElementById('resident-share-controls');
     residentShareToggleButton = document.getElementById('resident-share-toggle-btn');
     residentShareStatusLabel = document.getElementById('resident-share-status');
+    residentLiveIndicator = document.getElementById('resident-live-indicator');
+    residentStatusInput = document.getElementById('resident-status-input');
+    residentStatusSaveButton = document.getElementById('resident-status-save-btn');
+    residentStatusMessageElement = document.getElementById('resident-status-message');
+    residentEditToggleButton = document.getElementById('resident-edit-toggle');
+    residentEditForm = document.getElementById('resident-edit-form');
+    residentEditDisplayNameInput = document.getElementById('resident-edit-display-name');
+    residentEditPhotoInput = document.getElementById('resident-edit-photo-input');
+    residentEditPhotoPreview = document.getElementById('resident-edit-photo-preview');
+    residentEditMessageElement = document.getElementById('resident-edit-message');
+    residentEditCancelButton = document.getElementById('resident-edit-cancel');
+    residentEditRemoveButton = document.getElementById('resident-edit-photo-remove');
     residentLogoutButton = document.getElementById('resident-logout-btn');
     residentPromptText = document.getElementById('resident-prompt');
+    updateResidentEditToggleState();
     fuelToggleContainer = document.getElementById('fuel-toggle-container');
     fuelToggle = document.getElementById('fuel-toggle');
     fuelToggleFuelLabel = document.querySelector('#fuel-toggle-container .toggle-label-fuel');
@@ -3537,6 +4103,7 @@ function handleLocationError(browserHasGeolocation) {
             if (userMarker) {
                 userMarker.position = newLocation;
             }
+            updateUserMarkerAppearance();
             handleLocationEnabled();
             handleResidentLocationUpdate();
             if (typeof window.applyFilters === 'function') {
@@ -3573,6 +4140,7 @@ function handleLocationError(browserHasGeolocation) {
                 content: userMarkerContainer,
             });
 
+            updateUserMarkerAppearance();
 
 
             handleLocationEnabled();

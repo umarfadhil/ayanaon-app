@@ -84,6 +84,7 @@ function normalizePhoneNumber(rawPhone) {
 const MAX_MAIN_PHOTO_BYTES = 1024 * 1024;
 const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
 const MAX_MENU_PHOTO_COUNT = 3;
+const MAX_RESIDENT_PHOTO_BYTES = 1024 * 1024;
 
 function parseSellerPhoto(photoPayload, options = {}) {
     const {
@@ -142,6 +143,13 @@ function parseSellerMenuPhotos(menuPayload) {
     return parsed;
 }
 
+function parseResidentPhoto(photoPayload) {
+    return parseSellerPhoto(photoPayload, {
+        maxBytes: MAX_RESIDENT_PHOTO_BYTES,
+        fieldLabel: 'Foto profil warga'
+    });
+}
+
 function sanitizeSeller(doc) {
     if (!doc) return null;
     const {
@@ -196,6 +204,16 @@ function sanitizeResident(doc) {
     delete sanitized._id;
     sanitized.badgesGiven = Number(sanitized.badgesGiven) || 0;
     sanitized.shareLocation = shareFlag;
+    sanitized.statusMessage = typeof sanitized.statusMessage === 'string' ? sanitized.statusMessage.trim() : '';
+    if (sanitized.photo && sanitized.photo.data) {
+        sanitized.photo = {
+            contentType: sanitized.photo.contentType,
+            data: sanitized.photo.data,
+            size: sanitized.photo.size
+        };
+    } else {
+        delete sanitized.photo;
+    }
     if (sanitized.lastLocation && typeof sanitized.lastLocation === 'object') {
         const lat = Number(sanitized.lastLocation.lat);
         const lng = Number(sanitized.lastLocation.lng);
@@ -282,7 +300,7 @@ async function authenticateResidentRequest(req, res) {
 
 router.post('/residents/register', async (req, res) => {
     try {
-        const { username, password, displayName } = req.body || {};
+        const { username, password, displayName, photo } = req.body || {};
         if (!username || !password) {
             return res.status(400).json({ message: 'Username dan password wajib diisi.' });
         }
@@ -302,12 +320,19 @@ router.post('/residents/register', async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(password, 12);
+        let parsedPhoto = null;
+        try {
+            parsedPhoto = parseResidentPhoto(photo);
+        } catch (error) {
+            return res.status(400).json({ message: error.message || 'Foto profil tidak dapat diproses.' });
+        }
         const now = new Date();
         const residentDoc = {
             username: usernameTrimmed,
             usernameLower,
             passwordHash,
             displayName: String(displayName || '').trim() || usernameTrimmed,
+            statusMessage: '',
             badgesGiven: 0,
             shareLocation: false,
             lastLocation: null,
@@ -315,6 +340,9 @@ router.post('/residents/register', async (req, res) => {
             updatedAt: now,
             lastLoginAt: now
         };
+        if (parsedPhoto) {
+            residentDoc.photo = parsedPhoto;
+        }
 
         const insertResult = await residents.insertOne(residentDoc);
         const inserted = await residents.findOne({ _id: insertResult.insertedId });
@@ -369,6 +397,87 @@ router.get('/residents/me', async (req, res) => {
     const resident = await authenticateResidentRequest(req, res);
     if (!resident) return;
     res.json({ resident: sanitizeResident(resident) });
+});
+
+router.put('/residents/me', async (req, res) => {
+    try {
+        const resident = await authenticateResidentRequest(req, res);
+        if (!resident) return;
+        const residents = await getResidentsCollection();
+        const payload = req.body || {};
+        const { displayName, photo, removePhoto } = payload;
+        const { statusMessage } = payload;
+        const setFields = {};
+        const unsetFields = {};
+        let hasChanges = false;
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'displayName')) {
+            if (typeof displayName !== 'string') {
+                return res.status(400).json({ message: 'Nama tampilan tidak valid.' });
+            }
+            const trimmedName = displayName.trim();
+            if (!trimmedName) {
+                return res.status(400).json({ message: 'Nama tampilan tidak boleh kosong.' });
+            }
+            if (trimmedName.length > 60) {
+                return res.status(400).json({ message: 'Nama tampilan maksimal 60 karakter.' });
+            }
+            setFields.displayName = trimmedName;
+            hasChanges = true;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'statusMessage')) {
+            if (typeof statusMessage !== 'string') {
+                return res.status(400).json({ message: 'Status tidak valid.' });
+            }
+            const trimmedStatus = statusMessage.trim();
+            if (trimmedStatus.length > 30) {
+                return res.status(400).json({ message: 'Status maksimal 30 karakter.' });
+            }
+            setFields.statusMessage = trimmedStatus;
+            hasChanges = true;
+        }
+
+        if (typeof photo === 'string' && photo.trim()) {
+            try {
+                setFields.photo = parseResidentPhoto(photo);
+                hasChanges = true;
+            } catch (error) {
+                return res.status(400).json({ message: error.message || 'Foto profil tidak dapat diproses.' });
+            }
+        } else if (photo === null || photo === '') {
+            unsetFields.photo = '';
+            hasChanges = true;
+        } else if (removePhoto === true) {
+            unsetFields.photo = '';
+            hasChanges = true;
+        }
+
+        if (!hasChanges) {
+            return res.status(400).json({ message: 'Tidak ada perubahan data.' });
+        }
+
+        const now = new Date();
+        setFields.updatedAt = now;
+
+        const updateDoc = {};
+        if (Object.keys(setFields).length) {
+            updateDoc.$set = setFields;
+        }
+        if (Object.keys(unsetFields).length) {
+            updateDoc.$unset = unsetFields;
+        }
+
+        await residents.updateOne({ _id: resident._id }, updateDoc);
+        const updated = await residents.findOne({ _id: resident._id });
+        res.json({
+            message: 'Profil warga diperbarui.',
+            resident: sanitizeResident(updated)
+        });
+    } catch (error) {
+        console.error('Failed to update resident profile', error);
+        res.status(500).json({ message: 'Gagal memperbarui profil warga. Coba lagi.' });
+    }
 });
 
 router.post('/residents/share', async (req, res) => {
@@ -438,7 +547,9 @@ router.get('/residents/share', async (req, res) => {
                         username: 1,
                         displayName: 1,
                         badgesGiven: 1,
-                        lastLocation: 1
+                        lastLocation: 1,
+                        statusMessage: 1,
+                        photo: 1
                     }
                 }
             )
@@ -451,7 +562,9 @@ router.get('/residents/share', async (req, res) => {
                 username: resident.username,
                 displayName: resident.displayName,
                 badgesGiven: resident.badgesGiven,
-                lastLocation: resident.lastLocation
+                lastLocation: resident.lastLocation,
+                statusMessage: resident.statusMessage || '',
+                photo: resident.photo || null
             }));
 
         res.json({ residents: payload });

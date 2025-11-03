@@ -1110,17 +1110,38 @@ body {
     border-color: rgba(96, 165, 250, 0.4);
 }
 
-.resident-authenticated {
+.resident-panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px;
-    border-radius: 16px;
-    background: rgba(30, 41, 59, 0.4);
+    gap: 16px;
 }
 
-.resident-authenticated.hidden {
-    display: none;
+.resident-panel-body {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.resident-panel-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.resident-panel-links .menu-pill-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: 999px;
+}
+
+.resident-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .resident-greeting {
@@ -1142,7 +1163,7 @@ body {
 .resident-share-controls {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .resident-share-controls.hidden {
@@ -1150,13 +1171,317 @@ body {
 }
 
 .resident-share-btn {
-    align-self: flex-start;
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #34d399, #10b981);
+    color: #0f172a;
+    font-weight: 700;
+    font-size: 14px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .resident-share-btn.resident-share-btn--off {
-    background: rgba(148, 163, 184, 0.18);
-    border-color: rgba(148, 163, 184, 0.35);
+    border: none;
+    box-shadow: none;
+}
+
+.resident-share-btn.resident-share-btn--off:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px rgba(16, 185, 129, 0.35);
+}
+
+.resident-status-input-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: rgba(15, 23, 42, 0.45);
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.2);
+    flex: 1 1 40px;
+    width: 100%;
+}
+
+.resident-status-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+#resident-status-input {
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    font-size: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#resident-status-input::placeholder {
+    color: rgba(226, 232, 240, 0.6);
+}
+
+#resident-status-input:focus {
+    outline: none;
+}
+
+.resident-status-save-btn {
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(59, 130, 246, 0.35));
+    color: #e0f2fe;
+    transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.resident-status-save-btn:hover:not(:disabled) {
+    border-color: rgba(56, 189, 248, 0.75);
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.5), rgba(59, 130, 246, 0.55));
+}
+
+.resident-status-save-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.resident-status-message {
+    display: none;
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5f5;
+    margin-top: 4px;
+}
+
+.resident-status-message.resident-status-message--visible {
+    display: block;
+}
+
+.resident-status-message.resident-status-message--success {
+    background: rgba(52, 211, 153, 0.18);
+    color: #bbf7d0;
+}
+
+.resident-status-message.resident-status-message--error {
+    background: rgba(248, 113, 113, 0.18);
+    color: #fecaca;
+}
+
+.resident-edit-toggle {
+    margin-top: 10px;
+}
+
+.resident-edit-form {
+    margin-top: 12px;
+    padding: 14px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.68);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.resident-edit-form.hidden {
+    display: none;
+}
+
+.resident-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.resident-edit-field label,
+.resident-edit-label {
+    font-size: 12px;
+    font-weight: 600;
     color: #e2e8f0;
+}
+
+.resident-edit-field input[type="text"] {
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 23, 42, 0.4);
+    color: #f8fafc;
+    padding: 8px 10px;
+    font-size: 13px;
+    outline: none;
+}
+
+.resident-edit-field input[type="text"]:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.resident-edit-photo-field {
+    gap: 8px;
+}
+
+.resident-edit-photo-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.resident-edit-photo-preview {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    border: 2px dashed rgba(148, 163, 184, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.6);
+    color: #94a3b8;
+    font-size: 11px;
+    text-align: center;
+    overflow: hidden;
+    position: relative;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.resident-edit-photo-preview[data-has-image="true"] {
+    border-style: solid;
+    border-color: #38bdf8;
+    color: transparent;
+}
+
+.resident-edit-photo-preview__image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+}
+
+.resident-edit-photo-preview[data-has-image="true"] .resident-edit-photo-preview__image {
+    display: block;
+}
+
+.resident-edit-photo-preview__placeholder {
+    padding: 0 10px;
+    line-height: 1.35;
+}
+
+.resident-edit-photo-preview[data-has-image="true"] .resident-edit-photo-preview__placeholder {
+    display: none;
+}
+
+.resident-edit-photo-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.resident-edit-photo-upload {
+    position: relative;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.18);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #bae6fd;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    cursor: pointer;
+}
+
+.resident-edit-photo-upload input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.resident-edit-remove-btn {
+    border-radius: 999px;
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    background: rgba(248, 113, 113, 0.12);
+    color: #fecaca;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+}
+
+.resident-edit-remove-btn:hover {
+    background: rgba(248, 113, 113, 0.22);
+}
+
+.resident-edit-hint {
+    font-size: 11px;
+    color: #94a3b8;
+    margin: 0;
+}
+
+.resident-edit-message {
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5f5;
+    display: none;
+}
+
+.resident-edit-message.resident-edit-message--visible {
+    display: block;
+}
+
+.resident-edit-message.resident-edit-message--success {
+    background: rgba(52, 211, 153, 0.18);
+    color: #bbf7d0;
+}
+
+.resident-edit-message.resident-edit-message--error {
+    background: rgba(248, 113, 113, 0.18);
+    color: #fecaca;
+}
+
+.resident-edit-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.resident-edit-submit-btn,
+.resident-edit-cancel-btn {
+    padding: 6px 16px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.resident-edit-submit-btn {
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(59, 130, 246, 0.35));
+    color: #e0f2fe;
+}
+
+.resident-edit-submit-btn:hover {
+    border-color: rgba(56, 189, 248, 0.75);
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.5), rgba(59, 130, 246, 0.55));
+}
+
+.resident-edit-cancel-btn {
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5f5;
+}
+
+.resident-edit-cancel-btn:hover {
+    background: rgba(148, 163, 184, 0.22);
 }
 
 .resident-share-status {
@@ -1171,6 +1496,19 @@ body {
 .resident-logout-btn {
     align-self: flex-start;
     margin-top: 4px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(148, 163, 184, 0.12);
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.resident-logout-btn:hover {
+    background: rgba(148, 163, 184, 0.25);
+    border-color: rgba(148, 163, 184, 0.55);
 }
 
 .resident-auth-links {
@@ -1585,12 +1923,6 @@ body {
     white-space: pre-line;
 }
 
-.live-seller-popup-phone {
-    font-size: 12px;
-    color: #0f172a;
-    font-weight: 600;
-}
-
 .live-seller-popup-contact {
     display: inline-flex;
     align-items: center;
@@ -1699,31 +2031,100 @@ body {
 
 .resident-share-marker {
     position: relative;
-    width: 26px;
-    height: 26px;
+    width: 48px;
+    height: 62px;
 }
 
 .resident-share-marker__pulse {
     position: absolute;
-    inset: 0;
+    top: 4px;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    margin-left: -22px;
     border-radius: 50%;
-    background: rgba(52, 211, 153, 0.35);
+    background: rgba(34, 211, 238, 0.25);
     animation: resident-share-pulse 2.4s ease-out infinite;
+    transform-origin: center;
 }
 
-.resident-share-marker__dot {
+.resident-share-marker__avatar {
     position: absolute;
-    inset: 4px;
+    top: 8px;
+    left: 50%;
+    width: 36px;
+    height: 36px;
+    margin-left: -18px;
     border-radius: 50%;
-    background: #10b981;
+    background: linear-gradient(135deg, #0d9488, #047857);
     border: 2px solid #ecfeff;
-    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    color: #ecfeff;
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+}
+
+.resident-share-marker__photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+}
+
+.resident-share-marker--with-photo .resident-share-marker__photo {
+    display: block;
+}
+
+.resident-share-marker--with-photo .resident-share-marker__fallback {
+    display: none;
+}
+
+.resident-share-marker__fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.03em;
+}
+
+.resident-share-marker__status {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #e0f2fe;
+    font-size: 11px;
+    line-height: 1.2;
+    max-width: 140px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.35);
+    pointer-events: none;
 }
 
 @keyframes resident-share-pulse {
-    0% { transform: scale(0.5); opacity: 0.85; }
-    70% { transform: scale(1.8); opacity: 0; }
-    100% { opacity: 0; }
+    0% {
+        transform: scale(0.65);
+        opacity: 0.8;
+    }
+    70% {
+        transform: scale(1.4);
+        opacity: 0;
+    }
+    100% {
+        opacity: 0;
+    }
 }
 
 

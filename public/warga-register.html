@@ -31,6 +31,15 @@
                 <label for="resident-register-confirm">Konfirmasi Password</label>
                 <input type="password" id="resident-register-confirm" name="confirmPassword" required minlength="6" placeholder="Ulangi password" autocomplete="new-password">
             </div>
+            <div class="form-field">
+                <label for="resident-register-photo">Foto Profil <span class="form-field-hint">(Opsional, maks. 1MB)</span></label>
+                <input type="file" id="resident-register-photo" name="photo" accept="image/*">
+                <div id="resident-register-photo-preview" class="auth-photo-preview" aria-live="polite">
+                    <img alt="" class="auth-photo-preview__image">
+                    <span class="auth-photo-preview__placeholder">Belum ada foto</span>
+                </div>
+                <p class="form-field-hint">Foto akan muncul ketika kamu berbagi lokasi.</p>
+            </div>
             <button type="submit" class="auth-submit-btn">Daftar</button>
         </form>
         <footer class="auth-footer">

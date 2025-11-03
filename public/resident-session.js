@@ -124,11 +124,20 @@
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
             return null;
         }
+        let photoUrl = null;
+        const photo = resident.photo;
+        const statusMessage = typeof resident.statusMessage === 'string' ? resident.statusMessage.trim() : '';
+        if (photo && photo.data) {
+            const contentType = photo.contentType || 'image/jpeg';
+            photoUrl = `data:${contentType};base64,${photo.data}`;
+        }
         return {
             username: resident.username,
             displayName: resident.displayName || resident.username,
             badgesGiven: Number(resident.badgesGiven) || 0,
-            lastLocation: { lat, lng }
+            lastLocation: { lat, lng },
+            photoUrl,
+            statusMessage
         };
     }
 
@@ -192,11 +201,15 @@
         return payload;
     }
 
-    async function registerResident({ username, password, displayName }) {
+    async function registerResident({ username, password, displayName, photo }) {
+        const body = { username, password, displayName };
+        if (photo) {
+            body.photo = photo;
+        }
         const payload = await apiRequest('/api/residents/register', {
             method: 'POST',
             auth: false,
-            body: JSON.stringify({ username, password, displayName })
+            body: JSON.stringify(body)
         });
         if (payload?.token) {
             setSession({ token: payload.token, resident: payload.resident || null });
@@ -215,6 +228,34 @@
         if (payload?.token) {
             setSession({ token: payload.token, resident: payload.resident || null });
         } else if (payload?.resident) {
+            updateResidentState(payload.resident);
+        }
+        return payload?.resident || null;
+    }
+
+    async function updateResidentProfile(params = {}) {
+        const { displayName, photo, removePhoto, statusMessage } = params || {};
+        const body = {};
+        if (Object.prototype.hasOwnProperty.call(params, 'displayName')) {
+            body.displayName = displayName;
+        }
+        if (Object.prototype.hasOwnProperty.call(params, 'photo')) {
+            body.photo = photo;
+        }
+        if (removePhoto === true) {
+            body.removePhoto = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(params, 'statusMessage')) {
+            body.statusMessage = statusMessage;
+        }
+        if (!Object.keys(body).length) {
+            throw new Error('Tidak ada perubahan yang dikirim.');
+        }
+        const payload = await apiRequest('/api/residents/me', {
+            method: 'PUT',
+            body: JSON.stringify(body)
+        });
+        if (payload?.resident) {
             updateResidentState(payload.resident);
         }
         return payload?.resident || null;
@@ -387,6 +428,7 @@
         loginResident,
         logoutResident,
         refreshProfile,
+        updateResidentProfile,
         setShareLocation,
         updateLastLocation,
         incrementBadgeCount,

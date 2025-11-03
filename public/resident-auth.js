@@ -1,4 +1,6 @@
 (function () {
+    const RESIDENT_MAX_PHOTO_BYTES = 1024 * 1024;
+
     function getQueryParams() {
         const params = {};
         try {
@@ -47,6 +49,46 @@
         }
     }
 
+    function fileToDataUrl(file) {
+        return new Promise((resolve, reject) => {
+            if (!file) {
+                reject(new Error('File tidak ditemukan.'));
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Tidak dapat membaca file.'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function updatePhotoPreview(previewElement, dataUrl) {
+        if (!previewElement) {
+            return;
+        }
+        const imageElement = previewElement.querySelector('.auth-photo-preview__image');
+        const placeholderElement = previewElement.querySelector('.auth-photo-preview__placeholder');
+        if (dataUrl) {
+            if (imageElement) {
+                if (imageElement.src !== dataUrl) {
+                    imageElement.src = dataUrl;
+                }
+            }
+            if (placeholderElement) {
+                placeholderElement.setAttribute('aria-hidden', 'true');
+            }
+            previewElement.dataset.hasImage = 'true';
+        } else {
+            if (imageElement && imageElement.getAttribute('src')) {
+                imageElement.removeAttribute('src');
+            }
+            if (placeholderElement) {
+                placeholderElement.removeAttribute('aria-hidden');
+            }
+            delete previewElement.dataset.hasImage;
+        }
+    }
+
     function ensureResidentAPI() {
         if (typeof window.ResidentSession === 'undefined') {
             throw new Error('Fitur warga belum siap. Muat ulang halaman dan coba lagi.');
@@ -59,8 +101,38 @@
         const submitBtn = form.querySelector('button[type="submit"]');
         const params = getQueryParams();
         const usernameInput = form.querySelector('#resident-register-username');
+        const photoInput = form.querySelector('#resident-register-photo');
+        const photoPreview = document.getElementById('resident-register-photo-preview');
+        let cachedPhotoDataUrl = null;
         if (params.username && usernameInput && !usernameInput.value) {
             usernameInput.value = params.username;
+        }
+
+        if (photoInput) {
+            photoInput.addEventListener('change', async () => {
+                cachedPhotoDataUrl = null;
+                if (!photoInput.files || !photoInput.files[0]) {
+                    updatePhotoPreview(photoPreview, null);
+                    return;
+                }
+                const file = photoInput.files[0];
+                if (file.size > RESIDENT_MAX_PHOTO_BYTES) {
+                    showMessage(messageEl, 'error', 'Foto maksimal 1MB.');
+                    photoInput.value = '';
+                    updatePhotoPreview(photoPreview, null);
+                    return;
+                }
+                try {
+                    const dataUrl = await fileToDataUrl(file);
+                    cachedPhotoDataUrl = dataUrl;
+                    updatePhotoPreview(photoPreview, dataUrl);
+                    showMessage(messageEl, null, '');
+                } catch (error) {
+                    showMessage(messageEl, 'error', 'Tidak dapat membaca foto profil.');
+                    photoInput.value = '';
+                    updatePhotoPreview(photoPreview, null);
+                }
+            });
         }
 
         form.addEventListener('submit', async (event) => {
@@ -84,10 +156,34 @@
                 return;
             }
 
+            let photoDataUrl = cachedPhotoDataUrl;
+            const photoFile = photoInput?.files?.[0] || null;
+            if (photoFile) {
+                if (photoFile.size > RESIDENT_MAX_PHOTO_BYTES) {
+                    showMessage(messageEl, 'error', 'Foto maksimal 1MB.');
+                    return;
+                }
+                if (!photoDataUrl) {
+                    try {
+                        photoDataUrl = await fileToDataUrl(photoFile);
+                        cachedPhotoDataUrl = photoDataUrl;
+                        updatePhotoPreview(photoPreview, photoDataUrl);
+                    } catch (error) {
+                        showMessage(messageEl, 'error', 'Tidak dapat membaca foto profil.');
+                        return;
+                    }
+                }
+            }
+
             ensureSubmitState(submitBtn, true, 'Mendaftarkan...');
             try {
                 const api = ensureResidentAPI();
-                const resident = await api.registerResident({ username, password, displayName });
+                const resident = await api.registerResident({
+                    username,
+                    password,
+                    displayName,
+                    photo: photoDataUrl || undefined
+                });
                 const name = resident?.displayName || resident?.username || 'Warga Hebat';
                 showMessage(messageEl, 'success', `Halo ${name}! Akun warga kamu siap dipakai.`);
                 setTimeout(() => {
