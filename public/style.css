@@ -1649,6 +1649,74 @@ body {
     background: rgba(241, 245, 249, 0.8);
 }
 
+.live-seller-photo-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+    transition: opacity 0.2s ease;
+}
+
+.live-seller-photo-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.live-seller-photo-overlay-open {
+    overflow: hidden;
+}
+
+.live-seller-photo-overlay-content {
+    position: relative;
+    width: 100%;
+    max-width: min(96vw, 640px);
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.live-seller-photo-overlay-close {
+    align-self: flex-end;
+    border: none;
+    background: rgba(15, 23, 42, 0.85);
+    color: #e2e8f0;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.live-seller-photo-overlay-close:hover {
+    background: rgba(15, 23, 42, 0.95);
+}
+
+.live-seller-photo-overlay-images {
+    width: 100%;
+    max-height: inherit;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px;
+}
+
+.live-seller-photo-overlay-images img {
+    width: 100%;
+    border-radius: 16px;
+    object-fit: contain;
+    max-height: calc(92vh - 64px);
+    background: #f8fafc;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.45);
+}
+
 .live-seller-edit-btn {
     border: none;
     background: linear-gradient(135deg, #2563eb, #7c3aed);

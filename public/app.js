@@ -117,6 +117,127 @@ let actionMenu;
 let actionMenuToggleButton;
 let actionMenuContent;
 
+let liveSellerPhotoOverlayElement = null;
+let liveSellerPhotoOverlayImagesContainer = null;
+let liveSellerPhotoOverlayEscapeHandler = null;
+
+function ensureLiveSellerPhotoOverlay() {
+    if (liveSellerPhotoOverlayElement) {
+        return liveSellerPhotoOverlayElement;
+    }
+    if (!document.body) {
+        return null;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'live-seller-photo-overlay hidden';
+
+    const content = document.createElement('div');
+    content.className = 'live-seller-photo-overlay-content';
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'live-seller-photo-overlay-close';
+    closeButton.textContent = 'Tutup';
+    closeButton.addEventListener('click', () => {
+        closeLiveSellerPhotoOverlay();
+    });
+
+    const imagesContainer = document.createElement('div');
+    imagesContainer.className = 'live-seller-photo-overlay-images';
+
+    content.appendChild(closeButton);
+    content.appendChild(imagesContainer);
+    overlay.appendChild(content);
+
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            closeLiveSellerPhotoOverlay();
+        }
+    });
+
+    liveSellerPhotoOverlayElement = overlay;
+    liveSellerPhotoOverlayImagesContainer = imagesContainer;
+    liveSellerPhotoOverlayEscapeHandler = (event) => {
+        if (event.key === 'Escape') {
+            closeLiveSellerPhotoOverlay();
+        }
+    };
+
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function openLiveSellerPhotoOverlay({ photos = [], sellerName = 'Gerobak Online', startIndex = 0 } = {}) {
+    if (!Array.isArray(photos) || photos.length === 0) {
+        return;
+    }
+
+    const overlay = ensureLiveSellerPhotoOverlay();
+    if (!overlay || !liveSellerPhotoOverlayImagesContainer) {
+        return;
+    }
+
+    const normalizedIndex = Math.min(Math.max(startIndex, 0), photos.length - 1);
+
+    liveSellerPhotoOverlayImagesContainer.innerHTML = '';
+
+    const fragment = document.createDocumentFragment();
+    let focusImage = null;
+
+    photos.forEach((photo, index) => {
+        if (!photo || !photo.data) {
+            return;
+        }
+        const img = document.createElement('img');
+        const contentType = photo.contentType || 'image/jpeg';
+        img.src = `data:${contentType};base64,${photo.data}`;
+        img.alt = `${sellerName} menu ${index + 1}`;
+        if (index === normalizedIndex) {
+            focusImage = img;
+        }
+        fragment.appendChild(img);
+    });
+
+    if (!fragment.childNodes.length) {
+        return;
+    }
+
+    liveSellerPhotoOverlayImagesContainer.appendChild(fragment);
+
+    overlay.classList.remove('hidden');
+    document.body.classList.add('live-seller-photo-overlay-open');
+
+    if (focusImage) {
+        requestAnimationFrame(() => {
+            focusImage.scrollIntoView({ block: 'center', inline: 'center' });
+        });
+    }
+
+    if (liveSellerPhotoOverlayEscapeHandler) {
+        document.addEventListener('keydown', liveSellerPhotoOverlayEscapeHandler);
+    }
+}
+
+function closeLiveSellerPhotoOverlay() {
+    if (!liveSellerPhotoOverlayElement) {
+        return;
+    }
+
+    liveSellerPhotoOverlayElement.classList.add('hidden');
+    if (document.body) {
+        document.body.classList.remove('live-seller-photo-overlay-open');
+    }
+
+    if (liveSellerPhotoOverlayImagesContainer) {
+        liveSellerPhotoOverlayImagesContainer.innerHTML = '';
+    }
+
+    if (liveSellerPhotoOverlayEscapeHandler) {
+        document.removeEventListener('keydown', liveSellerPhotoOverlayEscapeHandler);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     actionMenu = document.getElementById('action-menu');
     actionMenuToggleButton = document.getElementById('action-menu-toggle');
@@ -1500,12 +1621,22 @@ function buildLiveSellerPopupNode(seller, entry) {
 
             const gallery = document.createElement('div');
             gallery.className = 'live-seller-popup-menu hidden';
+            const sellerDisplayName = seller?.nama || seller?.username || 'Gerobak Online';
 
             photos.forEach((photo, index) => {
                 const img = document.createElement('img');
                 const contentType = photo.contentType || 'image/jpeg';
                 img.src = `data:${contentType};base64,${photo.data}`;
-                img.alt = `${seller?.nama || seller?.username || 'Gerobak Online'} menu ${index + 1}`;
+                img.alt = `${sellerDisplayName} menu ${index + 1}`;
+                img.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openLiveSellerPhotoOverlay({
+                        photos,
+                        sellerName: sellerDisplayName,
+                        startIndex: index
+                    });
+                });
                 gallery.appendChild(img);
             });
 
