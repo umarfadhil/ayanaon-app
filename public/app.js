@@ -266,6 +266,8 @@ const MAX_LIVE_SELLER_PHOTO_BYTES = 1024 * 1024;
 const MAX_MENU_PHOTO_COUNT = 3;
 const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
 const RESIDENT_MAX_PHOTO_BYTES = 1024 * 1024;
+const LIVE_SELLER_PHOTO_MAX_DIMENSION = 512;
+const LIVE_SELLER_MENU_PHOTO_MAX_DIMENSION = 1280;
 
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
@@ -2501,6 +2503,152 @@ function readFileAsDataUrl(file) {
     });
 }
 
+function estimateDataUrlBytes(dataUrl) {
+    if (typeof dataUrl !== 'string') {
+        return 0;
+    }
+    const commaIndex = dataUrl.indexOf(',');
+    if (commaIndex === -1) {
+        return 0;
+    }
+    const base64 = dataUrl.slice(commaIndex + 1);
+    const paddingMatch = base64.match(/=+$/);
+    const padding = paddingMatch ? paddingMatch[0].length : 0;
+    return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function loadImageElementFromFile(file) {
+    return new Promise((resolve, reject) => {
+        if (!file) {
+            reject(new Error('File tidak ditemukan.'));
+            return;
+        }
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        const cleanup = () => {
+            URL.revokeObjectURL(objectUrl);
+        };
+        image.onload = () => {
+            const finish = () => {
+                cleanup();
+                resolve(image);
+            };
+            if (typeof image.decode === 'function') {
+                image.decode().then(finish).catch(() => finish());
+            } else {
+                finish();
+            }
+        };
+        image.onerror = () => {
+            cleanup();
+            reject(new Error('Tidak dapat memuat gambar.'));
+        };
+        image.src = objectUrl;
+    });
+}
+
+async function generateOptimizedImageDataUrl(file, options = {}) {
+    if (!file) {
+        throw new Error('File tidak ditemukan.');
+    }
+    const image = await loadImageElementFromFile(file);
+    const hasWidthConstraint = typeof options.maxWidth === 'number' && options.maxWidth > 0;
+    const hasHeightConstraint = typeof options.maxHeight === 'number' && options.maxHeight > 0;
+    const widthLimit = hasWidthConstraint ? options.maxWidth : image.width;
+    const heightLimit = hasHeightConstraint ? options.maxHeight : image.height;
+    const widthRatio = Number.isFinite(widthLimit) && image.width > 0 ? widthLimit / image.width : 1;
+    const heightRatio = Number.isFinite(heightLimit) && image.height > 0 ? heightLimit / image.height : 1;
+    const scale = Math.min(1, widthRatio > 0 ? widthRatio : 1, heightRatio > 0 ? heightRatio : 1);
+    const targetWidth = Math.max(1, Math.round(image.width * scale));
+    const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+        throw new Error('Browser tidak mendukung pengolahan gambar.');
+    }
+    context.imageSmoothingQuality = 'high';
+    context.imageSmoothingEnabled = true;
+    context.clearRect(0, 0, targetWidth, targetHeight);
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    const maxBytes = typeof options.maxBytes === 'number' && options.maxBytes > 0 ? options.maxBytes : null;
+    const preferredMimeTypes = Array.isArray(options.preferredMimeTypes) && options.preferredMimeTypes.length
+        ? options.preferredMimeTypes.filter(Boolean)
+        : ['image/webp', 'image/jpeg', 'image/png'];
+
+    const initialQuality = typeof options.initialQuality === 'number'
+        ? Math.min(Math.max(options.initialQuality, 0.35), 0.95)
+        : 0.82;
+    const minQuality = typeof options.minQuality === 'number'
+        ? Math.min(Math.max(options.minQuality, 0.2), initialQuality)
+        : 0.5;
+    const qualityStep = typeof options.qualityStep === 'number' && options.qualityStep > 0
+        ? options.qualityStep
+        : 0.1;
+
+    const qualityLevels = [];
+    if (maxBytes) {
+        let currentQuality = initialQuality;
+        while (currentQuality + 0.0001 >= minQuality) {
+            const rounded = Number(currentQuality.toFixed(2));
+            if (!qualityLevels.includes(rounded)) {
+                qualityLevels.push(rounded);
+            }
+            currentQuality = Number((currentQuality - qualityStep).toFixed(2));
+        }
+    } else {
+        qualityLevels.push(initialQuality);
+    }
+    qualityLevels.push(undefined);
+
+    for (const quality of qualityLevels) {
+        for (const mimeType of preferredMimeTypes) {
+            let dataUrl;
+            try {
+                dataUrl = quality === undefined ? canvas.toDataURL(mimeType) : canvas.toDataURL(mimeType, quality);
+            } catch (error) {
+                continue;
+            }
+            if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+                continue;
+            }
+            const mimeMatch = /^data:([^;,]+)[;,]/.exec(dataUrl);
+            const actualMimeType = mimeMatch ? mimeMatch[1] : mimeType;
+            if (mimeType !== actualMimeType && mimeType !== 'image/png') {
+                continue;
+            }
+            const bytes = estimateDataUrlBytes(dataUrl);
+            if (!maxBytes || bytes <= maxBytes) {
+                return {
+                    dataUrl,
+                    bytes,
+                    mimeType: actualMimeType,
+                    width: targetWidth,
+                    height: targetHeight
+                };
+            }
+        }
+    }
+
+    const fallbackDataUrl = canvas.toDataURL('image/png');
+    const fallbackBytes = estimateDataUrlBytes(fallbackDataUrl);
+    if (!maxBytes || fallbackBytes <= maxBytes) {
+        return {
+            dataUrl: fallbackDataUrl,
+            bytes: fallbackBytes,
+            mimeType: 'image/png',
+            width: targetWidth,
+            height: targetHeight
+        };
+    }
+
+    throw new Error('Foto masih terlalu besar setelah dikompres.');
+}
+
 function setLiveSellerEditMessage(type, text) {
     if (!liveSellerEditMessageElement) {
         return;
@@ -2760,16 +2908,6 @@ async function handleLiveSellerEditPhotoChange(event) {
         setLiveSellerEditMessage(null, '');
         return;
     }
-    if (file.size > MAX_LIVE_SELLER_PHOTO_BYTES) {
-        setLiveSellerEditMessage('error', 'Ukuran foto melebihi 1MB. Silakan kompres terlebih dahulu.');
-        input.value = '';
-        liveSellerEditSelectedPhotoDataUrl = null;
-        setLiveSellerEditPhotoPreview(
-            liveSellerEditExistingPhotoDataUrl,
-            liveSellerEditNameInput?.value || 'Foto Gerobak'
-        );
-        return;
-    }
     if (file.type && !file.type.toLowerCase().startsWith('image/')) {
         setLiveSellerEditMessage('error', 'Format foto tidak dikenali. Gunakan JPG atau PNG.');
         input.value = '';
@@ -2781,13 +2919,23 @@ async function handleLiveSellerEditPhotoChange(event) {
         return;
     }
     try {
-        const dataUrl = await readFileAsDataUrl(file);
-        liveSellerEditSelectedPhotoDataUrl = dataUrl;
+        setLiveSellerEditMessage(null, 'Memproses foto...');
+        const optimized = await generateOptimizedImageDataUrl(file, {
+            maxWidth: LIVE_SELLER_PHOTO_MAX_DIMENSION,
+            maxHeight: LIVE_SELLER_PHOTO_MAX_DIMENSION,
+            maxBytes: MAX_LIVE_SELLER_PHOTO_BYTES,
+            preferredMimeTypes: ['image/webp', 'image/png', 'image/jpeg'],
+            initialQuality: 0.88,
+            minQuality: 0.55,
+            qualityStep: 0.08
+        });
+        liveSellerEditSelectedPhotoDataUrl = optimized.dataUrl;
         setLiveSellerEditPhotoPreview(
-            dataUrl,
+            optimized.dataUrl,
             liveSellerEditNameInput?.value || 'Foto Gerobak'
         );
         setLiveSellerEditMessage(null, '');
+        input.value = '';
     } catch (error) {
         setLiveSellerEditMessage('error', error.message || 'Tidak dapat memuat foto.');
         input.value = '';
@@ -2948,19 +3096,33 @@ function initializeLiveSellerEditModal() {
                 liveSellerEditMenuInput.value = '';
                 return;
             }
-            const oversized = files.find(file => file.size > MAX_MENU_PHOTO_BYTES);
-            if (oversized) {
-                setLiveSellerEditMessage('error', 'Setiap foto menu maksimal berukuran 4MB.');
+            const invalidFile = files.find(file => file.type && !file.type.toLowerCase().startsWith('image/'));
+            if (invalidFile) {
+                setLiveSellerEditMessage('error', 'Format foto menu tidak dikenali. Gunakan JPG atau PNG.');
                 liveSellerEditMenuInput.value = '';
                 return;
             }
             try {
-                const dataUrls = await Promise.all(files.map(readFileAsDataUrl));
-                dataUrls.forEach((dataUrl, index) => {
+                setLiveSellerEditMessage(null, 'Memproses foto menu...');
+                const optimizedPhotos = [];
+                for (const file of files) {
+                    const optimized = await generateOptimizedImageDataUrl(file, {
+                        maxWidth: LIVE_SELLER_MENU_PHOTO_MAX_DIMENSION,
+                        maxHeight: LIVE_SELLER_MENU_PHOTO_MAX_DIMENSION,
+                        maxBytes: MAX_MENU_PHOTO_BYTES,
+                        preferredMimeTypes: ['image/webp', 'image/jpeg'],
+                        initialQuality: 0.82,
+                        minQuality: 0.5,
+                        qualityStep: 0.1
+                    });
+                    optimizedPhotos.push(optimized);
+                }
+                optimizedPhotos.forEach((optimized) => {
                     liveSellerEditMenuState.added.push({
                         id: `added-${Date.now()}-${liveSellerEditMenuSequence++}`,
-                        dataUrl,
-                        contentType: files[index].type || 'image/jpeg'
+                        dataUrl: optimized.dataUrl,
+                        contentType: optimized.mimeType,
+                        size: optimized.bytes
                     });
                 });
                 setLiveSellerEditMessage(null, '');
@@ -2968,6 +3130,7 @@ function initializeLiveSellerEditModal() {
                 renderLiveSellerMenuPreview();
             } catch (error) {
                 setLiveSellerEditMessage('error', error.message || 'Tidak dapat memuat foto menu.');
+                liveSellerEditMenuInput.value = '';
             }
         });
     }

@@ -195,4 +195,16 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 - **Avatar-Only Map Markers**: Resident markers (including the current user while sharing location) are rendered as breathing circular avatars with optional photos and status bubbles, replacing the previous dot-style pin for a clearer map experience.
 - **Backend Status Support**: Resident share payloads now include the saved status message so it persists between refreshes and appears consistently whenever a Warga is live.
 
+---
+
+## What's New in v2.2.1
+
+- **Tap-to-Zoom Menu Gallery**: Live Seller menu thumbnails now open a full-screen overlay when tapped, making it easier to inspect dishes without leaving the map view.
+
+---
+
+## What's New in v2.2.2
+
+- **Client-Side Image Optimization**: Logo and menu uploads are automatically resized and compressed in the browser before submission, keeping payloads small while preserving visual quality.
+
 
