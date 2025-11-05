@@ -317,27 +317,6 @@
         });
     }
 
-    function initVerifyForm(form) {
-        const messageEl = document.getElementById('form-message');
-        const submitBtn = form.querySelector('button[type="submit"]');
-        const params = getQueryParams();
-        const usernameInput = form.querySelector('#verify-username');
-        if (params.username && usernameInput && !usernameInput.value) {
-            usernameInput.value = params.username;
-        }
-
-        showMessage(messageEl, 'success', 'Gerobak Online kamu sudah aktif. Tidak perlu memasukkan kode verifikasi.');
-
-        form.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            const username = String(form.querySelector('#verify-username')?.value || '').trim();
-            setTimeout(() => {
-                const target = username ? `login.html?username=${encodeURIComponent(username)}` : 'login.html';
-                window.location.href = target;
-            }, 400);
-        });
-    }
-
     function initLoginForm(form) {
         const messageEl = document.getElementById('form-message');
         const submitBtn = form.querySelector('button[type="submit"]');
@@ -386,10 +365,6 @@
         const registerForm = document.getElementById('register-form');
         if (registerForm) {
             initRegisterForm(registerForm);
-        }
-        const verifyForm = document.getElementById('verify-form');
-        if (verifyForm) {
-            initVerifyForm(verifyForm);
         }
         const loginForm = document.getElementById('login-form');
         if (loginForm) {

@@ -36,6 +36,15 @@ let fuelToggleMode = 'fuel';
 let specialCategoryOffButton;
 let showSpecialCategories = false;
 
+let pinFormContainer;
+let addPinFormElement;
+let pinTitleInput;
+let pinDescriptionInput;
+let pinCategorySelectElement;
+let pinLinkInput;
+let pinLifetimeSelectElement;
+let pinLifetimeDateInput;
+
 let liveSellerMarkers = [];
 let liveSellerRefreshTimer = null;
 let liveSellerWatchId = null;
@@ -3424,7 +3433,7 @@ function getPinDateRangeForFilter(pin) {
 }
 
 function removeDeveloperOnlyCategoryOptions() {
-    const categorySelect = document.getElementById('category');
+    const categorySelect = pinCategorySelectElement || document.getElementById('category');
     if (!categorySelect) {
         return;
     }
@@ -3446,6 +3455,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterSearchButton = document.getElementById('filter-search-btn');
     const filterDateRangeInput = document.getElementById('filter-date-range-input');
     const resetFilterBtn = document.getElementById('reset-filter-btn');
+    addPinFormElement = document.getElementById('add-pin-form');
+    pinFormContainer = document.getElementById('pin-form');
+    pinTitleInput = document.getElementById('title');
+    pinDescriptionInput = document.getElementById('description');
+    pinCategorySelectElement = document.getElementById('category');
+    pinLinkInput = document.getElementById('link');
     liveSellerPanel = document.getElementById('live-seller-panel');
     liveSellerToggleButton = document.getElementById('live-seller-toggle-btn');
     liveSellerLoginButton = document.getElementById('live-seller-login-btn');
@@ -3502,7 +3517,6 @@ document.addEventListener('DOMContentLoaded', () => {
     liveSellerNameLabel = document.getElementById('live-seller-name');
     liveSellerBrandLabel = document.getElementById('live-seller-brand');
     liveSellerPhoneLink = document.getElementById('live-seller-phone');
-    liveSellerPhoneNote = document.getElementById('live-seller-phone-note');
     liveSellerPhoneNote = document.getElementById('live-seller-phone-note');
     liveSellerPhotoElement = document.getElementById('live-seller-photo');
     liveSellerCommunityBadge = document.getElementById('live-seller-community-badge');
@@ -3976,35 +3990,35 @@ document.addEventListener('DOMContentLoaded', () => {
     window.applyFilters = filterMarkers;
 
     // Lifetime options logic
-    const lifetimeSelect = document.getElementById('lifetime-select');
-    const lifetimeDatePicker = document.getElementById('lifetime-date-picker');
+    pinLifetimeSelectElement = document.getElementById('lifetime-select');
+    pinLifetimeDateInput = document.getElementById('lifetime-date-picker');
     let lifetimePicker = null;
 
-    if (lifetimeDatePicker && typeof flatpickr === 'function') {
-        lifetimePicker = flatpickr(lifetimeDatePicker, {
+    if (pinLifetimeDateInput && typeof flatpickr === 'function') {
+        lifetimePicker = flatpickr(pinLifetimeDateInput, {
             mode: 'range',
             dateFormat: 'Y-m-d',
             allowInput: false
         });
-        lifetimeDatePicker.setAttribute('readonly', 'readonly');
+        pinLifetimeDateInput.setAttribute('readonly', 'readonly');
     }
 
     // Hide date picker by default
-    if (lifetimeDatePicker) {
-        lifetimeDatePicker.style.display = 'none';
+    if (pinLifetimeDateInput) {
+        pinLifetimeDateInput.style.display = 'none';
     }
 
-    if (lifetimeSelect) {
-        lifetimeSelect.addEventListener('change', (e) => {
-            if (!lifetimeDatePicker) return;
+    if (pinLifetimeSelectElement) {
+        pinLifetimeSelectElement.addEventListener('change', (e) => {
+            if (!pinLifetimeDateInput) return;
             if (e.target.value === 'date') {
-                lifetimeDatePicker.style.display = 'block';
+                pinLifetimeDateInput.style.display = 'block';
             } else {
-                lifetimeDatePicker.style.display = 'none';
+                pinLifetimeDateInput.style.display = 'none';
                 if (lifetimePicker) {
                     lifetimePicker.clear();
                 } else {
-                    lifetimeDatePicker.value = '';
+                    pinLifetimeDateInput.value = '';
                 }
             }
         });
@@ -4262,12 +4276,18 @@ async function initMap() {
             return;
         }
     
-        const title = document.getElementById('title').value;
-        const description = document.getElementById('description').value;
-        const category = document.getElementById('category').value;
-        const link = document.getElementById('link').value;
-        const lifetimeType = document.getElementById('lifetime-select').value;
-        const lifetimeInputEl = document.getElementById('lifetime-date-picker');
+        const titleInputEl = pinTitleInput || document.getElementById('title');
+        const descriptionInputEl = pinDescriptionInput || document.getElementById('description');
+        const categorySelectEl = pinCategorySelectElement || document.getElementById('category');
+        const linkInputEl = pinLinkInput || document.getElementById('link');
+        const lifetimeSelectEl = pinLifetimeSelectElement || document.getElementById('lifetime-select');
+        const lifetimeInputEl = pinLifetimeDateInput || document.getElementById('lifetime-date-picker');
+
+        const title = titleInputEl ? titleInputEl.value : '';
+        const description = descriptionInputEl ? descriptionInputEl.value : '';
+        const category = categorySelectEl ? categorySelectEl.value : '';
+        const link = linkInputEl ? linkInputEl.value : '';
+        const lifetimeType = lifetimeSelectEl ? lifetimeSelectEl.value : '';
     
         if (!title || !description || !category || !lifetimeType) {
             alert('Please fill out all fields');
@@ -4342,9 +4362,14 @@ async function initMap() {
             if (typeof window.applyFilters === 'function') {
                 window.applyFilters();
             }
-            document.getElementById('add-pin-form').reset();
+            const formEl = addPinFormElement || document.getElementById('add-pin-form');
+            if (formEl) {
+                formEl.reset();
+            }
             removeDeveloperOnlyCategoryOptions();
-            document.getElementById('lifetime-date-picker').style.display = 'none';
+            if (lifetimeInputEl) {
+                lifetimeInputEl.style.display = 'none';
+            }
             alert('Pin dropped successfully!');
         });
     }
@@ -4464,14 +4489,24 @@ function handleLocationError(browserHasGeolocation) {
         });
     });
 
-    document.getElementById('add-pin-form').addEventListener('submit', submitPin);
-    document.getElementById('add-pin-btn').addEventListener('click', () => {
-        const pinForm = document.getElementById('pin-form');
-        pinForm.classList.toggle('hidden');
-        editingPinId = null; // Reset editing state
-        document.getElementById('add-pin-form').reset();
+    if (addPinFormElement) {
+        addPinFormElement.addEventListener('submit', submitPin);
+    }
+    const addPinButton = document.getElementById('add-pin-btn');
+    if (addPinButton) {
+        addPinButton.addEventListener('click', () => {
+            const formContainer = pinFormContainer || document.getElementById('pin-form');
+            if (formContainer) {
+                formContainer.classList.toggle('hidden');
+            }
+            editingPinId = null; // Reset editing state
+            const formEl = addPinFormElement || document.getElementById('add-pin-form');
+            if (formEl) {
+                formEl.reset();
+            }
             removeDeveloperOnlyCategoryOptions();
-    });
+        });
+    }
 
     fetchPins();
     getUserIp();
@@ -4547,9 +4582,15 @@ function getUserIp() {
 
 function editPin(id) {
     const pin = markers.find(marker => marker.pin._id === id).pin;
-    document.getElementById('title').value = pin.title;
-    document.getElementById('description').value = pin.description;
-    const categorySelect = document.getElementById('category');
+    const titleInputEl = pinTitleInput || document.getElementById('title');
+    if (titleInputEl) {
+        titleInputEl.value = pin.title;
+    }
+    const descriptionInputEl = pinDescriptionInput || document.getElementById('description');
+    if (descriptionInputEl) {
+        descriptionInputEl.value = pin.description;
+    }
+    const categorySelect = pinCategorySelectElement || document.getElementById('category');
     if (categorySelect) {
         let categoryOption = Array.from(categorySelect.options).find(option => option.value === pin.category);
         if (!categoryOption) {
@@ -4559,45 +4600,62 @@ function editPin(id) {
         }
         categorySelect.value = pin.category;
     }
-    document.getElementById('link').value = pin.link;
-    document.getElementById('lifetime-select').value = pin.lifetime.type;
-    const lifetimeInputEl = document.getElementById('lifetime-date-picker');
-    if (pin.lifetime.type === 'date') {
-        lifetimeInputEl.style.display = 'block';
-        const fp = lifetimeInputEl && lifetimeInputEl._flatpickr ? lifetimeInputEl._flatpickr : null;
-        if (pin.lifetime.start && pin.lifetime.end) {
-            if (fp) {
-                fp.setDate([pin.lifetime.start, pin.lifetime.end], true);
-            } else {
-                lifetimeInputEl.value = `${pin.lifetime.start} to ${pin.lifetime.end}`;
+    const linkInputEl = pinLinkInput || document.getElementById('link');
+    if (linkInputEl) {
+        linkInputEl.value = pin.link;
+    }
+    const lifetimeSelectEl = pinLifetimeSelectElement || document.getElementById('lifetime-select');
+    if (lifetimeSelectEl) {
+        lifetimeSelectEl.value = pin.lifetime.type;
+    }
+    const lifetimeInputEl = pinLifetimeDateInput || document.getElementById('lifetime-date-picker');
+    if (lifetimeInputEl) {
+        if (pin.lifetime.type === 'date') {
+            lifetimeInputEl.style.display = 'block';
+            const fp = lifetimeInputEl._flatpickr || null;
+            if (pin.lifetime.start && pin.lifetime.end) {
+                if (fp) {
+                    fp.setDate([pin.lifetime.start, pin.lifetime.end], true);
+                } else {
+                    lifetimeInputEl.value = `${pin.lifetime.start} to ${pin.lifetime.end}`;
+                }
+            } else if (pin.lifetime.value) {
+                if (fp) {
+                    fp.setDate([pin.lifetime.value], true);
+                } else {
+                    lifetimeInputEl.value = pin.lifetime.value.split('T')[0];
+                }
             }
-        } else if (pin.lifetime.value) {
-            if (fp) {
-                fp.setDate([pin.lifetime.value], true);
+        } else {
+            lifetimeInputEl.style.display = 'none';
+            if (lifetimeInputEl._flatpickr) {
+                lifetimeInputEl._flatpickr.clear();
             } else {
-                lifetimeInputEl.value = pin.lifetime.value.split('T')[0];
+                lifetimeInputEl.value = '';
             }
-        }
-    } else {
-        lifetimeInputEl.style.display = 'none';
-        if (lifetimeInputEl && lifetimeInputEl._flatpickr) {
-            lifetimeInputEl._flatpickr.clear();
-        } else if (lifetimeInputEl) {
-            lifetimeInputEl.value = '';
         }
     }
 
     editingPinId = id;
-    document.getElementById('pin-form').classList.remove('hidden');
+    const formContainer = pinFormContainer || document.getElementById('pin-form');
+    if (formContainer) {
+        formContainer.classList.remove('hidden');
+    }
 }
 
 function updatePin(id) {
-    const title = document.getElementById('title').value;
-    const description = document.getElementById('description').value;
-    const category = document.getElementById('category').value;
-    const link = document.getElementById('link').value;
-    const lifetimeType = document.getElementById('lifetime-select').value;
-    const lifetimeValue = document.getElementById('lifetime-date-picker').value;
+    const titleInputEl = pinTitleInput || document.getElementById('title');
+    const descriptionInputEl = pinDescriptionInput || document.getElementById('description');
+    const categorySelectEl = pinCategorySelectElement || document.getElementById('category');
+    const linkInputEl = pinLinkInput || document.getElementById('link');
+    const lifetimeSelectEl = pinLifetimeSelectElement || document.getElementById('lifetime-select');
+    const lifetimeInputEl = pinLifetimeDateInput || document.getElementById('lifetime-date-picker');
+
+    const title = titleInputEl ? titleInputEl.value : '';
+    const description = descriptionInputEl ? descriptionInputEl.value : '';
+    const category = categorySelectEl ? categorySelectEl.value : '';
+    const link = linkInputEl ? linkInputEl.value : '';
+    const lifetimeType = lifetimeSelectEl ? lifetimeSelectEl.value : '';
 
     const updatedPin = {
         title,
@@ -4605,7 +4663,6 @@ function updatePin(id) {
         category,
         link,
         lifetime: (() => {
-            const lifetimeInputEl = document.getElementById('lifetime-date-picker');
             if (lifetimeType !== 'date') {
                 return { type: lifetimeType };
             }
@@ -4648,9 +4705,15 @@ function updatePin(id) {
             return;
         }
         alert('Pin updated successfully!');
-        document.getElementById('add-pin-form').reset();
-            removeDeveloperOnlyCategoryOptions();
-        document.getElementById('pin-form').classList.add('hidden');
+        const formEl = addPinFormElement || document.getElementById('add-pin-form');
+        if (formEl) {
+            formEl.reset();
+        }
+        removeDeveloperOnlyCategoryOptions();
+        const formContainer = pinFormContainer || document.getElementById('pin-form');
+        if (formContainer) {
+            formContainer.classList.add('hidden');
+        }
         editingPinId = null;
         refreshPins();
     });
