@@ -57,8 +57,6 @@ cd ayanaon-app
 You'll need a `.env` file in your project root with:
 - `MONGODB_URI`: Your MongoDB connection string.
 - `GOOGLE_MAPS_API_KEY`: Your Google Maps JavaScript API key.
-- `JWT_SECRET`: Secret used to sign seller login tokens.
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` *(optional)*: These remain blank when WhatsApp verification is disabled; the six-digit code will appear directly in the API response or logs for manual entry.
 
 ### 3. Install dependencies
 ```bash
