@@ -91,6 +91,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.2.4
+- **Photo-Rich Pins:** Pins now accept up to three photos; uploads are compressed in the browser, previewed in-line, and existing images can be removed or restored before saving.
+- **Immersive Gallery Experience:** Pin popups render image strips and open a full-screen viewer so residents can browse every attachment without leaving the map.
+- **Smoother Pin Editing:** The share panel scrolls gracefully on small screens while the backend normalizes image payloads and lifetime expirations to keep pins tidy.
+
 ### What's New in v2.2.3
 - **Optimized Pin Form Handling:** Cached frequently used DOM nodes so pin creation and editing reuse the same references instead of querying the document repeatedly.
 - **Lean Auth Bundle:** Removed the unused verification initializer and redundant script include now that WhatsApp delivery is disabled, shrinking the Gerobak auth footprint without altering workflows.

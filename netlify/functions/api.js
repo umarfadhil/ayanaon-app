@@ -1014,6 +1014,191 @@ router.post('/live-sellers/:id/community-verify', async (req, res) => {
     }
 });
 
+function computeExpiresAtFromLifetime(lifetime) {
+    if (!lifetime || typeof lifetime !== 'object') {
+        return null;
+    }
+    if (lifetime.type === 'today') {
+        const expiresAt = new Date();
+        expiresAt.setHours(23, 59, 59, 999);
+        return expiresAt;
+    }
+    if (lifetime.type === 'date') {
+        const basis = lifetime.end || lifetime.value || lifetime.start;
+        if (basis) {
+            const expiresAt = new Date(basis);
+            if (!Number.isNaN(expiresAt.getTime())) {
+                expiresAt.setHours(23, 59, 59, 999);
+                return expiresAt;
+            }
+        }
+    }
+    return null;
+}
+
+function getPinImageIdentifier(image) {
+    if (!image) {
+        return null;
+    }
+    if (typeof image === 'string') {
+        return image;
+    }
+    if (typeof image !== 'object') {
+        return null;
+    }
+    const keys = [
+        '_id',
+        'id',
+        'uid',
+        'imageId',
+        'imageID',
+        'existingId',
+        'url',
+        'src',
+        'path',
+        'dataUrl',
+        'dataURL',
+        'fileUrl',
+        'fileURL',
+        'filePath',
+        'secureUrl',
+        'secureURL',
+        'secure_url',
+        'signedUrl',
+        'signedURL',
+        'signed_url',
+        'cdnUrl',
+        'cdnURL',
+        'assetUrl',
+        'assetURL',
+        'location',
+        'href'
+    ];
+    for (const key of keys) {
+        const value = image[key];
+        if (typeof value === 'string' && value) {
+            return value;
+        }
+    }
+    if (typeof image.data === 'string' && image.data) {
+        return image.data;
+    }
+    if (image.data && typeof image.data === 'object' && image.data !== image) {
+        return getPinImageIdentifier(image.data);
+    }
+    return null;
+}
+
+function normalizeIncomingPinImages(currentImages, incomingImages) {
+    const incomingList = Array.isArray(incomingImages) ? incomingImages : [];
+    const currentList = Array.isArray(currentImages) ? currentImages : [];
+    const currentById = new Map();
+
+    currentList.forEach((image) => {
+        const identifier = getPinImageIdentifier(image);
+        if (identifier && !currentById.has(identifier)) {
+            currentById.set(identifier, image);
+        }
+    });
+
+    if (!incomingList.length) {
+        return [];
+    }
+
+    return incomingList.reduce((acc, raw) => {
+        if (!raw || (typeof raw !== 'object' && typeof raw !== 'string')) {
+            return acc;
+        }
+
+        if (typeof raw === 'string') {
+            // Treat string as direct data URL or remote URL
+            const identifier = raw;
+            const existing = currentById.get(identifier);
+            if (existing) {
+                acc.push(existing);
+                currentById.delete(identifier);
+                return acc;
+            }
+            acc.push({
+                _id: identifier,
+                dataUrl: raw,
+                contentType: 'image/jpeg',
+                size: 0,
+                originalName: ''
+            });
+            return acc;
+        }
+
+        const { existingId, ...rest } = raw;
+        const candidates = [existingId, getPinImageIdentifier(raw)].filter((value) => typeof value === 'string' && value);
+        let matchedImage = null;
+        let matchedKey = null;
+        for (const candidate of candidates) {
+            if (candidate && currentById.has(candidate)) {
+                matchedImage = currentById.get(candidate);
+                matchedKey = candidate;
+                break;
+            }
+        }
+
+        if (matchedImage) {
+            const merged = {
+                ...matchedImage,
+                ...rest,
+                dataUrl: rest.dataUrl || matchedImage.dataUrl || '',
+                contentType: rest.contentType || matchedImage.contentType || 'image/jpeg',
+                size: typeof rest.size === 'number' ? rest.size : (matchedImage.size || 0),
+                originalName: rest.originalName || matchedImage.originalName || ''
+            };
+            if (!merged.data && (rest.data || matchedImage.data)) {
+                merged.data = rest.data || matchedImage.data;
+            }
+            if (merged.data === undefined) {
+                delete merged.data;
+            }
+            if (merged.existingId) {
+                delete merged.existingId;
+            }
+            if (!merged._id) {
+                merged._id = matchedImage._id || matchedKey || new ObjectId().toString();
+            }
+            acc.push(merged);
+            if (matchedKey) {
+                currentById.delete(matchedKey);
+            }
+            return acc;
+        }
+
+        const dataUrl = rest.dataUrl || (typeof rest.data === 'string'
+            ? (rest.data.startsWith('data:') ? rest.data : `data:${rest.contentType || 'image/jpeg'};base64,${rest.data}`)
+            : '');
+        if (!dataUrl) {
+            return acc;
+        }
+
+        const newImageId = rest._id || existingId || new ObjectId().toString();
+        const newImage = {
+            ...rest,
+            dataUrl,
+            contentType: rest.contentType || 'image/jpeg',
+            size: typeof rest.size === 'number' ? rest.size : 0,
+            originalName: rest.originalName || '',
+            _id: newImageId
+        };
+        if (newImage.data === undefined) {
+            delete newImage.data;
+        }
+        if (newImage.existingId) {
+            delete newImage.existingId;
+        }
+        if (rest.data && typeof rest.data === 'string') {
+            newImage.data = rest.data;
+        }
+        acc.push(newImage);
+        return acc;
+    }, []);
+}
+
 router.get('/pins', async (req, res) => {
     const db = await connectToDatabase();
     const ip = req.headers['x-nf-client-connection-ip'];
@@ -1068,25 +1253,10 @@ router.post('/pins', async (req, res) => {
     pin.upvoterIps = [];
     pin.downvoterIps = [];
 
-    // Calculate expiresAt (support single date or range)
-    if (pin.lifetime) {
-        let expiresAt = null;
-        if (pin.lifetime.type === 'today') {
-            expiresAt = new Date();
-            expiresAt.setHours(23, 59, 59, 999);
-        } else if (pin.lifetime.type === 'date') {
-            if (pin.lifetime.end) {
-                expiresAt = new Date(pin.lifetime.end);
-                expiresAt.setHours(23, 59, 59, 999);
-            } else if (pin.lifetime.value || pin.lifetime.start) {
-                const basis = pin.lifetime.value || pin.lifetime.start;
-                expiresAt = new Date(basis);
-                expiresAt.setHours(23, 59, 59, 999);
-            }
-        }
-        pin.expiresAt = expiresAt;
-    } else {
-        pin.expiresAt = null; // Or a default expiration if you want
+    pin.expiresAt = computeExpiresAtFromLifetime(pin.lifetime);
+
+    if (Array.isArray(pin.images) && pin.images.length) {
+        pin.images = normalizeIncomingPinImages([], pin.images);
     }
 
     // Get city from lat/lng
@@ -1116,21 +1286,45 @@ router.put('/pins/:id', async (req, res) => {
     const ip = req.headers['x-nf-client-connection-ip'];
     const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
 
+    if (!pin) {
+        return res.status(404).json({ message: 'Pin not found.' });
+    }
+
     if (pin.reporter !== ip) {
         return res.status(403).json({ message: 'You are not authorized to edit this pin.' });
     }
 
-    const { title, description, category, link, lifetime } = req.body;
-    const updatedPin = {
-        title,
-        description,
-        category,
-        link,
-        lifetime
-    };
+    const { title, description, category, link, lifetime, images: incomingImages } = req.body;
+    const updatedPin = {};
+
+    if (typeof title !== 'undefined') {
+        updatedPin.title = title;
+    }
+    if (typeof description !== 'undefined') {
+        updatedPin.description = description;
+    }
+    if (typeof category !== 'undefined') {
+        updatedPin.category = category;
+    }
+    if (typeof link !== 'undefined') {
+        updatedPin.link = link;
+    }
+    if (typeof lifetime !== 'undefined') {
+        updatedPin.lifetime = lifetime;
+        updatedPin.expiresAt = computeExpiresAtFromLifetime(lifetime);
+    }
+    if (Array.isArray(incomingImages)) {
+        updatedPin.images = normalizeIncomingPinImages(pin.images, incomingImages);
+    } else if (incomingImages === null) {
+        updatedPin.images = [];
+    }
 
     const result = await db.collection('pins').updateOne({ _id: new ObjectId(id) }, { $set: updatedPin });
-    res.json(result);
+    if (!result.matchedCount) {
+        return res.status(404).json({ message: 'Pin not found.' });
+    }
+    const refreshedPin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
+    res.json(refreshedPin);
 });
 
 router.post('/pins/:id/upvote', async (req, res) => {

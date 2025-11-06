@@ -44,6 +44,13 @@ let pinCategorySelectElement;
 let pinLinkInput;
 let pinLifetimeSelectElement;
 let pinLifetimeDateInput;
+let pinImageInput;
+let pinImagesPreviewList;
+let pinExistingImagesContainer;
+let pinExistingImagesList;
+let pinExistingImages = [];
+let pinAddedImages = [];
+let pinImageSequence = 0;
 
 let liveSellerMarkers = [];
 let liveSellerRefreshTimer = null;
@@ -129,7 +136,14 @@ let actionMenuContent;
 let liveSellerPhotoOverlayElement = null;
 let liveSellerPhotoOverlayImagesContainer = null;
 let liveSellerPhotoOverlayEscapeHandler = null;
-
+let pinImageOverlayElement = null;
+let pinImageOverlayImageElement = null;
+let pinImageOverlayCloseButton = null;
+let pinImageOverlayPrevButton = null;
+let pinImageOverlayNextButton = null;
+let pinImageOverlayCounter = null;
+let pinImageOverlaySources = [];
+let pinImageOverlayIndex = 0;
 function ensureLiveSellerPhotoOverlay() {
     if (liveSellerPhotoOverlayElement) {
         return liveSellerPhotoOverlayElement;
@@ -247,6 +261,212 @@ function closeLiveSellerPhotoOverlay() {
     }
 }
 
+function ensurePinImageOverlay() {
+    if (pinImageOverlayElement) {
+        return pinImageOverlayElement;
+    }
+    if (!document.body) {
+        return null;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pin-image-overlay hidden';
+
+    const content = document.createElement('div');
+    content.className = 'pin-image-overlay__content';
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'pin-image-overlay__close';
+    closeButton.textContent = 'Tutup';
+    closeButton.setAttribute('aria-label', 'Tutup foto pin');
+    closeButton.addEventListener('click', () => {
+        closePinImageOverlay();
+    });
+
+    const frame = document.createElement('div');
+    frame.className = 'pin-image-overlay__frame';
+
+    const imageElement = document.createElement('img');
+    imageElement.className = 'pin-image-overlay__image';
+    imageElement.alt = '';
+    imageElement.draggable = false;
+    frame.appendChild(imageElement);
+
+    const nav = document.createElement('div');
+    nav.className = 'pin-image-overlay__nav';
+
+    const prevButton = document.createElement('button');
+    prevButton.type = 'button';
+    prevButton.className = 'pin-image-overlay__nav-btn pin-image-overlay__nav-btn--prev';
+    prevButton.textContent = '‹';
+    prevButton.setAttribute('aria-label', 'Foto sebelumnya');
+    prevButton.addEventListener('click', () => {
+        showPinImageOverlayAt(pinImageOverlayIndex - 1);
+    });
+
+    const counter = document.createElement('div');
+    counter.className = 'pin-image-overlay__counter';
+
+    const nextButton = document.createElement('button');
+    nextButton.type = 'button';
+    nextButton.className = 'pin-image-overlay__nav-btn pin-image-overlay__nav-btn--next';
+    nextButton.textContent = '›';
+    nextButton.setAttribute('aria-label', 'Foto selanjutnya');
+    nextButton.addEventListener('click', () => {
+        showPinImageOverlayAt(pinImageOverlayIndex + 1);
+    });
+
+    nav.appendChild(prevButton);
+    nav.appendChild(counter);
+    nav.appendChild(nextButton);
+
+    content.appendChild(closeButton);
+    content.appendChild(frame);
+    content.appendChild(nav);
+    overlay.appendChild(content);
+
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            closePinImageOverlay();
+        }
+    });
+
+    pinImageOverlayElement = overlay;
+    pinImageOverlayImageElement = imageElement;
+    pinImageOverlayCloseButton = closeButton;
+    pinImageOverlayPrevButton = prevButton;
+    pinImageOverlayNextButton = nextButton;
+    pinImageOverlayCounter = counter;
+
+    document.body.appendChild(overlay);
+
+    document.addEventListener('keydown', handlePinImageOverlayKeydown);
+
+    return overlay;
+}
+
+function handlePinImageOverlayKeydown(event) {
+    if (!pinImageOverlayElement || pinImageOverlayElement.classList.contains('hidden')) {
+        return;
+    }
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closePinImageOverlay();
+    } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        showPinImageOverlayAt(pinImageOverlayIndex - 1);
+    } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        showPinImageOverlayAt(pinImageOverlayIndex + 1);
+    }
+}
+
+function showPinImageOverlayAt(index) {
+    if (!pinImageOverlaySources.length || !pinImageOverlayElement || !pinImageOverlayImageElement) {
+        return;
+    }
+    const total = pinImageOverlaySources.length;
+    if (total === 0) {
+        return;
+    }
+    let nextIndex = index;
+    if (index < 0) {
+        nextIndex = total - 1;
+    } else if (index >= total) {
+        nextIndex = 0;
+    }
+
+    const source = pinImageOverlaySources[nextIndex];
+    if (!source) {
+        return;
+    }
+
+    pinImageOverlayIndex = nextIndex;
+    pinImageOverlayImageElement.src = source.src;
+    pinImageOverlayImageElement.alt = source.alt || 'Foto pin';
+
+    const disableNav = total <= 1;
+    if (pinImageOverlayCounter) {
+        if (disableNav) {
+            pinImageOverlayCounter.textContent = '';
+            pinImageOverlayCounter.style.visibility = 'hidden';
+        } else {
+            pinImageOverlayCounter.textContent = `${pinImageOverlayIndex + 1} / ${total}`;
+            pinImageOverlayCounter.style.visibility = 'visible';
+        }
+    }
+
+    if (pinImageOverlayPrevButton) {
+        pinImageOverlayPrevButton.disabled = disableNav;
+        pinImageOverlayPrevButton.classList.toggle('pin-image-overlay__nav-btn--disabled', disableNav);
+        pinImageOverlayPrevButton.style.visibility = disableNav ? 'hidden' : 'visible';
+    }
+    if (pinImageOverlayNextButton) {
+        pinImageOverlayNextButton.disabled = disableNav;
+        pinImageOverlayNextButton.classList.toggle('pin-image-overlay__nav-btn--disabled', disableNav);
+        pinImageOverlayNextButton.style.visibility = disableNav ? 'hidden' : 'visible';
+    }
+}
+
+function openPinImageOverlay(sources = [], startIndex = 0) {
+    if (!Array.isArray(sources) || sources.length === 0) {
+        return;
+    }
+    const validSources = sources.filter((source) => source && typeof source.src === 'string' && source.src);
+    if (validSources.length === 0) {
+        return;
+    }
+
+    const overlay = ensurePinImageOverlay();
+    if (!overlay) {
+        return;
+    }
+
+    pinImageOverlaySources = validSources;
+    const normalizedIndex = Math.min(Math.max(startIndex, 0), pinImageOverlaySources.length - 1);
+    showPinImageOverlayAt(normalizedIndex);
+
+    overlay.classList.remove('hidden');
+    if (document.body) {
+        document.body.classList.add('pin-image-overlay-open');
+    }
+
+    if (pinImageOverlayCloseButton) {
+        requestAnimationFrame(() => {
+            pinImageOverlayCloseButton.focus({ preventScroll: true });
+        });
+    }
+}
+
+function closePinImageOverlay() {
+    if (!pinImageOverlayElement) {
+        return;
+    }
+
+    pinImageOverlayElement.classList.add('hidden');
+    if (document.body) {
+        document.body.classList.remove('pin-image-overlay-open');
+    }
+
+    if (pinImageOverlayImageElement) {
+        pinImageOverlayImageElement.src = '';
+        pinImageOverlayImageElement.alt = '';
+    }
+    pinImageOverlaySources = [];
+    pinImageOverlayIndex = 0;
+    if (pinImageOverlayCounter) {
+        pinImageOverlayCounter.textContent = '';
+        pinImageOverlayCounter.style.visibility = 'hidden';
+    }
+    if (pinImageOverlayPrevButton) {
+        pinImageOverlayPrevButton.style.visibility = 'hidden';
+    }
+    if (pinImageOverlayNextButton) {
+        pinImageOverlayNextButton.style.visibility = 'hidden';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     actionMenu = document.getElementById('action-menu');
     actionMenuToggleButton = document.getElementById('action-menu-toggle');
@@ -260,6 +480,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    ensurePinImageOverlay();
 
     document.addEventListener('click', (event) => {
         if (actionMenu && !actionMenu.contains(event.target) && actionMenu.classList.contains('open')) {
@@ -277,6 +499,9 @@ const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
 const RESIDENT_MAX_PHOTO_BYTES = 1024 * 1024;
 const LIVE_SELLER_PHOTO_MAX_DIMENSION = 512;
 const LIVE_SELLER_MENU_PHOTO_MAX_DIMENSION = 1280;
+const MAX_PIN_PHOTO_COUNT = 3;
+const MAX_PIN_PHOTO_BYTES = 4 * 1024 * 1024;
+const PIN_PHOTO_MAX_DIMENSION = 1280;
 
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
@@ -3440,6 +3665,510 @@ function removeDeveloperOnlyCategoryOptions() {
     Array.from(categorySelect.querySelectorAll('option[data-developer-only="true"]')).forEach(option => option.remove());
 }
 
+function formatFileSize(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        return '0 B';
+    }
+    const units = ['B', 'KB', 'MB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size = size / 1024;
+        unitIndex += 1;
+    }
+    const formatted = unitIndex === 0 ? Math.round(size).toString() : size.toFixed(size >= 10 ? 1 : 2);
+    return `${formatted} ${units[unitIndex]}`;
+}
+
+function getPinImageSource(image) {
+    if (!image) {
+        return '';
+    }
+    if (typeof image === 'string') {
+        return image;
+    }
+    const directSourceKeys = [
+        'dataUrl',
+        'dataURL',
+        'url',
+        'src',
+        'secureUrl',
+        'secureURL',
+        'secure_url',
+        'imageUrl',
+        'imageURL',
+        'path',
+        'filePath',
+        'fileURL',
+        'fileUrl',
+        'signedUrl',
+        'signedURL',
+        'signed_url',
+        'cdnUrl',
+        'cdnURL',
+        'assetUrl',
+        'assetURL',
+        'location',
+        'href'
+    ];
+    for (const key of directSourceKeys) {
+        const value = image[key];
+        if (typeof value === 'string' && value) {
+            return value;
+        }
+    }
+    if (typeof image.data === 'string' && image.data) {
+        if (image.data.startsWith('data:')) {
+            return image.data;
+        }
+        const mimeType = image.contentType || image.mimeType || 'image/jpeg';
+        return `data:${mimeType};base64,${image.data}`;
+    }
+    if (image.data && typeof image.data === 'object' && image.data !== image) {
+        const nested = getPinImageSource(image.data);
+        if (nested) {
+            return nested;
+        }
+    }
+    return '';
+}
+
+function getPinImageIdentifier(image) {
+    if (!image) {
+        return null;
+    }
+    if (typeof image === 'string') {
+        return image;
+    }
+    if (typeof image !== 'object') {
+        return null;
+    }
+    const identifierKeys = [
+        '_id',
+        'id',
+        'uid',
+        'imageId',
+        'imageID',
+        'existingId',
+        'url',
+        'src',
+        'path',
+        'dataUrl',
+        'dataURL',
+        'fileUrl',
+        'fileURL',
+        'filePath',
+        'secureUrl',
+        'secureURL',
+        'secure_url',
+        'signedUrl',
+        'signedURL',
+        'signed_url',
+        'cdnUrl',
+        'cdnURL',
+        'assetUrl',
+        'assetURL',
+        'location',
+        'href'
+    ];
+    for (const key of identifierKeys) {
+        const value = image[key];
+        if (typeof value === 'string' && value) {
+            return value;
+        }
+    }
+    if (typeof image.data === 'string' && image.data) {
+        return image.data;
+    }
+    if (image.data && typeof image.data === 'object' && image.data !== image) {
+        return getPinImageIdentifier(image.data);
+    }
+    return null;
+}
+
+function updatePinImagesPreview(files = pinAddedImages) {
+    const previewList = pinImagesPreviewList || document.getElementById('pin-images-preview');
+    if (!previewList) {
+        return;
+    }
+    const previousItemsWithObjectUrls = previewList.querySelectorAll('[data-object-url]');
+    previousItemsWithObjectUrls.forEach((element) => {
+        const objectUrl = element.dataset.objectUrl;
+        if (objectUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+            try {
+                URL.revokeObjectURL(objectUrl);
+            } catch (error) {
+                console.warn('Failed to revoke object URL', error);
+            }
+        }
+    });
+    previewList.innerHTML = '';
+    if (!Array.isArray(files) || files.length === 0) {
+        previewList.classList.add('hidden');
+        return;
+    }
+    previewList.classList.remove('hidden');
+    files.forEach((file, index) => {
+        const item = document.createElement('li');
+        item.className = 'pin-images-preview__item';
+        item.dataset.index = String(index);
+
+        const thumbnail = document.createElement('div');
+        thumbnail.className = 'pin-images-preview__thumb';
+        const name = file.originalName || file.name || `Foto baru ${index + 1}`;
+        const possiblePreviewSources = [
+            typeof file.dataUrl === 'string' ? file.dataUrl : null,
+            typeof file.previewUrl === 'string' ? file.previewUrl : null,
+            typeof file.thumbnailUrl === 'string' ? file.thumbnailUrl : null
+        ].filter(Boolean);
+        let appliedPreviewSrc = possiblePreviewSources.length ? possiblePreviewSources[0] : null;
+        if (!appliedPreviewSrc && typeof window !== 'undefined' && typeof URL !== 'undefined' && file instanceof Blob) {
+            try {
+                appliedPreviewSrc = URL.createObjectURL(file);
+                item.dataset.objectUrl = appliedPreviewSrc;
+            } catch (error) {
+                console.warn('Failed to create object URL for preview', error);
+            }
+        }
+        if (appliedPreviewSrc) {
+            const img = document.createElement('img');
+            img.src = appliedPreviewSrc;
+            img.alt = name;
+            img.loading = 'lazy';
+            thumbnail.appendChild(img);
+        } else {
+            thumbnail.classList.add('pin-images-preview__thumb--empty');
+            const placeholder = document.createElement('span');
+            placeholder.textContent = 'Foto';
+            thumbnail.appendChild(placeholder);
+        }
+
+        const details = document.createElement('div');
+        details.className = 'pin-images-preview__details';
+        const size = file.size ? ` (${formatFileSize(file.size)})` : '';
+        details.textContent = `${name}${size}`;
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'pin-images-preview__remove';
+        removeButton.dataset.index = String(index);
+        removeButton.textContent = 'Hapus';
+
+        item.appendChild(thumbnail);
+        item.appendChild(details);
+        item.appendChild(removeButton);
+        previewList.appendChild(item);
+    });
+}
+
+function refreshPinImageHints() {
+    const container = pinExistingImagesContainer || document.getElementById('pin-existing-images-container');
+    const hintElement = container ? container.querySelector('.pin-existing-images__hint') : null;
+    if (!hintElement) {
+        return;
+    }
+    if (!container || container.classList.contains('hidden')) {
+        if (container) {
+            const remainingIfHidden = Math.max(0, MAX_PIN_PHOTO_COUNT - pinAddedImages.length);
+            container.dataset.remainingSlots = String(remainingIfHidden);
+        }
+        hintElement.textContent = 'Foto yang dihapus akan hilang setelah pin disimpan.';
+        return;
+    }
+    const keptExisting = pinExistingImages.filter((entry) => !entry.removed).length;
+    const selectedNew = pinAddedImages.length;
+    const remaining = Math.max(0, MAX_PIN_PHOTO_COUNT - keptExisting - selectedNew);
+    if (container) {
+        container.dataset.remainingSlots = String(remaining);
+    }
+    if (remaining > 0) {
+        hintElement.textContent = `Foto yang dihapus akan hilang setelah pin disimpan. Tersisa ${remaining} slot foto.`;
+    } else {
+        hintElement.textContent = 'Foto yang dihapus akan hilang setelah pin disimpan. Tidak ada slot foto tersisa.';
+    }
+}
+
+function removeSelectedPinImage(index) {
+    if (index < 0 || index >= pinAddedImages.length) {
+        return;
+    }
+    pinAddedImages.splice(index, 1);
+    updatePinImagesPreview();
+    renderExistingPinImages();
+    refreshPinImageHints();
+}
+
+function resetPinImages(options = {}) {
+    const { keepExisting = false } = options;
+    const inputEl = pinImageInput || document.getElementById('pin-images');
+    if (inputEl) {
+        inputEl.value = '';
+    }
+    clearPinAddedImages();
+    if (!keepExisting) {
+        clearExistingPinImages();
+    } else {
+        renderExistingPinImages();
+    }
+    refreshPinImageHints();
+}
+
+function clearExistingPinImages() {
+    pinExistingImages = [];
+    const container = pinExistingImagesContainer || document.getElementById('pin-existing-images-container');
+    const list = pinExistingImagesList || document.getElementById('pin-existing-images-list');
+    if (list) {
+        list.innerHTML = '';
+    }
+    if (container) {
+        container.classList.add('hidden');
+        const hintElement = container.querySelector('.pin-existing-images__hint');
+        if (hintElement) {
+            hintElement.textContent = 'Foto yang dihapus akan hilang setelah pin disimpan.';
+        }
+        container.dataset.remainingSlots = String(Math.max(0, MAX_PIN_PHOTO_COUNT - pinAddedImages.length));
+    }
+    refreshPinImageHints();
+}
+
+function getRemainingPinImageSlots() {
+    const kept = pinExistingImages.filter((entry) => !entry.removed);
+    return Math.max(0, MAX_PIN_PHOTO_COUNT - kept.length);
+}
+
+function renderExistingPinImages() {
+    const container = pinExistingImagesContainer || document.getElementById('pin-existing-images-container');
+    const list = pinExistingImagesList || document.getElementById('pin-existing-images-list');
+    if (!container || !list) {
+        return;
+    }
+
+    list.innerHTML = '';
+    if (!pinExistingImages.length) {
+        container.classList.add('hidden');
+        container.dataset.remainingSlots = String(Math.max(0, MAX_PIN_PHOTO_COUNT - pinAddedImages.length));
+        refreshPinImageHints();
+        return;
+    }
+
+    container.classList.remove('hidden');
+
+    const hintElement = container.querySelector('.pin-existing-images__hint');
+    const remainingSlots = getRemainingPinImageSlots();
+    if (pinAddedImages.length > remainingSlots) {
+        pinAddedImages = pinAddedImages.slice(0, remainingSlots);
+        updatePinImagesPreview();
+    }
+    const totalRemaining = Math.max(0, remainingSlots - pinAddedImages.length);
+    if (hintElement) {
+        hintElement.textContent = totalRemaining > 0
+            ? `Foto yang dihapus akan hilang setelah pin disimpan. Tersisa ${totalRemaining} slot foto.`
+            : 'Foto yang dihapus akan hilang setelah pin disimpan. Tidak ada slot foto tersisa.';
+    }
+    container.dataset.remainingSlots = String(totalRemaining);
+
+    pinExistingImages.forEach((entry) => {
+        const { data, removed, id, originalName } = entry;
+        const source = getPinImageSource(data);
+        if (!source) {
+            return;
+        }
+        const item = document.createElement('li');
+        item.className = 'pin-existing-images__item';
+        if (removed) {
+            item.classList.add('pin-existing-images__item--removed');
+        }
+        if (id) {
+            item.dataset.imageId = String(id);
+        }
+        const identifier = id || getPinImageIdentifier(data);
+        if (identifier) {
+            item.dataset.imageId = identifier;
+        }
+
+        const thumbnail = document.createElement('img');
+        thumbnail.className = 'pin-existing-images__thumb';
+        thumbnail.src = source;
+        const fallbackAlt = originalName || (data && (data.alt || data.originalName));
+        thumbnail.alt = fallbackAlt || 'Foto pin yang tersimpan';
+        item.appendChild(thumbnail);
+
+        const actions = document.createElement('div');
+        actions.className = 'pin-existing-images__actions';
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = removed ? 'pin-existing-images__btn pin-existing-images__btn--restore' : 'pin-existing-images__btn pin-existing-images__btn--remove';
+        toggleBtn.textContent = removed ? 'Batal' : 'Hapus';
+        toggleBtn.addEventListener('click', () => {
+            entry.removed = !entry.removed;
+            renderExistingPinImages();
+            updatePinImagesPreview();
+            refreshPinImageHints();
+        });
+        actions.appendChild(toggleBtn);
+        item.appendChild(actions);
+
+        list.appendChild(item);
+    });
+
+    if (!list.childElementCount) {
+        container.classList.add('hidden');
+        container.dataset.remainingSlots = String(Math.max(0, MAX_PIN_PHOTO_COUNT - pinAddedImages.length));
+    }
+    refreshPinImageHints();
+}
+
+function clearPinAddedImages() {
+    pinAddedImages = [];
+    pinImageSequence = 0;
+    updatePinImagesPreview();
+    refreshPinImageHints();
+}
+
+function buildPinImagesPayload(maxCount = MAX_PIN_PHOTO_COUNT) {
+    const existingPayload = pinExistingImages
+        .filter((entry) => !entry.removed)
+        .map((entry) => {
+            const dataUrl = getPinImageSource(entry.data);
+            if (!dataUrl) {
+                return null;
+            }
+            const contentType = entry.contentType || entry.data?.contentType || entry.data?.mimeType || 'image/jpeg';
+            const size = entry.size || entry.data?.size || entry.data?.bytes || 0;
+            const originalName = entry.originalName || entry.data?.originalName || entry.data?.name || '';
+            const payload = {
+                dataUrl,
+                contentType,
+                size,
+                originalName
+            };
+            const existingId = entry.id || getPinImageIdentifier(entry.data);
+            if (existingId) {
+                payload.existingId = existingId;
+            }
+            return payload;
+        })
+        .filter(Boolean);
+
+    const remaining = Math.max(0, maxCount - existingPayload.length);
+    const addedPayload = pinAddedImages
+        .slice(0, remaining)
+        .map((entry) => ({
+            dataUrl: entry.dataUrl,
+            contentType: entry.contentType || 'image/jpeg',
+            size: entry.size || 0,
+            originalName: entry.originalName || ''
+        }));
+
+    return existingPayload.concat(addedPayload).slice(0, maxCount);
+}
+
+async function handlePinImagesChange(event) {
+    const inputEl = event?.target || pinImageInput || document.getElementById('pin-images');
+    if (!inputEl) {
+        return;
+    }
+    const incomingFiles = Array.from(inputEl.files || []);
+    inputEl.value = '';
+
+    const keptExistingCount = pinExistingImages.filter((entry) => !entry.removed).length;
+    let remainingSlots = Math.max(0, MAX_PIN_PHOTO_COUNT - keptExistingCount - pinAddedImages.length);
+    if (remainingSlots <= 0) {
+        if (incomingFiles.length > 0) {
+            alert(`Maksimal ${MAX_PIN_PHOTO_COUNT} foto per pin. Hapus foto yang ada terlebih dahulu sebelum menambahkan yang baru.`);
+        }
+        updatePinImagesPreview();
+        refreshPinImageHints();
+        return;
+    }
+
+    if (incomingFiles.length === 0) {
+        updatePinImagesPreview();
+        refreshPinImageHints();
+        return;
+    }
+
+    const accepted = [];
+    const limited = [];
+    const oversize = [];
+    const invalidType = [];
+
+    for (const file of incomingFiles) {
+        if (accepted.length >= remainingSlots) {
+            limited.push(file.name);
+            continue;
+        }
+        if (!file.type || !file.type.toLowerCase().startsWith('image/')) {
+            invalidType.push(file.name);
+            continue;
+        }
+        if (file.size > MAX_PIN_PHOTO_BYTES) {
+            oversize.push(file.name);
+            continue;
+        }
+        accepted.push(file);
+    }
+
+    if (accepted.length) {
+        const optimizedEntries = [];
+        for (const file of accepted) {
+            if (remainingSlots <= 0) {
+                limited.push(file.name);
+                continue;
+            }
+            try {
+                const optimized = await generateOptimizedImageDataUrl(file, {
+                    maxWidth: PIN_PHOTO_MAX_DIMENSION,
+                    maxHeight: PIN_PHOTO_MAX_DIMENSION,
+                    maxBytes: MAX_PIN_PHOTO_BYTES,
+                    preferredMimeTypes: ['image/webp', 'image/jpeg', 'image/png'],
+                    initialQuality: 0.85,
+                    minQuality: 0.5,
+                    qualityStep: 0.1
+                });
+                if (optimized.bytes > MAX_PIN_PHOTO_BYTES) {
+                    oversize.push(file.name);
+                    continue;
+                }
+                optimizedEntries.push({
+                    id: `added-${Date.now()}-${pinImageSequence++}`,
+                    dataUrl: optimized.dataUrl,
+                    contentType: optimized.mimeType,
+                    size: optimized.bytes,
+                    originalName: file.name
+                });
+                remainingSlots -= 1;
+            } catch (error) {
+                console.error('Failed to optimize pin image', error);
+                alert(`Tidak dapat memproses foto "${file.name}". Silakan coba foto lain.`);
+            }
+        }
+        if (optimizedEntries.length) {
+            const maxNewAllowed = Math.max(0, MAX_PIN_PHOTO_COUNT - keptExistingCount);
+            pinAddedImages = pinAddedImages.concat(optimizedEntries).slice(0, maxNewAllowed);
+        }
+    }
+
+    const messages = [];
+    if (limited.length) {
+        messages.push(`Hanya ${remainingSlots} slot foto yang tersedia. Lewati: ${limited.join(', ')}`);
+    }
+    if (invalidType.length) {
+        messages.push(`Format tidak didukung: ${invalidType.join(', ')}`);
+    }
+    if (oversize.length) {
+        messages.push(`Foto melebihi 4MB: ${oversize.join(', ')}`);
+    }
+    if (messages.length) {
+        alert(messages.join('\n'));
+    }
+
+    updatePinImagesPreview();
+    renderExistingPinImages();
+    refreshPinImageHints();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('welcome-modal');
     const closeModalBtn = document.getElementById('close-modal-btn');
@@ -3461,6 +4190,33 @@ document.addEventListener('DOMContentLoaded', () => {
     pinDescriptionInput = document.getElementById('description');
     pinCategorySelectElement = document.getElementById('category');
     pinLinkInput = document.getElementById('link');
+    pinImageInput = document.getElementById('pin-images');
+    pinImagesPreviewList = document.getElementById('pin-images-preview');
+    pinExistingImagesContainer = document.getElementById('pin-existing-images-container');
+    pinExistingImagesList = document.getElementById('pin-existing-images-list');
+    renderExistingPinImages();
+    if (pinImageInput) {
+        pinImageInput.addEventListener('change', (event) => {
+            handlePinImagesChange(event).catch((error) => {
+                console.error('Pin image change failed', error);
+            });
+        });
+    }
+    if (pinImagesPreviewList) {
+        pinImagesPreviewList.addEventListener('click', (event) => {
+            const target = event.target instanceof HTMLElement
+                ? event.target.closest('.pin-images-preview__remove')
+                : null;
+            if (!(target instanceof HTMLElement)) {
+                return;
+            }
+            const index = Number(target.dataset.index);
+            if (Number.isFinite(index)) {
+                removeSelectedPinImage(index);
+            }
+        });
+    }
+    updatePinImagesPreview();
     liveSellerPanel = document.getElementById('live-seller-panel');
     liveSellerToggleButton = document.getElementById('live-seller-toggle-btn');
     liveSellerLoginButton = document.getElementById('live-seller-login-btn');
@@ -4150,7 +4906,7 @@ async function initMap() {
 
         let editButton = '';
         if (userIp === pin.reporter) {
-            editButton = `<button class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
+            editButton = `<button type="button" class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
         }
     
         let when = 'N/A';
@@ -4170,6 +4926,35 @@ async function initMap() {
     
         const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
         const safeTitleForData = (pin.title || '').replace(/"/g, '&quot;');
+        const pinImageSources = Array.isArray(pin.images)
+            ? pin.images
+                .slice(0, MAX_PIN_PHOTO_COUNT)
+                .map((image, index) => {
+                    const src = getPinImageSource(image);
+                    if (!src) {
+                        return null;
+                    }
+                    const baseAlt = pin.title ? `${pin.title} foto ${index + 1}` : `Foto pin ${index + 1}`;
+                    return {
+                        src,
+                        alt: baseAlt
+                    };
+                })
+                .filter(Boolean)
+            : [];
+        let imageGallery = '';
+        if (pinImageSources.length) {
+            const imageItems = pinImageSources
+                .map(({ src, alt }) => {
+                    const safeSrc = src.replace(/"/g, '&quot;');
+                    const safeAlt = (alt || 'Foto pin').replace(/"/g, '&quot;');
+                    return `<li class="info-window-images__item"><img src="${safeSrc}" alt="${safeAlt}" loading="lazy"></li>`;
+                })
+                .join('');
+            if (imageItems) {
+                imageGallery = `<ul class="info-window-images">${imageItems}</ul>`;
+            }
+        }
 
         const contentString = `
             <div class="info-window-content">
@@ -4179,6 +4964,7 @@ async function initMap() {
                 </div>
                 <div class="info-window-title">${pin.title}</div>
                 <div class="info-window-description">${descriptionWithBreaks}</div>
+                ${imageGallery}
                 <div class="info-window-when">${when}</div>
                 ${linkElement}
                 <div class="info-window-actions">
@@ -4199,7 +4985,23 @@ async function initMap() {
         const infowindow = new CustomInfoWindow(pin, contentString);
         infowindow.setMap(map);
         marker.infoWindow = infowindow;
-    
+
+        if (pinImageSources.length) {
+            const imageNodes = infowindow.container.querySelectorAll('.info-window-images__item img');
+            if (imageNodes && imageNodes.length) {
+                const overlaySources = pinImageSources.map(({ src, alt }) => ({
+                    src,
+                    alt: alt || 'Foto pin'
+                }));
+                imageNodes.forEach((imageNode, index) => {
+                    imageNode.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        openPinImageOverlay(overlaySources, index);
+                    });
+                });
+            }
+        }
+
         // Attach event listeners programmatically
         const upvoteButton = infowindow.container.querySelector(`#upvote-btn-${pin._id}`);
         if (upvoteButton) {
@@ -4268,14 +5070,14 @@ async function initMap() {
     }
     refreshPins = fetchPins;
 
-    function submitPin(e) {
+    async function submitPin(e) {
         e.preventDefault();
 
         if (editingPinId) {
-            updatePin(editingPinId);
+            await updatePin(editingPinId);
             return;
         }
-    
+
         const titleInputEl = pinTitleInput || document.getElementById('title');
         const descriptionInputEl = pinDescriptionInput || document.getElementById('description');
         const categorySelectEl = pinCategorySelectElement || document.getElementById('category');
@@ -4288,13 +5090,12 @@ async function initMap() {
         const category = categorySelectEl ? categorySelectEl.value : '';
         const link = linkInputEl ? linkInputEl.value : '';
         const lifetimeType = lifetimeSelectEl ? lifetimeSelectEl.value : '';
-    
+
         if (!title || !description || !category || !lifetimeType) {
             alert('Please fill out all fields');
             return;
         }
-        
-        // Build lifetime payload supporting single date or range
+
         let lifetime = { type: lifetimeType };
         if (lifetimeType === 'date') {
             let startStr = '';
@@ -4309,7 +5110,7 @@ async function initMap() {
                 }
             } else if (lifetimeInputEl && lifetimeInputEl.value) {
                 const raw = lifetimeInputEl.value.trim();
-                const parts = raw.split(/\s*(?:to|–|-|—)\s*/);
+                const parts = raw.split(/\s*(?:to|[-\u2013\u2014])\s*/);
                 const first = parts[0] ? parts[0].trim() : '';
                 const second = parts[1] ? parts[1].trim() : '';
                 startStr = first;
@@ -4326,35 +5127,60 @@ async function initMap() {
                 lifetime.value = startStr;
             }
         }
-    
+
         if (!temporaryMarker) {
             alert('Please select a location on the map first');
             return;
         }
-    
-        const pin = {
-            title,
-            description,
-            category,
-            link,
-            lat: temporaryMarker.position.lat,
-            lng: temporaryMarker.position.lng,
-            lifetime
-        };
-    
-        fetch('/api/pins', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(pin)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.message) {
-                alert('Error: ' + data.message);
-                return;
+
+        const submitButton = addPinFormElement
+            ? addPinFormElement.querySelector('button[type="submit"]')
+            : null;
+        let originalButtonText = '';
+
+        try {
+            if (submitButton) {
+                originalButtonText = submitButton.textContent || 'Bagikan';
+                submitButton.disabled = true;
+                submitButton.textContent = 'Mengirim...';
             }
+
+            const imagesPayload = buildPinImagesPayload(MAX_PIN_PHOTO_COUNT);
+            const removedImageIds = pinExistingImages
+                .filter((entry) => entry.removed)
+                .map((entry) => entry.id || getPinImageIdentifier(entry.data))
+                .filter(Boolean);
+            const pin = {
+                title,
+                description,
+                category,
+                link,
+                lat: temporaryMarker.position.lat,
+                lng: temporaryMarker.position.lng,
+                lifetime
+            };
+
+            if (imagesPayload.length > 0) {
+                pin.images = imagesPayload;
+            }
+            if (removedImageIds.length > 0) {
+                pin.removedImageIds = removedImageIds;
+            }
+
+            const response = await fetch('/api/pins', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(pin)
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || (data && data.message)) {
+                throw new Error(data && data.message ? data.message : 'Failed to drop pin.');
+            }
+
             if (temporaryMarker) {
                 temporaryMarker.map = null;
             }
@@ -4366,12 +5192,25 @@ async function initMap() {
             if (formEl) {
                 formEl.reset();
             }
+            resetPinImages();
             removeDeveloperOnlyCategoryOptions();
             if (lifetimeInputEl) {
                 lifetimeInputEl.style.display = 'none';
             }
             alert('Pin dropped successfully!');
-        });
+        } catch (error) {
+            const errorMessage = error && error.message ? error.message : 'Failed to drop pin.';
+            if (typeof errorMessage === 'string' && errorMessage.toLowerCase().startsWith('error')) {
+                alert(errorMessage);
+            } else {
+                alert(`Error: ${errorMessage}`);
+            }
+        } finally {
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = originalButtonText || 'Bagikan';
+            }
+        }
     }
 
 function handleLocationError(browserHasGeolocation) {
@@ -4504,6 +5343,7 @@ function handleLocationError(browserHasGeolocation) {
             if (formEl) {
                 formEl.reset();
             }
+            resetPinImages();
             removeDeveloperOnlyCategoryOptions();
         });
     }
@@ -4581,7 +5421,37 @@ function getUserIp() {
 }
 
 function editPin(id) {
-    const pin = markers.find(marker => marker.pin._id === id).pin;
+    const markerEntry = markers.find((marker) => marker && marker.pin && marker.pin._id === id);
+    if (!markerEntry || !markerEntry.pin) {
+        console.warn('Pin not found for editing', id);
+        return;
+    }
+    const pin = markerEntry.pin;
+    resetPinImages({ keepExisting: true });
+    pinAddedImages = [];
+    const timestamp = Date.now();
+    pinExistingImages = Array.isArray(pin.images)
+        ? pin.images
+            .filter(Boolean)
+            .slice(0, MAX_PIN_PHOTO_COUNT)
+            .map((image, index) => {
+                const identifier = getPinImageIdentifier(image);
+                const id = identifier || `existing-${timestamp}-${index}`;
+                const contentType = image.contentType || image.mimeType || (image.data && image.data.contentType) || 'image/jpeg';
+                const size = image.size || image.bytes || image.length || 0;
+                const originalName = image.originalName || image.name || image.filename || '';
+                return {
+                    id,
+                    data: image,
+                    contentType,
+                    size,
+                    originalName,
+                    removed: false
+                };
+            })
+        : [];
+    pinImageSequence = 0;
+    renderExistingPinImages();
     const titleInputEl = pinTitleInput || document.getElementById('title');
     if (titleInputEl) {
         titleInputEl.value = pin.title;
@@ -4643,7 +5513,7 @@ function editPin(id) {
     }
 }
 
-function updatePin(id) {
+async function updatePin(id) {
     const titleInputEl = pinTitleInput || document.getElementById('title');
     const descriptionInputEl = pinDescriptionInput || document.getElementById('description');
     const categorySelectEl = pinCategorySelectElement || document.getElementById('category');
@@ -4657,67 +5527,115 @@ function updatePin(id) {
     const link = linkInputEl ? linkInputEl.value : '';
     const lifetimeType = lifetimeSelectEl ? lifetimeSelectEl.value : '';
 
+    if (!title || !description || !category || !lifetimeType) {
+        alert('Please fill out all fields');
+        return;
+    }
+
+    const lifetime = (() => {
+        if (lifetimeType !== 'date') {
+            return { type: lifetimeType };
+        }
+        let startStr = '';
+        let endStr = '';
+        if (typeof flatpickr === 'function' && lifetimeInputEl && lifetimeInputEl._flatpickr) {
+            const dates = lifetimeInputEl._flatpickr.selectedDates || [];
+            if (dates.length === 1) {
+                startStr = endStr = formatDateToYMD(dates[0]);
+            } else if (dates.length >= 2) {
+                startStr = formatDateToYMD(dates[0]);
+                endStr = formatDateToYMD(dates[1]);
+            }
+        } else if (lifetimeInputEl && lifetimeInputEl.value) {
+            const raw = lifetimeInputEl.value.trim();
+            const parts = raw.split(/\s*(?:to|[-\u2013\u2014])\s*/);
+            const first = parts[0] ? parts[0].trim() : '';
+            const second = parts[1] ? parts[1].trim() : '';
+            startStr = first;
+            endStr = second || first;
+        }
+        if (startStr && endStr && startStr !== endStr) {
+            return { type: 'date', start: startStr, end: endStr };
+        }
+        return { type: 'date', value: startStr || endStr };
+    })();
+
     const updatedPin = {
         title,
         description,
         category,
         link,
-        lifetime: (() => {
-            if (lifetimeType !== 'date') {
-                return { type: lifetimeType };
-            }
-            let startStr = '';
-            let endStr = '';
-            if (typeof flatpickr === 'function' && lifetimeInputEl && lifetimeInputEl._flatpickr) {
-                const dates = lifetimeInputEl._flatpickr.selectedDates || [];
-                if (dates.length === 1) {
-                    startStr = endStr = formatDateToYMD(dates[0]);
-                } else if (dates.length >= 2) {
-                    startStr = formatDateToYMD(dates[0]);
-                    endStr = formatDateToYMD(dates[1]);
-                }
-            } else if (lifetimeInputEl && lifetimeInputEl.value) {
-                const raw = lifetimeInputEl.value.trim();
-                const parts = raw.split(/\s*(?:to|–|-|—)\s*/);
-                const first = parts[0] ? parts[0].trim() : '';
-                const second = parts[1] ? parts[1].trim() : '';
-                startStr = first;
-                endStr = second || first;
-            }
-            if (startStr && endStr && startStr !== endStr) {
-                return { type: 'date', start: startStr, end: endStr };
-            }
-            return { type: 'date', value: startStr || endStr };
-        })()
+        lifetime
     };
 
-    fetch(`/api/pins/${id}`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updatedPin)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.message) {
-            alert('Error: ' + data.message);
-            return;
+    const submitButton = addPinFormElement
+        ? addPinFormElement.querySelector('button[type="submit"]')
+        : null;
+    let originalButtonText = '';
+
+    try {
+        if (submitButton) {
+            originalButtonText = submitButton.textContent || 'Bagikan';
+            submitButton.disabled = true;
+            submitButton.textContent = 'Mengirim...';
         }
+
+        const imagesPayload = buildPinImagesPayload(MAX_PIN_PHOTO_COUNT);
+        const removedImageIds = pinExistingImages
+            .filter((entry) => entry.removed)
+            .map((entry) => entry.id || getPinImageIdentifier(entry.data))
+            .filter(Boolean);
+        if (imagesPayload.length > 0 || removedImageIds.length > 0) {
+            updatedPin.images = imagesPayload;
+        }
+        if (removedImageIds.length > 0) {
+            updatedPin.removedImageIds = removedImageIds;
+        }
+
+        const response = await fetch(`/api/pins/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updatedPin)
+        });
+        const data = await response.json();
+
+        if (!response.ok || (data && data.message)) {
+            throw new Error(data && data.message ? data.message : 'Failed to update pin.');
+        }
+
         alert('Pin updated successfully!');
         const formEl = addPinFormElement || document.getElementById('add-pin-form');
         if (formEl) {
             formEl.reset();
         }
+        resetPinImages();
         removeDeveloperOnlyCategoryOptions();
         const formContainer = pinFormContainer || document.getElementById('pin-form');
         if (formContainer) {
             formContainer.classList.add('hidden');
         }
+        if (lifetimeInputEl) {
+            lifetimeInputEl.style.display = 'none';
+        }
         editingPinId = null;
         refreshPins();
-    });
+    } catch (error) {
+        const errorMessage = error && error.message ? error.message : 'Failed to update pin.';
+        if (typeof errorMessage === 'string' && errorMessage.toLowerCase().startsWith('error')) {
+            alert(errorMessage);
+        } else {
+            alert(`Error: ${errorMessage}`);
+        }
+    } finally {
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = originalButtonText || 'Bagikan';
+        }
+    }
 }
+
 
 function fetchActivePinsCount(options = {}) {
     const { checkForChanges = false, enableAnimation = false } = options;

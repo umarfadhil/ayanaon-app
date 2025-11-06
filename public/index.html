@@ -212,6 +212,17 @@
             </select>
             <input type="date" id="lifetime-date-picker" placeholder="Pilih Tanggal">
             <input type="text" id="link" placeholder="Link">
+            <div class="pin-images-field">
+                <label for="pin-images">Lampiran Foto (opsional)</label>
+                <input type="file" id="pin-images" accept="image/*" multiple>
+                <p class="pin-images-hint">Maksimal 3 foto, 4MB per foto. Foto akan dioptimalkan otomatis.</p>
+                <div id="pin-existing-images-container" class="pin-existing-images hidden">
+                    <div class="pin-existing-images__title">Foto saat ini</div>
+                    <ul id="pin-existing-images-list" class="pin-existing-images__list"></ul>
+                    <p class="pin-existing-images__hint">Foto yang dihapus akan hilang setelah pin disimpan.</p>
+                </div>
+                <ul id="pin-images-preview" class="pin-images-preview hidden"></ul>
+            </div>
             <button type="submit">Bagikan</button>
         </form>
     </div>
@@ -302,7 +313,7 @@
             <p> </p>
             <p><b>Terima kasih dan selamat berselancar, Warga 🏄‍♀️🌊</b></p>
             <p><i>Silahkan email <a href="mailto:contact@petalytix.id">contact@petalytix.id</a> jika ingin kontak dengan developer</i></p>
-            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.2.3</div>
+            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.2.4</div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr" defer></script>
