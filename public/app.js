@@ -51,6 +51,7 @@ let pinExistingImagesList;
 let pinExistingImages = [];
 let pinAddedImages = [];
 let pinImageSequence = 0;
+let filterDropdownElement;
 
 let liveSellerMarkers = [];
 let liveSellerRefreshTimer = null;
@@ -132,6 +133,13 @@ let lastKnownLiveSellerCount = null;
 let actionMenu;
 let actionMenuToggleButton;
 let actionMenuContent;
+let pinListPanelElement;
+let pinListToggleButton;
+let pinListContainerElement;
+let pinListTitleElement;
+let pinListSummaryElement;
+let pinListItemsContainer;
+let pinListEmptyElement;
 
 let liveSellerPhotoOverlayElement = null;
 let liveSellerPhotoOverlayImagesContainer = null;
@@ -475,9 +483,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (actionMenuToggleButton) {
         actionMenuToggleButton.addEventListener('click', (event) => {
             event.stopPropagation();
-            if (actionMenu) {
-                actionMenu.classList.toggle('open');
-            }
+            const isOpen = actionMenu ? actionMenu.classList.contains('open') : false;
+            setActionMenuOpen(!isOpen);
         });
     }
 
@@ -485,7 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('click', (event) => {
         if (actionMenu && !actionMenu.contains(event.target) && actionMenu.classList.contains('open')) {
-            actionMenu.classList.remove('open');
+            closeActionMenu();
         }
     });
 });
@@ -2585,6 +2592,7 @@ window.addEventListener('beforeinstallprompt', (event) => {
         installButton.hidden = false;
         installButton.disabled = false;
     }
+    updatePinListPlacement();
 });
 
 window.addEventListener('appinstalled', () => {
@@ -2595,6 +2603,7 @@ window.addEventListener('appinstalled', () => {
         installButton.hidden = true;
         installButton.disabled = false;
     }
+    updatePinListPlacement();
 });
 
 function toLatLngLiteral(position) {
@@ -2631,6 +2640,20 @@ function calculateDistanceKm(origin, target) {
         Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
+}
+
+function formatDistanceText(distanceKm) {
+    if (!Number.isFinite(distanceKm)) {
+        return '';
+    }
+    if (distanceKm < 1) {
+        const meters = Math.round(distanceKm * 1000);
+        return `${meters} m`;
+    }
+    if (distanceKm < 10) {
+        return `${distanceKm.toFixed(1)} km`;
+    }
+    return `${Math.round(distanceKm)} km`;
 }
 
 function formatDateToYMD(date) {
@@ -2686,6 +2709,226 @@ function buildLiveSellerSearchBlob(seller = {}) {
         .map(normalizeSearchText)
         .join(' ');
 }
+
+function truncateText(value, maxLength = 160) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    if (value.length <= maxLength) {
+        return value;
+    }
+    return `${value.slice(0, maxLength)}…`;
+}
+
+function renderTextWithLineBreaks(element, text) {
+    if (!element) {
+        return;
+    }
+    const safeText = typeof text === 'string' ? text : '';
+    const segments = safeText.split('\n');
+    element.textContent = '';
+    segments.forEach((segment, index) => {
+        if (index > 0) {
+            element.appendChild(document.createElement('br'));
+        }
+        element.appendChild(document.createTextNode(segment));
+    });
+}
+
+function getPinListReferencePosition() {
+    const userPosition = userLocation || (userMarker ? toLatLngLiteral(userMarker.position) : null);
+    if (userPosition && Number.isFinite(userPosition.lat) && Number.isFinite(userPosition.lng)) {
+        return userPosition;
+    }
+    if (map && typeof map.getCenter === 'function') {
+        return toLatLngLiteral(map.getCenter());
+    }
+    return null;
+}
+
+function setPinListCollapsed(collapsed) {
+    if (!collapsed) {
+        closeActionMenu();
+        hideFilterDropdown();
+        hidePinForm();
+    }
+    if (pinListPanelElement) {
+        pinListPanelElement.classList.toggle('pin-list-panel--collapsed', collapsed);
+    }
+    if (pinListToggleButton) {
+        pinListToggleButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+}
+
+function setActionMenuOpen(isOpen) {
+    const shouldOpen = Boolean(isOpen);
+    if (actionMenu) {
+        actionMenu.classList.toggle('open', shouldOpen);
+    }
+    if (actionMenuToggleButton) {
+        actionMenuToggleButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    }
+    if (shouldOpen) {
+        setPinListCollapsed(true);
+        hideFilterDropdown();
+        hidePinForm();
+    }
+}
+
+function closeActionMenu() {
+    setActionMenuOpen(false);
+}
+
+function hideFilterDropdown() {
+    if (filterDropdownElement) {
+        filterDropdownElement.classList.add('hidden');
+    }
+}
+
+function hidePinForm() {
+    const formContainer = pinFormContainer || document.getElementById('pin-form');
+    if (formContainer) {
+        formContainer.classList.add('hidden');
+    }
+}
+
+function updatePinListPlacement() {
+    if (!pinListPanelElement) {
+        return;
+    }
+    const installButton = document.getElementById('install-app-btn');
+    const installVisible = Boolean(installButton && !installButton.hidden && installButton.offsetParent !== null);
+    pinListPanelElement.classList.toggle('pin-list-panel--stacked', installVisible);
+}
+
+function focusOnPinMarker(marker) {
+    if (!marker || !map) {
+        return;
+    }
+    const position = toLatLngLiteral(marker.position);
+    if (position && typeof map.panTo === 'function') {
+        map.panTo(position);
+    }
+    if (typeof map.getZoom === 'function') {
+        const currentZoom = map.getZoom();
+        if (!currentZoom || currentZoom < 15) {
+            map.setZoom(15);
+        }
+    }
+    if (marker.infoWindow && typeof marker.infoWindow.show === 'function') {
+        marker.infoWindow.show();
+    }
+}
+
+function updatePinListPanel(context = {}) {
+    if (!pinListItemsContainer || !pinListTitleElement || !pinListSummaryElement) {
+        return;
+    }
+
+    const referencePosition = getPinListReferencePosition();
+    const hasSearchQuery = currentSearchTokens.length > 0;
+    const visiblePins = markers
+        .filter(marker => marker && marker.pin && marker.isVisible)
+        .map(marker => {
+            const position = toLatLngLiteral(marker.position);
+            const distanceKm = referencePosition && position
+                ? calculateDistanceKm(referencePosition, position)
+                : Number.POSITIVE_INFINITY;
+            return {
+                marker,
+                pin: marker.pin,
+                position,
+                distanceKm
+            };
+        })
+        .sort((a, b) => {
+            const distanceA = Number.isFinite(a.distanceKm) ? a.distanceKm : Number.POSITIVE_INFINITY;
+            const distanceB = Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
+            if (distanceA === distanceB) {
+                return (a.pin?.title || '').localeCompare(b.pin?.title || '');
+            }
+            return distanceA - distanceB;
+        });
+
+    pinListTitleElement.textContent = hasSearchQuery ? 'Hasil pencarian' : 'Pin terdekat';
+    const totalVisible = visiblePins.length;
+    const resultsToRender = visiblePins.slice(0, 30);
+
+    if (pinListSummaryElement) {
+        if (!totalVisible) {
+            pinListSummaryElement.textContent = 'Tidak ada pin yang cocok dengan filter.';
+        } else if (hasSearchQuery) {
+            pinListSummaryElement.textContent = `${resultsToRender.length} dari ${totalVisible} hasil pencarian`;
+        } else if (referencePosition) {
+            pinListSummaryElement.textContent = `${resultsToRender.length} pin terdekat diurut berdasarkan jarak`;
+        } else {
+            pinListSummaryElement.textContent = `${resultsToRender.length} pin terdekat`;
+        }
+    }
+
+    pinListItemsContainer.innerHTML = '';
+    if (pinListEmptyElement) {
+        pinListEmptyElement.classList.toggle('hidden', totalVisible > 0);
+    }
+
+    if (!resultsToRender.length) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    resultsToRender.forEach((entry) => {
+        const pin = entry.pin || {};
+        const distanceLabel = formatDistanceText(entry.distanceKm);
+
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'pin-list-item';
+        item.setAttribute('role', 'listitem');
+        item.dataset.pinId = pin._id || '';
+
+        const row = document.createElement('div');
+        row.className = 'pin-list-item__row';
+
+        const title = document.createElement('div');
+        title.className = 'pin-list-item__title';
+        title.textContent = pin.title || 'Pin tanpa judul';
+        row.appendChild(title);
+
+        if (distanceLabel) {
+            const distanceBadge = document.createElement('div');
+            distanceBadge.className = 'pin-list-item__distance';
+            distanceBadge.textContent = distanceLabel;
+            row.appendChild(distanceBadge);
+        }
+
+        const category = document.createElement('div');
+        category.className = 'pin-list-item__category';
+        category.textContent = 'Kategori: ' + (pin.category || 'Kategori tidak tersedia');
+
+        const description = document.createElement('div');
+        description.className = 'pin-list-item__desc';
+        const truncatedDescription = truncateText(pin.description || '', 320);
+        renderTextWithLineBreaks(description, truncatedDescription);
+
+        item.appendChild(row);
+        item.appendChild(category);
+        item.appendChild(description);
+
+        item.addEventListener('click', () => {
+            setPinListCollapsed(false);
+            focusOnPinMarker(entry.marker);
+        });
+
+        fragment.appendChild(item);
+    });
+
+    pinListItemsContainer.appendChild(fragment);
+
+    if (hasSearchQuery && context.reason === 'search') {
+        setPinListCollapsed(false);
+    }
+}
+
 
 function updateLiveSellerMarkerElement(element, seller = {}) {
     if (!element) {
@@ -4176,7 +4419,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const locateMeBtn = document.getElementById('locate-me-btn');
     const filterBtn = document.getElementById('filter-btn');
     const installAppBtn = document.getElementById('install-app-btn');
-    const filterDropdown = document.getElementById('filter-dropdown');
+    filterDropdownElement = document.getElementById('filter-dropdown');
     const selectAllCategories = document.getElementById('select-all-categories');
     const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
     const categoryCheckboxList = Array.from(categoryCheckboxes);
@@ -4184,6 +4427,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterSearchButton = document.getElementById('filter-search-btn');
     const filterDateRangeInput = document.getElementById('filter-date-range-input');
     const resetFilterBtn = document.getElementById('reset-filter-btn');
+    pinListPanelElement = document.getElementById('pin-list-panel');
+    pinListToggleButton = document.getElementById('pin-list-toggle');
+    pinListContainerElement = document.getElementById('pin-list-container');
+    pinListTitleElement = document.getElementById('pin-list-title');
+    pinListSummaryElement = document.getElementById('pin-list-summary');
+    pinListItemsContainer = document.getElementById('pin-list');
+    pinListEmptyElement = document.getElementById('pin-list-empty');
     addPinFormElement = document.getElementById('add-pin-form');
     pinFormContainer = document.getElementById('pin-form');
     pinTitleInput = document.getElementById('title');
@@ -4216,7 +4466,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    if (pinListToggleButton) {
+        pinListToggleButton.addEventListener('click', () => {
+            const isCollapsed = pinListPanelElement
+                ? pinListPanelElement.classList.contains('pin-list-panel--collapsed')
+                : false;
+            const nextCollapsed = !isCollapsed;
+            setPinListCollapsed(nextCollapsed);
+        });
+    }
+    if (pinListPanelElement && pinListPanelElement.classList.contains('pin-list-panel--collapsed')) {
+        setPinListCollapsed(true);
+    }
     updatePinImagesPreview();
+    updatePinListPanel({ reason: 'init' });
     liveSellerPanel = document.getElementById('live-seller-panel');
     liveSellerToggleButton = document.getElementById('live-seller-toggle-btn');
     liveSellerLoginButton = document.getElementById('live-seller-login-btn');
@@ -4353,6 +4616,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isStandalone) {
             installAppBtn.hidden = true;
         }
+        updatePinListPlacement();
         installAppBtn.addEventListener('click', async () => {
             if (!deferredInstallPrompt) {
                 DEBUG_LOGGER.log('Install prompt not available');
@@ -4376,8 +4640,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 deferredInstallPrompt = null;
                 installAppBtn.disabled = false;
                 installAppBtn.hidden = true;
+                updatePinListPlacement();
             }
         });
+    }
+    if (!installAppBtn) {
+        updatePinListPlacement();
     }
 
     const hasVisited = localStorage.getItem('hasVisited');
@@ -4404,9 +4672,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    filterBtn.addEventListener('click', () => {
-        filterDropdown.classList.toggle('hidden');
-    });
+    if (filterBtn) {
+        filterBtn.addEventListener('click', () => {
+            if (!filterDropdownElement) return;
+            const willOpen = filterDropdownElement.classList.contains('hidden');
+            if (willOpen) {
+                setPinListCollapsed(true);
+                closeActionMenu();
+                hidePinForm();
+                filterDropdownElement.classList.remove('hidden');
+            } else {
+                filterDropdownElement.classList.add('hidden');
+            }
+        });
+    }
 
     selectAllCategories.addEventListener('change', (e) => {
         const shouldCheck = e.target.checked;
@@ -4623,11 +4902,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         lastLiveSellerSearchResults = visibleLiveSellerEntries;
 
+        updatePinListPanel({ reason: 'filter' });
         refreshMarkerCluster(visibleMarkers);
     }
 
     function executeSearch() {
-        if (!filterDropdown) {
+        if (!filterDropdownElement) {
             return;
         }
 
@@ -4637,6 +4917,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentSearchTokens = tokenizeSearchQuery(currentSearchQuery);
 
         filterMarkers();
+        updatePinListPanel({ reason: 'search' });
 
         if (!map) {
             return;
@@ -4654,7 +4935,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (filterSearchInput) {
             filterSearchInput.blur();
         }
-        filterDropdown.classList.add('hidden');
+        filterDropdownElement.classList.add('hidden');
 
         const pinCandidates = visibleMarkers
             .map(marker => ({
@@ -4732,8 +5013,8 @@ document.addEventListener('DOMContentLoaded', () => {
             filterDateRangeInput.value = '';
         }
         filterMarkers();
-        if (filterDropdown) {
-            filterDropdown.classList.add('hidden');
+        if (filterDropdownElement) {
+            filterDropdownElement.classList.add('hidden');
         }
         if (map && typeof map.setZoom === 'function' && typeof map.panTo === 'function') {
             const targetPosition = userMarker ? toLatLngLiteral(userMarker.position) : DEFAULT_MAP_CENTER;
@@ -5335,8 +5616,17 @@ function handleLocationError(browserHasGeolocation) {
     if (addPinButton) {
         addPinButton.addEventListener('click', () => {
             const formContainer = pinFormContainer || document.getElementById('pin-form');
-            if (formContainer) {
-                formContainer.classList.toggle('hidden');
+            if (!formContainer) {
+                return;
+            }
+            const willOpen = formContainer.classList.contains('hidden');
+            if (willOpen) {
+                setPinListCollapsed(true);
+                closeActionMenu();
+                hideFilterDropdown();
+                formContainer.classList.remove('hidden');
+            } else {
+                formContainer.classList.add('hidden');
             }
             editingPinId = null; // Reset editing state
             const formEl = addPinFormElement || document.getElementById('add-pin-form');

@@ -13,6 +13,19 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <div id="pin-list-panel" class="pin-list-panel pin-list-panel--collapsed">
+        <button id="pin-list-toggle" class="pin-list-toggle" type="button" aria-expanded="false" aria-controls="pin-list-container">
+            AyaNaon
+        </button>
+        <div id="pin-list-container" class="pin-list-container" role="complementary" aria-label="Daftar pin terdekat dan hasil pencarian">
+            <div class="pin-list-header">
+                <div class="pin-list-title" id="pin-list-title">Pin Terdekat</div>
+                <div class="pin-list-summary" id="pin-list-summary">Memuat pin...</div>
+            </div>
+            <div class="pin-list-empty" id="pin-list-empty">Belum ada pin untuk ditampilkan.</div>
+            <div class="pin-list" id="pin-list" role="list"></div>
+        </div>
+    </div>
     <div id="map"></div>
     <button id="install-app-btn" type="button" hidden>Install App</button>
         <div id="action-menu" class="action-menu">
@@ -313,7 +326,7 @@
             <p> </p>
             <p><b>Terima kasih dan selamat berselancar, Warga 🏄‍♀️🌊</b></p>
             <p><i>Silahkan email <a href="mailto:contact@petalytix.id">contact@petalytix.id</a> jika ingin kontak dengan developer</i></p>
-            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.2.4</div>
+            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.2.5</div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr" defer></script>
