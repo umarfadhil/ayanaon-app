@@ -1332,11 +1332,16 @@ body {
     transform: translateX(24px);
 }
 
+#special-category-on-btn,
 #special-category-off-btn {
     position: static;
-    width: auto;
-    height: auto;
     box-shadow: none;
+}
+
+#special-category-on-btn.active {
+    background: rgba(74, 222, 128, 0.25);
+    border-color: rgba(74, 222, 128, 0.45);
+    color: #bbf7d0;
 }
 
 #special-category-off-btn.active {
@@ -1345,6 +1350,7 @@ body {
     color: #bbf7d0;
 }
 
+#special-category-on-btn:disabled,
 #special-category-off-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;

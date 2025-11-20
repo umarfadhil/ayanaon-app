@@ -33,6 +33,7 @@ let evCheckbox;
 let suppressSpecialCategorySync = false;
 let fuelToggleMode = 'fuel';
 
+let specialCategoryOnButton;
 let specialCategoryOffButton;
 let showSpecialCategories = false;
 let updateAppBtn;
@@ -714,7 +715,8 @@ function passesSpecialCategoryRules(marker) {
 }
 
 function updateFuelToggleUI() {
-    const allowSpecialSelection = showSpecialCategories && Boolean(userLocation);
+    const hasLocation = Boolean(userLocation);
+    const allowSpecialSelection = showSpecialCategories && hasLocation;
 
     if (fuelToggle) {
         fuelToggle.disabled = !allowSpecialSelection;
@@ -730,9 +732,13 @@ function updateFuelToggleUI() {
     if (fuelToggleEvLabel) {
         fuelToggleEvLabel.classList.toggle('active', allowSpecialSelection && fuelToggleMode === 'ev');
     }
+    if (specialCategoryOnButton) {
+        specialCategoryOnButton.classList.toggle('active', showSpecialCategories);
+        specialCategoryOnButton.disabled = hasLocation ? false : true;
+    }
     if (specialCategoryOffButton) {
         specialCategoryOffButton.classList.toggle('active', !showSpecialCategories);
-        specialCategoryOffButton.disabled = Boolean(userLocation) ? false : true;
+        specialCategoryOffButton.disabled = hasLocation ? false : true;
     }
 
     if (!suppressSpecialCategorySync) {
@@ -4651,10 +4657,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    specialCategoryOnButton = document.getElementById('special-category-on-btn');
     specialCategoryOffButton = document.getElementById('special-category-off-btn');
+    if (specialCategoryOnButton) {
+        specialCategoryOnButton.addEventListener('click', () => {
+            setSpecialCategoryVisibility(true);
+        });
+    }
     if (specialCategoryOffButton) {
         specialCategoryOffButton.addEventListener('click', () => {
-            setSpecialCategoryVisibility(!showSpecialCategories);
+            setSpecialCategoryVisibility(false);
         });
     }
 

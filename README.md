@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.2.7
+- **Travel Modes:** Added a dedicated car button beside the walking toggle; both share matching active styling while car mode reveals fuel/EV stations and walking hides them.
+- **PWA Icons Fixed:** Manifest now ships PNG icons (with SVG fallback) so desktop installs display the correct logo; cache and precache entries bumped to v2.2.7.
+- **Head Cleanup:** Favicon/apple-touch links now point to the generated PNG icon for consistent branding across platforms.
+
 ### What's New in v2.2.6
 - **Install App Placement:** The PWA install button now lives in the first Menu tab for easier access on mobile.
 - **One-Tap Updates:** A new “Update Tersedia” button appears in that tab whenever a fresh version is waiting; tapping it activates the new service worker and reloads automatically.
