@@ -9,6 +9,7 @@ AyaNaon-app is a community-driven map application designed to help you share and
 - [Key Features](#key-features)
 - [How It Works (Under the Hood)](#how-it-works-under-the-hood)
 - [Getting Started](#getting-started)
+- [PWA Install & Updates](#pwa-install--updates)
 - [Gerobak Online Workflow](#gerobak-online-workflow)
 - [Contributing](#contributing)
 - [Contact](#contact)
@@ -66,6 +67,12 @@ npm install
 ### 4. Deploy to Netlify
 This app is designed for easy deployment on Netlify. Connect your GitHub repository to Netlify, and it will automatically build and deploy your functions and frontend.
 
+## PWA Install & Updates
+
+- **Install App:** Open the top-right Menu and, in the first tab, tap **Install App** when the browser surfaces the install prompt.
+- **Update Available:** When a new version is ready, an **Update Tersedia** button appears in the same tab. Tap it to refresh immediately (it triggers the waiting service worker to activate, then reloads).
+- **Manual Refresh:** If the update button is hidden but you suspect a newer build exists, refresh the page to pick up the latest assets.
+
 ## Gerobak Online Workflow
 
 | Step | Details |
@@ -88,6 +95,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 ## Release Notes
 
 Release updates are listed from the most recent version to the earliest.
+
+### What's New in v2.2.6
+- **Install App Placement:** The PWA install button now lives in the first Menu tab for easier access on mobile.
+- **One-Tap Updates:** A new “Update Tersedia” button appears in that tab whenever a fresh version is waiting; tapping it activates the new service worker and reloads automatically.
+- **Fresher Caches:** Service worker now honors `SKIP_WAITING` messages so users hop onto the latest build faster.
 
 ### What's New in v2.2.5
 - **AyaNaon List Pin:** List of pins from the nearest location or search query to get better list of information about the pins

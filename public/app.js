@@ -35,6 +35,9 @@ let fuelToggleMode = 'fuel';
 
 let specialCategoryOffButton;
 let showSpecialCategories = false;
+let updateAppBtn;
+let serviceWorkerRegistration = null;
+let hasRefreshedForServiceWorker = false;
 
 let pinFormContainer;
 let addPinFormElement;
@@ -561,11 +564,60 @@ const DEBUG_LOGGER = (() => {
     return api;
 })();
 
+function showUpdateAvailableButton() {
+    if (!updateAppBtn) {
+        return;
+    }
+    updateAppBtn.hidden = false;
+    updateAppBtn.disabled = false;
+    updateAppBtn.textContent = 'Update Tersedia';
+}
+
+function attachServiceWorkerUpdateListeners(registration) {
+    if (!registration) {
+        return;
+    }
+
+    const listenToWorker = (worker) => {
+        if (!worker) {
+            return;
+        }
+        worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                showUpdateAvailableButton();
+            }
+        });
+    };
+
+    if (registration.waiting && navigator.serviceWorker.controller) {
+        showUpdateAvailableButton();
+    }
+
+    listenToWorker(registration.installing);
+
+    registration.addEventListener('updatefound', () => {
+        listenToWorker(registration.installing);
+    });
+}
+
 if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hasRefreshedForServiceWorker) {
+            return;
+        }
+        hasRefreshedForServiceWorker = true;
+        window.location.reload();
+    });
+
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('service-worker.js')
             .then((registration) => {
+                serviceWorkerRegistration = registration;
+                attachServiceWorkerUpdateListeners(registration);
                 DEBUG_LOGGER.log('Service worker registered', { scope: registration.scope });
+                if (typeof registration.update === 'function') {
+                    registration.update().catch(() => {});
+                }
             })
             .catch((error) => {
                 console.error('Service worker registration failed:', error);
@@ -4419,6 +4471,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const locateMeBtn = document.getElementById('locate-me-btn');
     const filterBtn = document.getElementById('filter-btn');
     const installAppBtn = document.getElementById('install-app-btn');
+    updateAppBtn = document.getElementById('update-app-btn');
     filterDropdownElement = document.getElementById('filter-dropdown');
     const selectAllCategories = document.getElementById('select-all-categories');
     const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
@@ -4646,6 +4699,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (!installAppBtn) {
         updatePinListPlacement();
+    }
+
+    if (updateAppBtn) {
+        if (serviceWorkerRegistration && serviceWorkerRegistration.waiting && navigator.serviceWorker.controller) {
+            showUpdateAvailableButton();
+        }
+        updateAppBtn.addEventListener('click', () => {
+            if (serviceWorkerRegistration && serviceWorkerRegistration.waiting) {
+                updateAppBtn.disabled = true;
+                updateAppBtn.textContent = 'Memperbarui...';
+                serviceWorkerRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                return;
+            }
+            updateAppBtn.disabled = true;
+            updateAppBtn.textContent = 'Memuat ulang...';
+            window.location.reload();
+        });
     }
 
     const hasVisited = localStorage.getItem('hasVisited');
