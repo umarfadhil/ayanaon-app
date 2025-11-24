@@ -2768,6 +2768,17 @@ function buildLiveSellerSearchBlob(seller = {}) {
         .join(' ');
 }
 
+function truncateWithEllipsis(value, maxLength = 200) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const text = value.trim();
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return `${text.slice(0, maxLength).trim()}...`;
+}
+
 function truncateText(value, maxLength = 160) {
     if (typeof value !== 'string') {
         return '';
@@ -2884,6 +2895,7 @@ function updatePinListPanel(context = {}) {
     }
 
     const referencePosition = getPinListReferencePosition();
+    const hasUserLocation = Boolean(userLocation && Number.isFinite(userLocation?.lat) && Number.isFinite(userLocation?.lng));
     const hasSearchQuery = currentSearchTokens.length > 0;
     const visiblePins = markers
         .filter(marker => marker && marker.pin && marker.isVisible)
@@ -2934,9 +2946,39 @@ function updatePinListPanel(context = {}) {
     }
 
     const fragment = document.createDocumentFragment();
+    const createMetaCard = ({ label, primary, secondary = '', modifier = '' }) => {
+        const card = document.createElement('div');
+        card.className = `pin-meta-card${modifier ? ` pin-meta-card--${modifier}` : ''}`;
+
+        const labelEl = document.createElement('div');
+        labelEl.className = 'pin-meta-card__label';
+        labelEl.textContent = label;
+
+        const primaryEl = document.createElement('div');
+        primaryEl.className = 'pin-meta-card__value';
+        const primaryText = (primary || primary === 0) ? primary : 'N/A';
+        primaryEl.textContent = String(primaryText);
+
+        card.appendChild(labelEl);
+        card.appendChild(primaryEl);
+
+        if (secondary) {
+            const secondaryEl = document.createElement('div');
+            secondaryEl.className = 'pin-meta-card__sub';
+            secondaryEl.textContent = secondary;
+            card.appendChild(secondaryEl);
+        }
+        return card;
+    };
+
     resultsToRender.forEach((entry) => {
         const pin = entry.pin || {};
-        const distanceLabel = formatDistanceText(entry.distanceKm);
+        const hasDistance = hasUserLocation && Number.isFinite(entry.distanceKm);
+        const distanceLabel = hasDistance ? formatDistanceText(entry.distanceKm) : 'N/A';
+        const { start: startDateValue, end: endDateValue } = getPinDateRangeParts(pin);
+        const startParts = formatDateParts(startDateValue);
+        const endParts = formatDateParts(endDateValue);
+        const whenLabel = getPinWhenLabel(pin);
 
         const item = document.createElement('button');
         item.type = 'button';
@@ -2944,37 +2986,109 @@ function updatePinListPanel(context = {}) {
         item.setAttribute('role', 'listitem');
         item.dataset.pinId = pin._id || '';
 
-        const row = document.createElement('div');
-        row.className = 'pin-list-item__row';
+        const header = document.createElement('div');
+        header.className = 'pin-list-item__header';
 
         const title = document.createElement('div');
         title.className = 'pin-list-item__title';
         title.textContent = pin.title || 'Pin tanpa judul';
-        row.appendChild(title);
+        header.appendChild(title);
 
-        if (distanceLabel) {
-            const distanceBadge = document.createElement('div');
-            distanceBadge.className = 'pin-list-item__distance';
-            distanceBadge.textContent = distanceLabel;
-            row.appendChild(distanceBadge);
+        const meta = document.createElement('div');
+        meta.className = 'pin-list-item__meta';
+
+        const categoryDisplay = getCategoryDisplay(pin.category);
+
+        meta.appendChild(createMetaCard({
+            label: 'Kategori',
+            primary: categoryDisplay.emoji,
+            secondary: categoryDisplay.label,
+            modifier: 'category'
+        }));
+
+        meta.appendChild(createMetaCard({
+            label: 'Mulai',
+            primary: startParts.day,
+            secondary: startParts.isValid ? startParts.monthYear : '',
+            modifier: 'date'
+        }));
+
+        meta.appendChild(createMetaCard({
+            label: 'Selesai',
+            primary: endParts.day,
+            secondary: endParts.isValid ? endParts.monthYear : '',
+            modifier: 'date'
+        }));
+
+        let distancePrimary = distanceLabel || 'N/A';
+        let distanceUnit = '';
+        if (typeof distanceLabel === 'string') {
+            const parts = distanceLabel.split(' ');
+            if (parts.length === 2) {
+                distancePrimary = parts[0];
+                distanceUnit = parts[1];
+            }
         }
 
-        const category = document.createElement('div');
-        category.className = 'pin-list-item__category';
-        category.textContent = 'Kategori: ' + (pin.category || 'Kategori tidak tersedia');
+        meta.appendChild(createMetaCard({
+            label: 'Jarak',
+            primary: distancePrimary || 'N/A',
+            secondary: distanceUnit,
+            modifier: 'distance'
+        }));
+
+        const descriptionBlock = document.createElement('div');
+        descriptionBlock.className = 'pin-list-item__description-block';
+
+        const descriptionTitle = document.createElement('div');
+        descriptionTitle.className = 'pin-list-item__desc-title';
+        descriptionTitle.textContent = 'Deskripsi';
 
         const description = document.createElement('div');
         description.className = 'pin-list-item__desc';
-        const truncatedDescription = truncateText(pin.description || '', 320);
-        renderTextWithLineBreaks(description, truncatedDescription);
+        const fullDescription = typeof pin.description === 'string' ? pin.description.trim() : '';
+        const previewText = truncateWithEllipsis(fullDescription || 'Tidak ada deskripsi.', 220);
+        renderTextWithLineBreaks(description, previewText);
 
-        item.appendChild(row);
-        item.appendChild(category);
-        item.appendChild(description);
+        const isExpandable = fullDescription && fullDescription.length > previewText.length;
+        let moreButton = null;
+        if (isExpandable) {
+            moreButton = document.createElement('span');
+            moreButton.className = 'pin-list-item__more-btn';
+            moreButton.textContent = 'Lihat lebih banyak...';
+            moreButton.setAttribute('data-expanded', 'false');
+            moreButton.setAttribute('role', 'button');
+            moreButton.tabIndex = 0;
+            moreButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const expanded = moreButton.getAttribute('data-expanded') === 'true';
+                const nextExpanded = !expanded;
+                moreButton.setAttribute('data-expanded', nextExpanded ? 'true' : 'false');
+                const textToRender = nextExpanded ? fullDescription : previewText;
+                renderTextWithLineBreaks(description, textToRender || 'Tidak ada deskripsi.');
+                moreButton.textContent = nextExpanded ? 'Sembunyikan' : 'Lihat lebih banyak...';
+            });
+            moreButton.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    moreButton.click();
+                }
+            });
+        }
+
+        descriptionBlock.appendChild(descriptionTitle);
+        descriptionBlock.appendChild(description);
+        if (moreButton) {
+            descriptionBlock.appendChild(moreButton);
+        }
+
+        item.appendChild(header);
+        item.appendChild(meta);
+        item.appendChild(descriptionBlock);
 
         item.addEventListener('click', () => {
-            setPinListCollapsed(false);
             focusOnPinMarker(entry.marker);
+            setPinListCollapsed(true);
         });
 
         fragment.appendChild(item);
@@ -5272,20 +5386,7 @@ async function initMap() {
             editButton = `<button type="button" class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
         }
     
-        let when = 'N/A';
-        if (pin.lifetime) {
-            if (pin.lifetime.type === 'today') {
-                when = 'Hari ini';
-            } else if (pin.lifetime.type === 'date') {
-                if (pin.lifetime.start && pin.lifetime.end && pin.lifetime.start !== pin.lifetime.end) {
-                    when = `${formatDate(pin.lifetime.start)} - ${formatDate(pin.lifetime.end)}`;
-                } else if (pin.lifetime.value) {
-                    when = formatDate(pin.lifetime.value);
-                } else if (pin.lifetime.start) {
-                    when = formatDate(pin.lifetime.start);
-                }
-            }
-        }
+        const when = getPinWhenLabel(pin) || 'N/A';
     
         const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
         const safeTitleForData = (pin.title || '').replace(/"/g, '&quot;');
@@ -5771,8 +5872,11 @@ function getIconForCategory(category) {
     return icons[category] || '💡';
 }
 
-function formatDate(dateString) {
-    const date = new Date(dateString);
+function formatDate(dateInput) {
+    const date = new Date(dateInput);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     
@@ -5782,6 +5886,139 @@ function formatDate(dateString) {
     const year = date.getFullYear();
     
     return `${dayName}, ${day} ${monthName} ${year}`;
+}
+
+function formatDateParts(dateInput) {
+    if (!dateInput) {
+        return { day: 'N/A', monthYear: '', label: 'N/A', isValid: false };
+    }
+    const date = new Date(dateInput);
+    if (Number.isNaN(date.getTime())) {
+        return { day: 'N/A', monthYear: '', label: 'N/A', isValid: false };
+    }
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const day = String(date.getDate()).padStart(2, '0');
+    const monthYear = `${months[date.getMonth()]} ${date.getFullYear()}`;
+    return { day, monthYear, label: formatDate(date), isValid: true };
+}
+
+function getCategoryEmoji(category) {
+    if (!category) {
+        return 'N/A';
+    }
+    const text = String(category).trim();
+    if (!text) {
+        return 'N/A';
+    }
+    const emojiMatch = text.match(/\p{Extended_Pictographic}/u);
+    if (emojiMatch && emojiMatch[0]) {
+        return emojiMatch[0];
+    }
+    const firstToken = text.split(/\s+/)[0];
+    return firstToken || 'N/A';
+}
+
+function getCategoryLabel(category) {
+    if (!category) {
+        return '';
+    }
+    const text = String(category).trim();
+    const map = {
+        '🎭 Budaya & Hiburan': 'Budaya & Hiburan',
+        '🐾 Barang & Hewan Hilang': 'Info Kehilangan',
+        '🎓 Edukasi': 'Edukasi',
+        '🤝 Jual-Beli Barang': 'Jual-Beli Barang',
+        '🎉 Konser Musik & Acara': 'Konser & Acara',
+        '🏃🏻 Olahraga & Aktivitas Hobi': 'Olahraga & Hobi',
+        '🛍️ Pasar Lokal & Pameran': 'Pasar Lokal & Pameran',
+        '🍔 Promo & Diskon Makanan / Minuman': 'Promo Makanan',
+        '💸 Promo & Diskon Lainnya': 'Promo Lainnya',
+        '🧑‍🤝‍🧑 Sosial & Kopdar': 'Sosial & Kopdar',
+        '💡 Lain-lain': 'Lainnya'
+    };
+    if (map[text]) {
+        return map[text];
+    }
+    const parts = text.split(/\s+/);
+    return parts.slice(1).join(' ') || text;
+}
+
+function getCategoryDisplay(category) {
+    return {
+        emoji: getCategoryEmoji(category),
+        label: getCategoryLabel(category)
+    };
+}
+
+function getPinDateRangeParts(pin) {
+    const result = { start: null, end: null };
+    const { lifetime } = pin || {};
+    if (!lifetime) {
+        return result;
+    }
+    if (lifetime.type === 'today') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        result.start = today;
+        result.end = today;
+        return result;
+    }
+    if (lifetime.type === 'date') {
+        if (lifetime.start) {
+            const startDate = new Date(lifetime.start);
+            if (!Number.isNaN(startDate.getTime())) {
+                result.start = startDate;
+            }
+        }
+        if (lifetime.end) {
+            const endDate = new Date(lifetime.end);
+            if (!Number.isNaN(endDate.getTime())) {
+                result.end = endDate;
+            }
+        }
+        if (lifetime.value) {
+            const valueDate = new Date(lifetime.value);
+            if (!Number.isNaN(valueDate.getTime())) {
+                if (!result.start) {
+                    result.start = valueDate;
+                }
+                if (!result.end) {
+                    result.end = valueDate;
+                }
+            }
+        }
+        if (result.start && !result.end) {
+            result.end = result.start;
+        }
+        if (result.end && !result.start) {
+            result.start = result.end;
+        }
+    }
+    return result;
+}
+
+function getPinWhenLabel(pin) {
+    if (!pin) {
+        return '';
+    }
+    const { lifetime } = pin;
+    if (lifetime) {
+        if (lifetime.type === 'today') {
+            return 'Hari ini';
+        }
+        if (lifetime.type === 'date') {
+            if (lifetime.start && lifetime.end && lifetime.start !== lifetime.end) {
+                return `${formatDate(lifetime.start)} - ${formatDate(lifetime.end)}`;
+            }
+            if (lifetime.value) {
+                return formatDate(lifetime.value);
+            }
+            if (lifetime.start) {
+                return formatDate(lifetime.start);
+            }
+        }
+    }
+    return '';
 }
 
 function getUserIp() {

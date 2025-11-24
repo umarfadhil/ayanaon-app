@@ -90,8 +90,8 @@ body {
 
 .pin-list-container {
     pointer-events: auto;
-    width: 340px;
-    max-width: min(420px, 90vw);
+    width: 400px;
+    max-width: min(480px, 92vw);
     max-height: calc(100vh - 170px);
     padding: 14px;
     background: rgba(12, 18, 34, 0.92);
@@ -157,24 +157,32 @@ body {
 .pin-list-item {
     width: 100%;
     border: 1px solid rgba(148, 163, 184, 0.35);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.04);
+    border-radius: 16px;
+    background: #0f172a;
     color: inherit;
-    padding: 12px 14px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 12px;
     text-align: left;
     cursor: pointer;
     transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
 }
 
 .pin-list-item:hover,
 .pin-list-item:focus-visible {
-    background: rgba(59, 130, 246, 0.14);
+    background: rgba(59, 130, 246, 0.12);
     border-color: rgba(59, 130, 246, 0.55);
     outline: none;
     transform: translateY(-1px);
+}
+
+.pin-list-item__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
 }
 
 .pin-list-item__row {
@@ -186,9 +194,9 @@ body {
 }
 
 .pin-list-item__title {
-    font-weight: 700;
-    font-size: 15px;
-    color: #e0f2fe;
+    font-weight: 800;
+    font-size: 17px;
+    color: #f8fafc;
 }
 
 .pin-list-item__distance {
@@ -213,10 +221,107 @@ body {
     letter-spacing: 0.02em;
 }
 
+.pin-list-item__date {
+    font-size: 12px;
+    color: #e0e7ff;
+    letter-spacing: 0.01em;
+}
+
 .pin-list-item__desc {
-    font-size: 13px;
-    color: #e2e8f0;
+    font-size: 14px;
+    color: #f8fafc;
     line-height: 1.4;
+}
+
+.pin-list-item__meta {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(64px, 1fr));
+    gap: 8px;
+}
+
+.pin-meta-card {
+    background: linear-gradient(135deg, #16a34a, #16a34a54, transparent 70%);
+    color: #f8fafc;
+    border-radius: 16px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+    min-height: 76px;
+    align-items: center;
+    text-align: center;
+}
+
+.pin-meta-card--category {
+    background: linear-gradient(135deg, #16a34a, #16a34a54, transparent 70%);
+}
+
+.pin-meta-card--category .pin-meta-card__value {
+    font-size: 16px;
+    line-height: 1.25;
+    white-space: normal;
+    word-break: break-word;
+    padding: 0 4px;
+}
+
+.pin-meta-card--distance {
+    background: linear-gradient(135deg, #16a34a, #16a34a54, transparent 70%);
+}
+
+.pin-meta-card__label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.pin-meta-card__value {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.pin-meta-card__sub {
+    font-size: 10px;
+    font-weight: 700;
+    opacity: 0.95;
+}
+
+.pin-list-item__description-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+.pin-list-item__desc-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #e2e8f0;
+}
+
+.pin-list-item__date-range {
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+.pin-list-item__more-btn {
+    background: none;
+    border: none;
+    color: #93c5fd;
+    font-weight: 700;
+    font-style: italic;
+    padding: 0;
+    text-decoration: underline;
+    cursor: pointer;
+    align-self: flex-start;
+}
+
+.pin-list-item__more-btn:hover {
+    color: #bfdbfe;
 }
 
 @media (max-width: 768px) {
@@ -225,8 +330,16 @@ body {
         left: calc(12px + var(--safe-left));
     }
     .pin-list-container {
-        width: min(92vw, 320px);
+        width: min(96vw, 380px);
         max-height: calc(100vh - 190px);
+    }
+    .pin-list-item__meta {
+        grid-template-columns: repeat(4, minmax(60px, 1fr));
+        gap: 6px;
+    }
+    .pin-meta-card {
+        padding: 7px;
+        min-height: 72px;
     }
 }
 

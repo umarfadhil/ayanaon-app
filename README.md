@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.2.8
+- **Pin List Cards:** Rebuilt the pin list item layout into four compact cards (Kategori, Mulai, Selesai, Jarak) with N/A fallbacks and emoji-only category badges plus short labels beneath.
+- **Cleaner Details:** Removed the inline date-range row, added a “Lihat lebih banyak...” toggle for descriptions, and auto-collapsed the list when opening a pin so the map popup takes focus.
+- **Mobile Fit:** Widened the pin list panel and tightened card sizing so all four cards sit on one row without overlap across desktop and mobile.
+
 ### What's New in v2.2.7
 - **Travel Modes:** Added a dedicated car button beside the walking toggle; both share matching active styling while car mode reveals fuel/EV stations and walking hides them.
 - **PWA Icons Fixed:** Manifest now ships PNG icons (with SVG fallback) so desktop installs display the correct logo; cache and precache entries bumped to v2.2.7.
