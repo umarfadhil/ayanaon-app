@@ -28,6 +28,13 @@
         </div>
     </div>
     <div id="map"></div>
+    <div id="pin-location-search-bar" class="pin-location-search-bar hidden">
+        <div class="pin-location-search-inner">
+            <input type="text" id="pin-location-search" placeholder="Cari lokasi atau alamat" aria-label="Cari lokasi atau alamat">
+            <button type="button" id="pin-location-search-btn" aria-label="Cari lokasi">Cari</button>
+        </div>
+        <p class="pin-location-search-note">Tap peta untuk menjatuhkan pin, atau cari lokasi lalu konfirmasi titik tersebut.</p>
+    </div>
     <div id="action-menu" class="action-menu">
         <button id="action-menu-toggle" class="action-menu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="action-menu-content">Menu</button>
         <div id="action-menu-content" class="action-menu-content hidden">
@@ -227,6 +234,16 @@
                 <option value="date">Pilih Tanggal</option>
             </select>
             <input type="date" id="lifetime-date-picker" placeholder="Pilih Tanggal">
+            <div class="pin-location-field">
+                <div class="pin-location-header">
+                    <button type="button" id="pin-location-btn" class="pin-location-btn">Tentukan Titik Lokasi</button>
+                </div>
+                <p class="pin-location-hint" id="pin-location-hint">Klik tombol, pilih lokasi di peta, lalu konfirmasi.</p>
+                <div class="pin-location-coordinates" id="pin-location-coordinates" aria-live="polite">
+                    <span id="pin-location-lat">Latitude: -</span>
+                    <span id="pin-location-lng">Longitude: -</span>
+                </div>
+            </div>
             <input type="text" id="link" placeholder="Link">
             <div class="pin-images-field">
                 <label for="pin-images">Lampiran Foto (opsional)</label>
@@ -329,7 +346,7 @@
             <p> </p>
             <p><b>Terima kasih dan selamat berselancar, Warga 🏄‍♀️🌊</b></p>
             <p><i>Silahkan email <a href="mailto:contact@petalytix.id">contact@petalytix.id</a> jika ingin kontak dengan developer</i></p>
-            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.2.8</div>
+            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.2.9</div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr" defer></script>

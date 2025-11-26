@@ -48,6 +48,68 @@ let pinCategorySelectElement;
 let pinLinkInput;
 let pinLifetimeSelectElement;
 let pinLifetimeDateInput;
+let pinLocationButton;
+let pinLocationSearchInput;
+let pinLocationSearchButton;
+let pinLocationSearchBarElement;
+let pinLocationLatDisplay;
+let pinLocationLngDisplay;
+let pinLocationHint;
+let isSelectingPinLocation = false;
+let geocoder = null;
+let pinLocationConfirmWindow = null;
+
+function showPinLocationSearchBar(show = false) {
+    if (!pinLocationSearchBarElement) {
+        pinLocationSearchBarElement = document.getElementById('pin-location-search-bar');
+    }
+    if (!pinLocationSearchBarElement) {
+        return;
+    }
+    pinLocationSearchBarElement.classList.toggle('hidden', !show);
+}
+
+function closePinLocationConfirmOverlay() {
+    if (pinLocationConfirmWindow && typeof pinLocationConfirmWindow.close === 'function') {
+        pinLocationConfirmWindow.close();
+    }
+}
+
+function showPinLocationConfirmOverlay() {
+    if (!map || !temporaryMarker) {
+        return;
+    }
+    const coords = toLatLngLiteral(temporaryMarker.position || temporaryMarker);
+    if (!coords) {
+        return;
+    }
+    if (!pinLocationConfirmWindow && typeof google !== 'undefined' && google.maps && typeof google.maps.InfoWindow === 'function') {
+        pinLocationConfirmWindow = new google.maps.InfoWindow();
+    }
+    if (!pinLocationConfirmWindow) {
+        return;
+    }
+    const content = document.createElement('div');
+    content.className = 'pin-location-confirm';
+    const text = document.createElement('span');
+    text.textContent = 'Pilih titik lokasi ini?';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'confirm-pin-location-btn';
+    btn.textContent = 'Konfirmasi';
+    btn.addEventListener('click', finalizePinLocationSelection);
+    content.appendChild(text);
+    content.appendChild(btn);
+
+    pinLocationConfirmWindow.setContent(content);
+    pinLocationConfirmWindow.setPosition(coords);
+    if (typeof pinLocationConfirmWindow.open === 'function') {
+        pinLocationConfirmWindow.open({
+            map,
+            anchor: temporaryMarker
+        });
+    }
+}
 let pinImageInput;
 let pinImagesPreviewList;
 let pinExistingImagesContainer;
@@ -2700,6 +2762,193 @@ function calculateDistanceKm(origin, target) {
     return R * c;
 }
 
+function setPinLocationHint(message) {
+    if (pinLocationHint && typeof message === 'string') {
+        pinLocationHint.textContent = message;
+    }
+}
+
+function highlightMapForSelection(enable = false) {
+    const mapElement = map && typeof map.getDiv === 'function'
+        ? map.getDiv()
+        : document.getElementById('map');
+    if (!mapElement) {
+        return;
+    }
+    mapElement.classList.toggle('pin-location-mode', Boolean(enable));
+}
+
+function updatePinLocationDisplay(position, message) {
+    if (!pinLocationLatDisplay || !pinLocationLngDisplay) {
+        if (message) {
+            setPinLocationHint(message);
+        }
+        return;
+    }
+    if (!position) {
+        pinLocationLatDisplay.textContent = 'Lat: -';
+        pinLocationLngDisplay.textContent = 'Lng: -';
+        if (message) {
+            setPinLocationHint(message);
+        }
+        return;
+    }
+    const coords = toLatLngLiteral(position);
+    if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number') {
+        return;
+    }
+    pinLocationLatDisplay.textContent = `Lat: ${coords.lat.toFixed(5)}`;
+    pinLocationLngDisplay.textContent = `Lng: ${coords.lng.toFixed(5)}`;
+    if (message) {
+        setPinLocationHint(message);
+    }
+}
+
+function setTemporaryMarkerLocation(position, options = {}) {
+    const { panToLocation = false, message = '', finalizeSelection = false } = options;
+    const coords = toLatLngLiteral(position);
+    if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number') {
+        return;
+    }
+
+    const markerCtor = (typeof google !== 'undefined' && google.maps && google.maps.marker && google.maps.marker.AdvancedMarkerElement)
+        ? google.maps.marker.AdvancedMarkerElement
+        : null;
+
+    if (temporaryMarker && typeof temporaryMarker === 'object') {
+        temporaryMarker.position = coords;
+        if ('map' in temporaryMarker) {
+            temporaryMarker.map = map || temporaryMarker.map;
+        } else if (markerCtor && map) {
+            temporaryMarker = new markerCtor({
+                position: coords,
+                map
+            });
+        }
+    } else if (markerCtor && map) {
+        temporaryMarker = new markerCtor({
+            position: coords,
+            map
+        });
+    } else {
+        temporaryMarker = { position: coords };
+    }
+
+    if (map && panToLocation && typeof map.panTo === 'function') {
+        map.panTo(coords);
+    }
+
+    if (finalizeSelection) {
+        isSelectingPinLocation = false;
+        highlightMapForSelection(false);
+    }
+
+    updatePinLocationDisplay(coords, message || 'Koordinat lokasi sudah terisi.');
+    if (isSelectingPinLocation) {
+        showPinLocationConfirmOverlay();
+    }
+}
+
+function clearTemporaryMarkerSelection(message = '') {
+    if (temporaryMarker && temporaryMarker.map) {
+        temporaryMarker.map = null;
+    }
+    temporaryMarker = null;
+    updatePinLocationDisplay(null, message || 'Belum ada lokasi yang dipilih.');
+    isSelectingPinLocation = false;
+    highlightMapForSelection(false);
+    hidePinLocationSearchBar();
+    closePinLocationConfirmOverlay();
+}
+
+function ensureGeocoder() {
+    if (geocoder) {
+        return geocoder;
+    }
+    if (typeof google !== 'undefined' && google.maps && typeof google.maps.Geocoder === 'function') {
+        geocoder = new google.maps.Geocoder();
+        return geocoder;
+    }
+    return null;
+}
+
+function hidePinForm() {
+    const formContainer = pinFormContainer || document.getElementById('pin-form');
+    if (formContainer) {
+        formContainer.classList.add('hidden');
+    }
+}
+
+function showPinForm() {
+    const formContainer = pinFormContainer || document.getElementById('pin-form');
+    if (formContainer) {
+        formContainer.classList.remove('hidden');
+    }
+}
+
+function startPinLocationSelection({ collapseForm = false } = {}) {
+    isSelectingPinLocation = true;
+    highlightMapForSelection(true);
+    showPinLocationSearchBar(true);
+    setPinLocationHint('Tap peta atau cari lokasi, lalu konfirmasi titiknya.');
+    if (collapseForm) {
+        hidePinForm();
+    }
+    closePinLocationConfirmOverlay();
+}
+
+function finalizePinLocationSelection() {
+    if (!temporaryMarker) {
+        setPinLocationHint('Belum ada lokasi yang dipilih.');
+        return;
+    }
+    isSelectingPinLocation = false;
+    highlightMapForSelection(false);
+    showPinLocationSearchBar(false);
+    closePinLocationConfirmOverlay();
+    showPinForm();
+    updatePinLocationDisplay(temporaryMarker.position || temporaryMarker, 'Koordinat dikonfirmasi.');
+}
+
+async function searchPinLocation() {
+    const query = pinLocationSearchInput ? pinLocationSearchInput.value.trim() : '';
+    if (!query) {
+        setPinLocationHint('Masukkan kata kunci lokasi untuk mencari.');
+        return;
+    }
+
+    const geocoderInstance = ensureGeocoder();
+    if (!geocoderInstance) {
+        alert('Peta belum siap untuk mencari lokasi. Silakan coba lagi setelah peta dimuat.');
+        return;
+    }
+
+    setPinLocationHint('Mencari lokasi...');
+    try {
+        const response = await geocoderInstance.geocode({
+            address: query,
+            bounds: map && typeof map.getBounds === 'function' ? map.getBounds() : undefined
+        });
+        const results = response && response.results ? response.results : [];
+        if (!Array.isArray(results) || results.length === 0) {
+            setPinLocationHint('Lokasi tidak ditemukan, coba kata kunci lain.');
+            return;
+        }
+        const geometry = results[0].geometry || {};
+        const target = geometry.location;
+        if (!target || typeof target.lat !== 'function' || typeof target.lng !== 'function') {
+            setPinLocationHint('Lokasi tidak ditemukan, coba kata kunci lain.');
+            return;
+        }
+        const coords = { lat: target.lat(), lng: target.lng() };
+        setTemporaryMarkerLocation(coords, { panToLocation: true, message: 'Koordinat diisi dari hasil pencarian.' });
+        startPinLocationSelection();
+    } catch (error) {
+        console.error('Pencarian lokasi gagal', error);
+        setPinLocationHint('Pencarian lokasi gagal, coba lagi.');
+    }
+}
+
 function formatDistanceText(distanceKm) {
     if (!Number.isFinite(distanceKm)) {
         return '';
@@ -4613,6 +4862,17 @@ document.addEventListener('DOMContentLoaded', () => {
     pinDescriptionInput = document.getElementById('description');
     pinCategorySelectElement = document.getElementById('category');
     pinLinkInput = document.getElementById('link');
+    pinLocationButton = document.getElementById('pin-location-btn');
+    pinLocationSearchInput = document.getElementById('pin-location-search');
+    pinLocationSearchButton = document.getElementById('pin-location-search-btn');
+    pinLocationSearchBarElement = document.getElementById('pin-location-search-bar');
+    pinLocationLatDisplay = document.getElementById('pin-location-lat');
+    pinLocationLngDisplay = document.getElementById('pin-location-lng');
+    pinLocationHint = document.getElementById('pin-location-hint');
+    updatePinLocationDisplay(
+        temporaryMarker ? temporaryMarker.position : null,
+        'Klik tombol lalu jatuhkan pin di peta atau cari lokasi untuk mengisi koordinat.'
+    );
     pinImageInput = document.getElementById('pin-images');
     pinImagesPreviewList = document.getElementById('pin-images-preview');
     pinExistingImagesContainer = document.getElementById('pin-existing-images-container');
@@ -4636,6 +4896,32 @@ document.addEventListener('DOMContentLoaded', () => {
             const index = Number(target.dataset.index);
             if (Number.isFinite(index)) {
                 removeSelectedPinImage(index);
+            }
+        });
+    }
+    if (pinLocationButton) {
+        pinLocationButton.addEventListener('click', () => {
+            startPinLocationSelection({ collapseForm: true });
+            setPinListCollapsed(true);
+            closeActionMenu();
+            hideFilterDropdown();
+            if (temporaryMarker && temporaryMarker.position) {
+                updatePinLocationDisplay(temporaryMarker.position, 'Klik peta untuk mengganti lokasi atau gunakan pencarian.');
+            }
+        });
+    }
+    if (pinLocationSearchButton) {
+        pinLocationSearchButton.addEventListener('click', () => {
+            startPinLocationSelection();
+            searchPinLocation();
+        });
+    }
+    if (pinLocationSearchInput) {
+        pinLocationSearchInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                startPinLocationSelection();
+                searchPinLocation();
             }
         });
     }
@@ -5593,7 +5879,9 @@ async function initMap() {
         }
 
         if (!temporaryMarker) {
-            alert('Please select a location on the map first');
+            alert('Silakan tentukan titik lokasi terlebih dahulu lewat tombol "Tentukan Titik Lokasi" atau klik peta.');
+            setPinLocationHint('Pilih lokasi dulu sebelum membagikan pin.');
+            startPinLocationSelection();
             return;
         }
 
@@ -5614,13 +5902,17 @@ async function initMap() {
                 .filter((entry) => entry.removed)
                 .map((entry) => entry.id || getPinImageIdentifier(entry.data))
                 .filter(Boolean);
+            const coords = toLatLngLiteral(temporaryMarker.position || temporaryMarker);
+            if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number') {
+                throw new Error('Lokasi belum dipilih. Silakan pilih titik lokasi di peta.');
+            }
             const pin = {
                 title,
                 description,
                 category,
                 link,
-                lat: temporaryMarker.position.lat,
-                lng: temporaryMarker.position.lng,
+                lat: coords.lat,
+                lng: coords.lng,
                 lifetime
             };
 
@@ -5645,9 +5937,7 @@ async function initMap() {
                 throw new Error(data && data.message ? data.message : 'Failed to drop pin.');
             }
 
-            if (temporaryMarker) {
-                temporaryMarker.map = null;
-            }
+            clearTemporaryMarkerSelection('Belum ada lokasi yang dipilih.');
             addPinToMap(data);
             if (typeof window.applyFilters === 'function') {
                 window.applyFilters();
@@ -5783,12 +6073,12 @@ function handleLocationError(browserHasGeolocation) {
 
 
     map.addListener('click', (e) => {
-        if (temporaryMarker) {
-            temporaryMarker.map = null;
+        if (!isSelectingPinLocation) {
+            return;
         }
-        temporaryMarker = new AdvancedMarkerElement({
-            position: e.latLng,
-            map: map,
+        setTemporaryMarkerLocation(e.latLng, {
+            panToLocation: false,
+            message: 'Koordinat diisi dari titik yang kamu pilih.'
         });
     });
 
@@ -5816,6 +6106,7 @@ function handleLocationError(browserHasGeolocation) {
             if (formEl) {
                 formEl.reset();
             }
+            clearTemporaryMarkerSelection('Belum ada lokasi yang dipilih.');
             resetPinImages();
             removeDeveloperOnlyCategoryOptions();
         });

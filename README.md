@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.2.9
+- **Guided Pin Placement:** The “Tentukan Titik Lokasi” button now collapses the form and highlights the map with a floating search bar so users tap the map or search first, preventing accidental drops.
+- **Explicit Confirmation:** After choosing a point, a pop-up anchored to the marker asks for confirmation (button now bottom-right and labeled “Konfirmasi”) before the form reappears with the chosen lat/lng.
+- **Safer Defaults:** Map clicks only place temporary pins while in selection mode, reducing unintended locations.
+
 ### What's New in v2.2.8
 - **Pin List Cards:** Rebuilt the pin list item layout into four compact cards (Kategori, Mulai, Selesai, Jarak) with N/A fallbacks and emoji-only category badges plus short labels beneath.
 - **Cleaner Details:** Removed the inline date-range row, added a “Lihat lebih banyak...” toggle for descriptions, and auto-collapsed the list when opening a pin so the map popup takes focus.

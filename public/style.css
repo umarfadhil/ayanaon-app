@@ -49,6 +49,97 @@ body {
     width: 100%;
 }
 
+#map.pin-location-mode {
+    box-shadow: inset 0 0 0 3px rgba(14, 165, 233, 0.45);
+    transition: box-shadow 0.2s ease;
+}
+
+.pin-location-search-bar {
+    position: absolute;
+    top: calc(var(--ui-top-offset) + 48px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 14px;
+    padding: 10px 12px;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+    width: min(460px, calc(100% - 32px));
+    box-sizing: border-box;
+}
+
+.pin-location-search-bar.hidden {
+    display: none;
+}
+
+.pin-location-search-inner {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.pin-location-search-inner input {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    font-size: 14px;
+}
+
+.pin-location-search-inner button {
+    width: auto;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: none;
+    background: #1f2937;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.pin-location-search-inner button:hover,
+.pin-location-search-inner button:focus-visible {
+    background: #111827;
+    transform: translateY(-1px);
+    outline: none;
+}
+
+.pin-location-search-note {
+    margin: 8px 4px 0;
+    font-size: 12px;
+    color: #475569;
+}
+
+.pin-location-confirm {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.pin-location-confirm button {
+    align-self: flex-end;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 10px;
+    background: #0ea5e9;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.pin-location-confirm button:hover,
+.pin-location-confirm button:focus-visible {
+    background: #0284c7;
+    outline: none;
+}
+
 .pin-list-panel {
     position: absolute;
     top: var(--ui-top-offset);
@@ -689,6 +780,65 @@ body {
 #pin-form textarea::placeholder {
     color: #666;
     font-family: sans-serif;
+}
+
+#pin-form .pin-location-field {
+    margin-bottom: 15px;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(241, 245, 249, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+#pin-form .pin-location-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+#pin-form .pin-location-btn {
+    border: none;
+    background: #0ea5e9;
+    color: #fff;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+#pin-form .pin-location-btn:hover,
+#pin-form .pin-location-btn:focus-visible {
+    background: #0284c7;
+    transform: translateY(-1px);
+    outline: none;
+}
+
+#pin-form .pin-location-hint {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: #475569;
+}
+
+#pin-form .pin-location-coordinates {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+#pin-form .pin-location-coordinates span {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 10px;
+    padding: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    text-align: center;
 }
 
 #pin-form .pin-images-field {
