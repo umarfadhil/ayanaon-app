@@ -96,6 +96,9 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.2.10
+- **Cleaner Pin Cards:** Pins without date info now skip the Mulai/Selesai meta cards so only relevant details show in the list.
+
 ### What's New in v2.2.9
 - **Guided Pin Placement:** The “Tentukan Titik Lokasi” button now collapses the form and highlights the map with a floating search bar so users tap the map or search first, preventing accidental drops.
 - **Explicit Confirmation:** After choosing a point, a pop-up anchored to the marker asks for confirmation (button now bottom-right and labeled “Konfirmasi”) before the form reappears with the chosen lat/lng.

@@ -3231,7 +3231,7 @@ function updatePinListPanel(context = {}) {
         const { start: startDateValue, end: endDateValue } = getPinDateRangeParts(pin);
         const startParts = formatDateParts(startDateValue);
         const endParts = formatDateParts(endDateValue);
-        const whenLabel = getPinWhenLabel(pin);
+        const hasDateInfo = startParts.isValid || endParts.isValid;
 
         const item = document.createElement('button');
         item.type = 'button';
@@ -3259,19 +3259,21 @@ function updatePinListPanel(context = {}) {
             modifier: 'category'
         }));
 
-        meta.appendChild(createMetaCard({
-            label: 'Mulai',
-            primary: startParts.day,
-            secondary: startParts.isValid ? startParts.monthYear : '',
-            modifier: 'date'
-        }));
+        if (hasDateInfo) {
+            meta.appendChild(createMetaCard({
+                label: 'Mulai',
+                primary: startParts.day,
+                secondary: startParts.isValid ? startParts.monthYear : '',
+                modifier: 'date'
+            }));
 
-        meta.appendChild(createMetaCard({
-            label: 'Selesai',
-            primary: endParts.day,
-            secondary: endParts.isValid ? endParts.monthYear : '',
-            modifier: 'date'
-        }));
+            meta.appendChild(createMetaCard({
+                label: 'Selesai',
+                primary: endParts.day,
+                secondary: endParts.isValid ? endParts.monthYear : '',
+                modifier: 'date'
+            }));
+        }
 
         let distancePrimary = distanceLabel || 'N/A';
         let distanceUnit = '';
