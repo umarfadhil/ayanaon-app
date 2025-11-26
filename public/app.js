@@ -69,6 +69,10 @@ function showPinLocationSearchBar(show = false) {
     pinLocationSearchBarElement.classList.toggle('hidden', !show);
 }
 
+function hidePinLocationSearchBar() {
+    showPinLocationSearchBar(false);
+}
+
 function closePinLocationConfirmOverlay() {
     if (pinLocationConfirmWindow && typeof pinLocationConfirmWindow.close === 'function') {
         pinLocationConfirmWindow.close();
