@@ -392,6 +392,16 @@
         return Boolean(currentSession.token && currentSession.resident);
     }
 
+    function isAdmin() {
+        const username = currentSession?.resident?.username || '';
+        const usernameLower = username.toLowerCase();
+        return Boolean(currentSession?.resident?.isAdmin || usernameLower === 'admin');
+    }
+
+    function getToken() {
+        return currentSession.token || '';
+    }
+
     function subscribe(listener) {
         if (typeof listener !== 'function') {
             return () => undefined;
@@ -436,6 +446,8 @@
         getSharedResidentsSnapshot,
         getCurrentResident,
         isLoggedIn,
+        isAdmin,
+        getToken,
         subscribe
     };
 })();

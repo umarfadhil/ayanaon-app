@@ -212,7 +212,15 @@
             if (typeof api.isLoggedIn === 'function' && api.isLoggedIn()) {
                 const resident = typeof api.getCurrentResident === 'function' ? api.getCurrentResident() : null;
                 const name = resident?.displayName || resident?.username || 'warga';
-                showMessage(messageEl, 'success', `Kamu sudah login sebagai ${name}.`);
+                const isAdmin = typeof api.isAdmin === 'function' && api.isAdmin();
+                const target = isAdmin ? 'admin.html' : 'index.html';
+                const suffix = isAdmin ? ' Mengarahkan ke dashboard admin...' : '';
+                showMessage(messageEl, 'success', `Kamu sudah login sebagai ${name}.${suffix}`);
+                if (isAdmin) {
+                    setTimeout(() => {
+                        window.location.replace(target);
+                    }, 700);
+                }
             }
         } catch (error) {
             // if ResidentSession not available we'll handle when submitting
@@ -229,10 +237,16 @@
             ensureSubmitState(submitBtn, true, 'Mengautentikasi...');
             try {
                 const api = ensureResidentAPI();
-                await api.loginResident({ username, password });
-                showMessage(messageEl, 'success', 'Login berhasil. Mengarahkan ke peta...');
+                const resident = await api.loginResident({ username, password });
+                const usernameLower = username.toLowerCase();
+                const isAdmin = Boolean(resident?.isAdmin || resident?.role === 'admin' || usernameLower === 'admin');
+                const target = isAdmin ? 'admin.html' : 'index.html';
+                const message = isAdmin
+                    ? 'Login admin berhasil. Membuka dashboard...'
+                    : 'Login berhasil. Mengarahkan ke peta...';
+                showMessage(messageEl, 'success', message);
                 setTimeout(() => {
-                    window.location.replace('index.html');
+                    window.location.replace(target);
                 }, 900);
             } catch (error) {
                 showMessage(messageEl, 'error', error.message || 'Gagal masuk. Silakan coba lagi.');

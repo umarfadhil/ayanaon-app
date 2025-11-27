@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.3.0
+- **Manage Pins:** Add Kelola Pin tab to manage pins (update information, add photos, relocate pin, remove, etc.) for admin.
+- **Business Metrics:** Add Business Metrics tab to control the web-app performances and gain insights for future developments.
+- **Dashboard Embed:** MongoDB Charts dashboard is embedded in the metrics view with secured password loading via backend.
+
 ### What's New in v2.2.10
 - **Cleaner Pin Cards:** Pins without date info now skip the Mulai/Selesai meta cards so only relevant details show in the list.
 

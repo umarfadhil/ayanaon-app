@@ -14,7 +14,8 @@ app.use(bodyParser.json({ limit: '20mb' }));
 const {
     MONGODB_URI,
     GOOGLE_MAPS_API_KEY,
-    JWT_SECRET = 'ayanaon-dev-secret'
+    JWT_SECRET = 'ayanaon-dev-secret',
+    DASHBOARD_PASSWORD = process.env.MONGODB_DASHBOARD_PASSWORD || ''
 } = process.env;
 
 // Establish the database connection outside of the handler
@@ -45,6 +46,10 @@ async function ensureIndexes(database) {
         await database.collection('sellers').createIndex({ 'liveStatus.isLive': 1, 'liveStatus.lastPingAt': 1 });
         await database.collection('sellers').createIndex({ 'communityVerification.voterIps': 1 });
         await database.collection('residents').createIndex({ usernameLower: 1 }, { unique: true });
+        await database.collection('analytics_events').createIndex({ createdAt: 1, eventType: 1 });
+        await database.collection('analytics_events').createIndex({ pinId: 1 });
+        await database.collection('analytics_events').createIndex({ referrer: 1 });
+        await database.collection('analytics_events').createIndex({ lat: 1, lng: 1 });
         indexesEnsured = true;
     } catch (error) {
         console.error('Failed to ensure indexes', error);
@@ -189,6 +194,16 @@ function sanitizeSeller(doc) {
     return sanitized;
 }
 
+function isAdminResident(doc) {
+    if (!doc) return false;
+    if (doc.isAdmin === true) {
+        return true;
+    }
+    const username = typeof doc.username === 'string' ? doc.username : '';
+    const usernameLower = typeof doc.usernameLower === 'string' ? doc.usernameLower : username.toLowerCase();
+    return usernameLower === 'admin';
+}
+
 function sanitizeResident(doc) {
     if (!doc) return null;
     const {
@@ -226,7 +241,126 @@ function sanitizeResident(doc) {
         sanitized.lastLocation = null;
     }
     sanitized.displayName = sanitized.displayName || sanitized.username;
+    const adminFlag = isAdminResident(doc);
+    sanitized.isAdmin = adminFlag;
+    sanitized.role = adminFlag ? 'admin' : 'resident';
     return sanitized;
+}
+
+function getRangeStart(range) {
+    const now = new Date();
+    if (range === 'day') {
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+    if (range === 'month') {
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    if (range === 'year') {
+        return new Date(now.getFullYear(), 0, 1);
+    }
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function getMonthRange(year, month) {
+    const y = Number(year);
+    const m = Number(month) - 1;
+    return {
+        start: new Date(y, m, 1),
+        end: new Date(y, m + 1, 1)
+    };
+}
+
+function getYearRange(year) {
+    const y = Number(year);
+    return {
+        start: new Date(y, 0, 1),
+        end: new Date(y + 1, 0, 1)
+    };
+}
+
+function buildDateRangeFromQuery(query = {}) {
+    const granularity = (query.granularity || 'month').toString();
+    const now = new Date();
+    if (granularity === 'day') {
+        const year = Number(query.year) || now.getFullYear();
+        const month = Number(query.month) || now.getMonth() + 1;
+        const { start, end } = getMonthRange(year, month);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        return { start, end, periods: daysInMonth, granularity };
+    }
+    if (granularity === 'year') {
+        const startYear = Number(query.startYear) || now.getFullYear();
+        const endYear = Number(query.endYear) || startYear;
+        const start = new Date(startYear, 0, 1);
+        const end = new Date(endYear + 1, 0, 1);
+        return { start, end, periods: Math.max(1, endYear - startYear + 1), granularity };
+    }
+    const year = Number(query.year) || now.getFullYear();
+    const { start, end } = getYearRange(year);
+    return { start, end, periods: 12, granularity: 'month' };
+}
+
+const geocodeCityCache = new Map();
+
+async function reverseGeocodeCity(lat, lng) {
+    const key = `${lat},${lng}`;
+    if (geocodeCityCache.has(key)) {
+        return geocodeCityCache.get(key);
+    }
+    const useGoogle = Boolean(GOOGLE_MAPS_API_KEY);
+    try {
+        if (useGoogle) {
+            const response = await axios.get(
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+            );
+            const results = response.data?.results || [];
+            if (results.length) {
+                let city = '';
+                let country = '';
+                const components = results[0].address_components || [];
+                components.forEach((component) => {
+                    if (component.types.includes('locality') || component.types.includes('administrative_area_level_2')) {
+                        city = city || component.long_name || '';
+                    }
+                    if (component.types.includes('country')) {
+                        country = component.short_name || component.long_name || '';
+                    }
+                });
+                const label = [city, country].filter(Boolean).join(', ');
+                const payload = { city, country, label };
+                geocodeCityCache.set(key, payload);
+                return payload;
+            }
+        }
+        // Fallback: free OpenStreetMap Nominatim
+        const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+            params: {
+                format: 'json',
+                lat,
+                lon: lng,
+                zoom: 10,
+                addressdetails: 1
+            },
+            headers: {
+                'User-Agent': 'ayanaon-analytics/1.0'
+            }
+        });
+        const addr = response.data?.address || {};
+        const city =
+            addr.city ||
+            addr.town ||
+            addr.village ||
+            addr.county ||
+            '';
+        const country = addr.country_code ? addr.country_code.toUpperCase() : (addr.country || '');
+        const label = [city, country].filter(Boolean).join(', ') || response.data?.display_name || 'Unknown';
+        const payload = { city, country, label };
+        geocodeCityCache.set(key, payload);
+        return payload;
+    } catch (error) {
+        console.error('Reverse geocode failed', error);
+        return null;
+    }
 }
 
 async function authenticateRequest(req, res) {
@@ -260,10 +394,12 @@ function createResidentToken(resident) {
     if (!resident?._id) {
         throw new Error('Resident document tidak valid.');
     }
+    const isAdmin = isAdminResident(resident);
+    const role = isAdmin ? 'admin' : 'resident';
     return jwt.sign(
         {
             sub: resident._id.toString(),
-            role: 'resident',
+            role,
             username: resident.username
         },
         JWT_SECRET,
@@ -271,16 +407,20 @@ function createResidentToken(resident) {
     );
 }
 
-async function authenticateResidentRequest(req, res) {
+async function authenticateResidentRequest(req, res, options = {}) {
+    const { optional = false } = options;
     const authHeader = req.headers.authorization || '';
     if (!authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ message: 'Token tidak ditemukan.' });
+        if (!optional) {
+            res.status(401).json({ message: 'Token tidak ditemukan.' });
+        }
         return null;
     }
     const token = authHeader.slice(7);
     try {
         const payload = jwt.verify(token, JWT_SECRET);
-        if (!payload?.sub || (payload.role && payload.role !== 'resident')) {
+        const allowedRoles = new Set(['resident', 'admin', undefined]);
+        if (!payload?.sub || (payload.role && !allowedRoles.has(payload.role))) {
             res.status(401).json({ message: 'Token tidak valid.' });
             return null;
         }
@@ -290,7 +430,12 @@ async function authenticateResidentRequest(req, res) {
             res.status(401).json({ message: 'Token tidak dikenal.' });
             return null;
         }
-        return resident;
+        const isAdmin = isAdminResident(resident);
+        return {
+            ...resident,
+            isAdmin,
+            role: isAdmin ? 'admin' : 'resident'
+        };
     } catch (error) {
         console.error('Resident authentication failed', error);
         res.status(401).json({ message: 'Token tidak valid.' });
@@ -1036,6 +1181,32 @@ function computeExpiresAtFromLifetime(lifetime) {
     return null;
 }
 
+async function resolveCityFromCoords(lat, lng) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+    }
+    if (!GOOGLE_MAPS_API_KEY) {
+        return null;
+    }
+    try {
+        const response = await axios.get(
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+        );
+        const results = response.data?.results || [];
+        if (!results.length) {
+            return null;
+        }
+        for (const component of results[0].address_components || []) {
+            if (component.types && component.types.includes('administrative_area_level_2')) {
+                return component.long_name;
+            }
+        }
+    } catch (error) {
+        console.error('Failed to resolve city from coordinates', error);
+    }
+    return null;
+}
+
 function getPinImageIdentifier(image) {
     if (!image) {
         return null;
@@ -1243,6 +1414,373 @@ router.get('/ip', (req, res) => {
     res.json({ ip: ip });
 });
 
+router.get('/analytics/dashboard-password', (req, res) => {
+    if (!DASHBOARD_PASSWORD) {
+        return res.status(404).json({ message: 'Password belum disetel.' });
+    }
+    res.json({ password: DASHBOARD_PASSWORD });
+});
+
+function normalizeReferrer(referrer) {
+    if (!referrer || typeof referrer !== 'string') {
+        return '';
+    }
+    try {
+        const url = new URL(referrer);
+        return url.hostname || referrer;
+    } catch (error) {
+        return referrer;
+    }
+}
+
+router.post('/analytics/track', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const events = db.collection('analytics_events');
+        const {
+            eventType = 'pageview',
+            path = '',
+            pinId = null,
+            referrer = '',
+            lat,
+            lng,
+            city,
+            country
+        } = req.body || {};
+        const ip = req.headers['x-nf-client-connection-ip'] || '';
+        const userAgent = req.headers['user-agent'] || '';
+        const doc = {
+            eventType: String(eventType || 'pageview'),
+            path: typeof path === 'string' ? path : '',
+            pinId: pinId || null,
+            referrer: typeof referrer === 'string' ? referrer : '',
+            createdAt: new Date(),
+            ip,
+            userAgent
+        };
+        const latNum = Number(lat);
+        const lngNum = Number(lng);
+        if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+            doc.lat = latNum;
+            doc.lng = lngNum;
+        }
+        const cityLabel = [city, country].filter(Boolean).join(', ').trim();
+        if (cityLabel) {
+            doc.cityLabel = cityLabel;
+        }
+        if (city) {
+            doc.city = city;
+        }
+        if (country) {
+            doc.country = country;
+        }
+        await events.insertOne(doc);
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Failed to track analytics event', error);
+        res.status(500).json({ message: 'Gagal menyimpan data analitik.' });
+    }
+});
+
+router.get('/analytics/summary', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const events = db.collection('analytics_events');
+        const { start, end, granularity } = buildDateRangeFromQuery(req.query);
+        const match = { createdAt: { $gte: start, $lt: end } };
+        const uniqueIps = await events.distinct('ip', match);
+        const pageviews = await events.countDocuments({ ...match, eventType: 'pageview' });
+        res.json({
+            summary: {
+                [granularity]: {
+                    uniqueVisitors: uniqueIps.length,
+                    pageviews
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Failed to get analytics summary', error);
+        res.status(500).json({ message: 'Gagal mengambil ringkasan analitik.' });
+    }
+});
+
+router.get('/analytics/top-pins', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const events = db.collection('analytics_events');
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 20);
+        const { start, end, granularity } = buildDateRangeFromQuery(req.query);
+        const cursor = await events
+            .aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: start, $lt: end },
+                        eventType: { $in: ['pin_view', 'pin_click'] },
+                        pinId: { $ne: null }
+                    }
+                },
+                { $group: { _id: '$pinId', count: { $sum: 1 } } },
+                { $sort: { count: -1 } },
+                { $limit: limit }
+            ])
+            .toArray();
+        const pinIds = cursor.map((item) => item._id).filter(Boolean);
+        const objectIds = pinIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id));
+        const categories = [];
+        if (objectIds.length) {
+            const pins = await db
+                .collection('pins')
+                .find({ _id: { $in: objectIds } }, { projection: { category: 1 } })
+                .toArray();
+            pins.forEach((pin) => {
+                categories.push(pin.category || 'Tidak diketahui');
+            });
+        }
+        const agg = cursor.reduce((map, item, index) => {
+            const cat = categories[index] || 'Tidak diketahui';
+            map.set(cat, (map.get(cat) || 0) + (item.count || 0));
+            return map;
+        }, new Map());
+        const topPins = Array.from(agg.entries())
+            .map(([category, count]) => ({
+                category,
+                count
+            }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, limit);
+        res.json({
+            granularity,
+            start,
+            end,
+            topPins
+        });
+    } catch (error) {
+        console.error('Failed to get top pins', error);
+        res.status(500).json({ message: 'Gagal mengambil daftar pin teratas.' });
+    }
+});
+
+router.get('/analytics/top-referrers', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const events = db.collection('analytics_events');
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 20);
+        const { start, end, granularity } = buildDateRangeFromQuery(req.query);
+        const match = {
+            createdAt: { $gte: start, $lt: end },
+            eventType: 'pageview',
+            referrer: { $nin: [null, '', '-'] }
+        };
+        const docs = await events.find(match, { projection: { referrer: 1 } }).toArray();
+        const counts = new Map();
+        docs.forEach((doc) => {
+            const host = normalizeReferrer(doc.referrer || '');
+            const key = host || 'direct';
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        const sorted = Array.from(counts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, limit)
+            .map(([source, count]) => ({
+                source,
+                count
+            }));
+        res.json({ granularity, topSources: sorted });
+    } catch (error) {
+        console.error('Failed to get top referrers', error);
+        res.status(500).json({ message: 'Gagal mengambil sumber trafik teratas.' });
+    }
+});
+
+router.get('/analytics/top-cities', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const events = db.collection('analytics_events');
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 20);
+        const { start, end, granularity } = buildDateRangeFromQuery(req.query);
+        const docs = await events
+            .aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: start, $lt: end },
+                        $or: [
+                            { cityLabel: { $exists: true, $ne: '' } },
+                            { lat: { $exists: true }, lng: { $exists: true } }
+                        ]
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            cityLabel: '$cityLabel',
+                            lat: { $round: ['$lat', 2] },
+                            lng: { $round: ['$lng', 2] }
+                        },
+                        count: { $sum: 1 }
+                    }
+                },
+                { $sort: { count: -1 } },
+                { $limit: limit }
+            ])
+            .toArray();
+        const cities = [];
+        for (const doc of docs) {
+            let label = (doc?._id?.cityLabel && doc._id.cityLabel.trim()) || '';
+            let city = '';
+            let country = '';
+            if (!label && doc?._id?.lat !== undefined && doc?._id?.lng !== undefined) {
+                const geo = await reverseGeocodeCity(doc._id.lat, doc._id.lng);
+                if (geo?.label) {
+                    label = geo.label;
+                    city = geo.city || '';
+                    country = geo.country || '';
+                } else {
+                    label = `Lat ${doc._id.lat}, Lng ${doc._id.lng}`;
+                }
+            }
+            cities.push({
+                label: label || 'Unknown',
+                city,
+                country,
+                lat: doc?._id?.lat,
+                lng: doc?._id?.lng,
+                count: doc.count
+            });
+        }
+        const merged = cities.reduce((map, entry) => {
+            const key = entry.label || 'Unknown';
+            const current = map.get(key) || { ...entry, count: 0 };
+            current.count += entry.count || 0;
+            map.set(key, current);
+            return map;
+        }, new Map());
+        res.json({ granularity, topCities: Array.from(merged.values()).sort((a, b) => b.count - a.count) });
+    } catch (error) {
+        console.error('Failed to get top cities', error);
+        res.status(500).json({ message: 'Gagal mengambil lokasi teratas.' });
+    }
+});
+
+router.get('/analytics/heatmap', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const events = db.collection('analytics_events');
+        const { start, end, granularity } = buildDateRangeFromQuery(req.query);
+        const points = await events
+            .aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: start, $lt: end },
+                        lat: { $exists: true },
+                        lng: { $exists: true }
+                    }
+                },
+                {
+                    $project: {
+                        lat: { $round: ['$lat', 4] },
+                        lng: { $round: ['$lng', 4] }
+                    }
+                },
+                {
+                    $group: {
+                        _id: { lat: '$lat', lng: '$lng' },
+                        count: { $sum: 1 }
+                    }
+                },
+                { $sort: { count: -1 } },
+                { $limit: 200 }
+            ])
+            .toArray();
+        res.json({
+            granularity,
+            points: points.map((p) => ({
+                lat: p._id.lat,
+                lng: p._id.lng,
+                count: p.count
+            }))
+        });
+    } catch (error) {
+        console.error('Failed to get heatmap data', error);
+        res.status(500).json({ message: 'Gagal mengambil data heatmap.' });
+    }
+});
+
+router.get('/analytics/timeseries', async (req, res) => {
+    try {
+        const { start, end, granularity } = buildDateRangeFromQuery(req.query);
+        const events = (await connectToDatabase()).collection('analytics_events');
+        let groupId;
+        if (granularity === 'day') {
+            groupId = {
+                year: { $year: '$createdAt' },
+                month: { $month: '$createdAt' },
+                day: { $dayOfMonth: '$createdAt' }
+            };
+        } else if (granularity === 'year') {
+            groupId = {
+                year: { $year: '$createdAt' }
+            };
+        } else {
+            groupId = {
+                year: { $year: '$createdAt' },
+                month: { $month: '$createdAt' }
+            };
+        }
+        const pipeline = [
+            {
+                $match: {
+                    createdAt: { $gte: start, $lt: end }
+                }
+            },
+            {
+                $group: {
+                    _id: groupId,
+                    ipSet: { $addToSet: '$ip' },
+                    pageviews: {
+                        $sum: {
+                            $cond: [{ $eq: ['$eventType', 'pageview'] }, 1, 0]
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    uniqueVisitors: { $size: '$ipSet' },
+                    pageviews: 1
+                }
+            },
+            { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
+        ];
+        const docs = await events.aggregate(pipeline).toArray();
+        const series = docs.map((doc) => {
+            const id = doc._id || {};
+            let label = '';
+            if (granularity === 'day') {
+                const y = id.year || start.getFullYear();
+                const m = id.month || start.getMonth() + 1;
+                const d = id.day || 1;
+                label = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            } else if (granularity === 'year') {
+                label = String(id.year || '');
+            } else {
+                const y = id.year || start.getFullYear();
+                const m = id.month || 1;
+                label = `${y}-${String(m).padStart(2, '0')}`;
+            }
+            return {
+                label,
+                uniqueVisitors: doc.uniqueVisitors || 0,
+                pageviews: doc.pageviews || 0
+            };
+        });
+        res.json({ granularity, series });
+    } catch (error) {
+        console.error('Failed to get timeseries', error);
+        res.status(500).json({ message: 'Gagal mengambil data grafik.' });
+    }
+});
+
 router.post('/pins', async (req, res) => {
     const db = await connectToDatabase();
     const pin = req.body;
@@ -1284,18 +1822,31 @@ router.put('/pins/:id', async (req, res) => {
     const db = await connectToDatabase();
     const { id } = req.params;
     const ip = req.headers['x-nf-client-connection-ip'];
+    const authResident = await authenticateResidentRequest(req, res, { optional: true });
+    if (!authResident && req.headers.authorization) {
+        // Sudah diberi respons oleh authenticateResidentRequest ketika token tidak valid
+        return;
+    }
     const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
 
     if (!pin) {
         return res.status(404).json({ message: 'Pin not found.' });
     }
 
-    if (pin.reporter !== ip) {
+    const isAdmin = Boolean(authResident?.isAdmin);
+    const isReporter = pin.reporter === ip;
+
+    if (!isReporter && !isAdmin) {
         return res.status(403).json({ message: 'You are not authorized to edit this pin.' });
     }
 
     const { title, description, category, link, lifetime, images: incomingImages } = req.body;
+    const rawLat = req.body?.lat;
+    const rawLng = req.body?.lng;
+    const parsedLat = Number(rawLat);
+    const parsedLng = Number(rawLng);
     const updatedPin = {};
+    let latLngUpdated = false;
 
     if (typeof title !== 'undefined') {
         updatedPin.title = title;
@@ -1313,10 +1864,22 @@ router.put('/pins/:id', async (req, res) => {
         updatedPin.lifetime = lifetime;
         updatedPin.expiresAt = computeExpiresAtFromLifetime(lifetime);
     }
+    if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+        updatedPin.lat = parsedLat;
+        updatedPin.lng = parsedLng;
+        latLngUpdated = true;
+    }
     if (Array.isArray(incomingImages)) {
         updatedPin.images = normalizeIncomingPinImages(pin.images, incomingImages);
     } else if (incomingImages === null) {
         updatedPin.images = [];
+    }
+
+    if (latLngUpdated) {
+        const resolvedCity = await resolveCityFromCoords(parsedLat, parsedLng);
+        if (resolvedCity) {
+            updatedPin.city = resolvedCity;
+        }
     }
 
     const result = await db.collection('pins').updateOne({ _id: new ObjectId(id) }, { $set: updatedPin });
@@ -1325,6 +1888,27 @@ router.put('/pins/:id', async (req, res) => {
     }
     const refreshedPin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
     res.json(refreshedPin);
+});
+
+router.delete('/pins/:id', async (req, res) => {
+    const db = await connectToDatabase();
+    const { id } = req.params;
+    const ip = req.headers['x-nf-client-connection-ip'];
+    const authResident = await authenticateResidentRequest(req, res, { optional: true });
+    if (!authResident && req.headers.authorization) {
+        return;
+    }
+    const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
+    if (!pin) {
+        return res.status(404).json({ message: 'Pin not found.' });
+    }
+    const isAdmin = Boolean(authResident?.isAdmin);
+    const isReporter = pin.reporter === ip;
+    if (!isAdmin && !isReporter) {
+        return res.status(403).json({ message: 'You are not authorized to delete this pin.' });
+    }
+    await db.collection('pins').deleteOne({ _id: new ObjectId(id) });
+    res.json({ message: 'Pin deleted.' });
 });
 
 router.post('/pins/:id/upvote', async (req, res) => {

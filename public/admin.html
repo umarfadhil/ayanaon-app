@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Pin | AyaNaon?</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="auth.css">
+    <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+    <main class="admin-page">
+        <header class="admin-header">
+            <div class="admin-title-block">
+                <p class="eyebrow">AyaNaon Admin</p>
+                <h1>Kelola Pin</h1>
+                <p class="subhead">Lihat jumlah pin, perbarui informasi, dan tambahkan foto baru.</p>
+            </div>
+            <div class="admin-actions">
+                <a class="ghost-btn" href="index.html">Lihat Peta</a>
+                <button id="admin-logout-btn" class="ghost-btn ghost-btn--danger">Logout</button>
+            </div>
+        </header>
+        <div class="admin-tabs" role="tablist" aria-label="Admin Navigation">
+            <button class="admin-tab admin-tab--active" data-tab="pins" role="tab" aria-selected="true">Kelola Pin</button>
+            <button class="admin-tab" data-tab="metrics" role="tab" aria-selected="false">Matriks Bisnis</button>
+        </div>
+
+        <section id="admin-pin-content" class="admin-tab-content">
+
+        <section class="admin-summary">
+            <div class="summary-card">
+                <div class="summary-label">Total Pin Aktif</div>
+                <div class="summary-value" id="pin-count">-</div>
+                <button id="refresh-pins-btn" class="chip-btn" type="button">Refresh data</button>
+                <div class="summary-meta" id="pin-count-subtext">Memuat jumlah pin...</div>
+            </div>
+            <div class="summary-card admin-user-card">
+                <div class="summary-label">Masuk sebagai</div>
+                <div class="summary-value" id="admin-name">Admin</div>
+                <div class="summary-meta" id="admin-username"></div>
+            </div>
+        </section>
+
+        <div id="admin-message" class="admin-message" role="status" aria-live="polite"></div>
+
+        <section class="admin-grid">
+            <aside class="pin-list-panel">
+                <div class="panel-header">
+                    <div>
+                        <h2>Daftar Pin</h2>
+                    </div>
+                    <div class="panel-actions">
+                        <input type="search" id="pin-search" placeholder="Cari judul atau kategori" aria-label="Cari pin">
+                    </div>
+                </div>
+                <ul id="pin-list" class="pin-list" aria-label="Daftar pin"></ul>
+            </aside>
+
+            <section class="pin-editor">
+                <div class="panel-header">
+                    <div>
+                        <h2 id="editor-title">Detail Pin</h2>
+                    </div>
+                </div>
+                <form id="pin-edit-form" class="pin-form" novalidate>
+                    <div class="form-row">
+                        <label for="pin-title">Judul</label>
+                        <input type="text" id="pin-title" name="title" required placeholder="Judul pin">
+                    </div>
+                    <div class="form-row">
+                        <label for="pin-description">Deskripsi</label>
+                        <textarea id="pin-description" name="description" required rows="3" placeholder="Deskripsi singkat"></textarea>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-row">
+                            <label for="pin-category">Kategori</label>
+                            <input type="text" id="pin-category" name="category" required placeholder="Kategori">
+                        </div>
+                        <div class="form-row">
+                            <label for="pin-link">Link (opsional)</label>
+                            <input type="url" id="pin-link" name="link" placeholder="https://">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="pin-lifetime">Masa berlaku</label>
+                        <select id="pin-lifetime">
+                            <option value="">Biarkan seperti semula</option>
+                            <option value="today">Hanya hari ini</option>
+                            <option value="date">Pilih tanggal</option>
+                        </select>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-row">
+                            <label for="pin-lifetime-start">Tanggal Mulai</label>
+                            <input type="text" id="pin-lifetime-start" placeholder="dd/mm/yyyy">
+                        </div>
+                        <div class="form-row">
+                            <label for="pin-lifetime-end">Tanggal Selesai</label>
+                            <input type="text" id="pin-lifetime-end" placeholder="dd/mm/yyyy">
+                        </div>
+                    </div>
+                    <div class="form-row coordinate-row">
+                        <label>Koordinat</label>
+                        <p class="image-hint">Isi manual atau gunakan peta mini untuk memilih lokasi.</p>
+                        <div class="form-grid">
+                            <input type="text" id="pin-lat" placeholder="Lat">
+                            <input type="text" id="pin-lng" placeholder="Lng">
+                        </div>
+                        <div class="mini-map-search">
+                            <input type="text" id="mini-map-search-input" placeholder="Cari alamat atau tempat">
+                            <button type="button" id="mini-map-search-btn" class="ghost-btn chip-btn">Cari</button>
+                        </div>
+                        <div id="admin-mini-map" class="mini-map" aria-label="Peta mini untuk memilih lokasi"></div>
+                    </div>
+                    <div class="form-row">
+                        <label>Foto Pin</label>
+                        <div class="image-hint" id="image-hint">Maksimal 3 foto, 4MB per foto.</div>
+                        <div id="existing-images" class="image-list" aria-live="polite"></div>
+                        <div id="new-images" class="image-list" aria-live="polite"></div>
+                        <div class="upload-actions-row">
+                            <div class="upload-row">
+                                <label class="upload-btn">
+                                    <input type="file" id="pin-image-input" accept="image/*" multiple>
+                                    <span>Tambah Foto</span>
+                                </label>
+                                <span class="upload-remaining" id="photo-remaining"></span>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" id="delete-pin-btn" class="ghost-btn ghost-btn--danger">Hapus Pin</button>
+                                <button type="submit" class="primary-btn" id="save-pin-btn">Simpan Perubahan</button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </section>
+        </section>
+        </section>
+
+        <div id="admin-metrics-pane" class="admin-tab-content hidden metrics-two-col">
+            <section id="admin-metrics-content" class="admin-metrics">
+                <div class="panel-header">
+                    <div>
+                        <h2>Business Metrics</h2>
+                        <p class="panel-sub">Pantau pengunjung dan performa pin.</p>
+                    </div>
+                    <div class="panel-actions">
+                        <button type="button" id="metrics-refresh-btn" class="ghost-btn chip-btn">Refresh</button>
+                    </div>
+                </div>
+                <div class="metrics-controls">
+                    <div class="metrics-control">
+                        <label for="metrics-granularity">Rentang</label>
+                        <select id="metrics-granularity">
+                            <option value="day">Per Hari</option>
+                            <option value="month" selected>Per Bulan</option>
+                            <option value="year">Per Tahun</option>
+                        </select>
+                    </div>
+                    <div class="metrics-control" id="metrics-month-wrap">
+                        <label for="metrics-month">Bulan</label>
+                        <select id="metrics-month">
+                            <option value="1">Januari</option>
+                            <option value="2">Februari</option>
+                            <option value="3">Maret</option>
+                            <option value="4">April</option>
+                            <option value="5">Mei</option>
+                            <option value="6">Juni</option>
+                            <option value="7">Juli</option>
+                            <option value="8">Agustus</option>
+                            <option value="9">September</option>
+                            <option value="10">Oktober</option>
+                            <option value="11">November</option>
+                            <option value="12">Desember</option>
+                        </select>
+                    </div>
+                    <div class="metrics-control" id="metrics-year-wrap">
+                        <label for="metrics-year">Tahun</label>
+                        <input type="number" id="metrics-year" min="2000" max="2100">
+                    </div>
+                    <div class="metrics-control" id="metrics-year-range-wrap">
+                        <label for="metrics-start-year">Rentang Tahun</label>
+                        <div class="year-range">
+                            <input type="number" id="metrics-start-year" min="2000" max="2100" placeholder="Mulai">
+                            <input type="number" id="metrics-end-year" min="2000" max="2100" placeholder="Akhir">
+                        </div>
+                    </div>
+                    <div class="metrics-control">
+                        <button type="button" id="metrics-apply" class="chip-btn">Terapkan</button>
+                    </div>
+                </div>
+                <div class="metrics-columns">
+                    <div class="metrics-column">
+                        <div class="metrics-card">
+                            <div class="metrics-card__header">
+                                <h3>Unique Visitors</h3>
+                            </div>
+                            <div class="metrics-chart" id="uv-chart"></div>
+                        </div>
+                    </div>
+                    <div class="metrics-column">
+                        <div class="metrics-card">
+                            <div class="metrics-card__header">
+                                <h3>Pageviews</h3>
+                            </div>
+                            <div class="metrics-chart" id="pv-chart"></div>
+                        </div>
+                    </div>
+                    <div class="metrics-column metrics-column--lists">
+                        <div class="metrics-card">
+                            <div class="metrics-card__header">
+                                <h3>Top Pins</h3>
+                                <span class="metrics-note" id="top-pins-range"></span>
+                            </div>
+                            <ol id="top-pins-list" class="metrics-list"></ol>
+                        </div>
+                        <div class="metrics-card">
+                            <div class="metrics-card__header">
+                                <h3>Top Sources</h3>
+                                <span class="metrics-note" id="top-sources-range"></span>
+                            </div>
+                            <ol id="top-sources-list" class="metrics-list"></ol>
+                        </div>
+                        <div class="metrics-card">
+                            <div class="metrics-card__header">
+                                <h3>Top Cities</h3>
+                                <span class="metrics-note" id="top-cities-range"></span>
+                            </div>
+                            <ol id="top-cities-list" class="metrics-list"></ol>
+                        </div>
+                    </div>
+                </div>
+                <div class="metrics-heatmap">
+                    <div class="metrics-card__header">
+                        <h3>Visitor Heatmap</h3>
+                        <span class="metrics-note" id="heatmap-range"></span>
+                    </div>
+                    <div id="metrics-heatmap" class="mini-map" aria-label="Heatmap pengunjung"></div>
+                </div>
+            </section>
+            <section class="admin-embed-section">
+                <div class="metrics-card__header">
+                    <h3>Dashboard Lengkap</h3>
+                    <button type="button" id="dashboard-reload-btn" class="chip-btn">Muat Ulang</button>
+                </div>
+                <div class="dashboard-frame-wrapper">
+                    <iframe id="dashboard-frame" title="Business Metrics Dashboard" loading="lazy"></iframe>
+                </div>
+                <div id="dashboard-error" class="metrics-note"></div>
+            </section>
+        </div>
+    </main>
+    <script src="resident-session.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>

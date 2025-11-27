@@ -32,6 +32,11 @@ let fuelCheckbox;
 let evCheckbox;
 let suppressSpecialCategorySync = false;
 let fuelToggleMode = 'fuel';
+const ADMIN_EDIT_HANDOFF_KEY = 'ayanaon_admin_edit_pin';
+let pendingAdminEditPinId = null;
+let trackedPinViews = new Set();
+let hasTrackedPageview = false;
+let analyticsLocationSent = false;
 
 let specialCategoryOnButton;
 let specialCategoryOffButton;
@@ -77,6 +82,113 @@ function closePinLocationConfirmOverlay() {
     if (pinLocationConfirmWindow && typeof pinLocationConfirmWindow.close === 'function') {
         pinLocationConfirmWindow.close();
     }
+}
+
+async function trackAnalyticsEvent(payload = {}) {
+    try {
+        await fetch('/api/analytics/track', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                eventType: payload.eventType || 'pageview',
+                path: window.location.pathname || '/',
+                referrer: document.referrer || '',
+                pinId: payload.pinId || null,
+                lat: payload.lat,
+                lng: payload.lng,
+                city: payload.city,
+                country: payload.country
+            })
+        });
+    } catch (error) {
+        console.warn('Analytics event failed', error);
+    }
+}
+
+function trackPageView(lat, lng) {
+    if (hasTrackedPageview) {
+        return;
+    }
+    hasTrackedPageview = true;
+    trackAnalyticsEvent({
+        eventType: 'pageview',
+        lat,
+        lng
+    });
+}
+
+function trackLocationUpdate(lat, lng) {
+    if (analyticsLocationSent) {
+        return;
+    }
+    analyticsLocationSent = true;
+    trackAnalyticsEvent({
+        eventType: 'location',
+        lat,
+        lng
+    });
+    if (!hasTrackedPageview) {
+        trackPageView(lat, lng);
+    }
+}
+
+function recordPinView(pin) {
+    if (!pin || !pin._id) {
+        return;
+    }
+    const key = String(pin._id);
+    if (trackedPinViews.has(key)) {
+        return;
+    }
+    trackedPinViews.add(key);
+    const coords = userLocation || null;
+    trackAnalyticsEvent({
+        eventType: 'pin_view',
+        pinId: key,
+        lat: coords?.lat,
+        lng: coords?.lng,
+        city: pin.city || undefined
+    });
+}
+
+function readAdminEditHandoff() {
+    if (pendingAdminEditPinId) {
+        return pendingAdminEditPinId;
+    }
+    try {
+        const raw = sessionStorage.getItem(ADMIN_EDIT_HANDOFF_KEY);
+        if (!raw) {
+            return null;
+        }
+        sessionStorage.removeItem(ADMIN_EDIT_HANDOFF_KEY);
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.pinId) {
+            pendingAdminEditPinId = String(parsed.pinId);
+        }
+    } catch (error) {
+        console.warn('Gagal membaca handoff admin', error);
+    }
+    return pendingAdminEditPinId;
+}
+
+function startAdminEditLocationIfPending() {
+    if (!pendingAdminEditPinId) {
+        readAdminEditHandoff();
+    }
+    if (!pendingAdminEditPinId) {
+        return;
+    }
+    const id = pendingAdminEditPinId;
+    const markerEntry = markers.find(
+        (marker) => marker && marker.pin && (marker.pin._id === id || marker.pin.id === id)
+    );
+    if (!markerEntry) {
+        return;
+    }
+    pendingAdminEditPinId = null;
+    editPin(id, { startLocationSelection: true });
 }
 
 function showPinLocationConfirmOverlay() {
@@ -164,6 +276,7 @@ let residentShareStatusLabel;
 let residentLiveIndicator;
 let residentEditToggleButton;
 let residentEditForm;
+let adminPageButton;
 let residentEditDisplayNameInput;
 let residentEditPhotoInput;
 let residentEditPhotoPreview;
@@ -1730,6 +1843,10 @@ async function handleResidentEditFormSubmit(event) {
 function updateResidentUI(state) {
     const isLoggedIn = Boolean(state && state.isLoggedIn);
     const resident = state ? state.resident : null;
+    const isAdmin =
+        Boolean(resident?.isAdmin) ||
+        (typeof resident?.role === 'string' && resident.role.toLowerCase() === 'admin') ||
+        (typeof resident?.username === 'string' && resident.username.toLowerCase() === 'admin');
 
     if (residentAuthLinksContainer) {
         residentAuthLinksContainer.classList.toggle('hidden', isLoggedIn);
@@ -1790,6 +1907,15 @@ function updateResidentUI(state) {
     }
     if (!residentEditFormOpen) {
         setResidentEditMessage(null, '');
+    }
+    if (adminPageButton) {
+        adminPageButton.classList.toggle('hidden', !isAdmin);
+        if (!adminPageButton.dataset.bound) {
+            adminPageButton.addEventListener('click', () => {
+                window.location.href = 'admin.html';
+            });
+            adminPageButton.dataset.bound = 'true';
+        }
     }
 
     updateUserMarkerAppearance();
@@ -5023,6 +5149,7 @@ document.addEventListener('DOMContentLoaded', () => {
     residentStatusSaveButton = document.getElementById('resident-status-save-btn');
     residentStatusMessageElement = document.getElementById('resident-status-message');
     residentEditToggleButton = document.getElementById('resident-edit-toggle');
+    adminPageButton = document.getElementById('admin-page-btn');
     residentEditForm = document.getElementById('resident-edit-form');
     residentEditDisplayNameInput = document.getElementById('resident-edit-display-name');
     residentEditPhotoInput = document.getElementById('resident-edit-photo-input');
@@ -5784,6 +5911,7 @@ async function initMap() {
                 infowindow.hide();
             } else {
                 infowindow.show();
+                recordPinView(pin);
             }
         });
 
@@ -5809,6 +5937,7 @@ async function initMap() {
             if (typeof window.applyFilters === 'function') {
                 window.applyFilters();
             }
+            startAdminEditLocationIfPending();
             lastKnownPinsCount = normalizedPins.length;
             DEBUG_LOGGER.log('Pins synchronized', { count: lastKnownPinsCount });
         })
@@ -6024,6 +6153,7 @@ function handleLocationError(browserHasGeolocation) {
             updateUserMarkerAppearance();
             handleLocationEnabled();
             handleResidentLocationUpdate();
+            trackLocationUpdate(newLocation.lat, newLocation.lng);
             if (typeof window.applyFilters === 'function') {
                 window.applyFilters();
             }
@@ -6041,6 +6171,7 @@ function handleLocationError(browserHasGeolocation) {
         };
         userLocation = newLocation;
         map.setCenter(newLocation);
+            trackLocationUpdate(newLocation.lat, newLocation.lng);
             // Build animated pulsing marker
             const userMarkerContainer = document.createElement('div');
             userMarkerContainer.className = 'user-marker';
@@ -6120,6 +6251,7 @@ function handleLocationError(browserHasGeolocation) {
 
     fetchPins();
     getUserIp();
+    trackPageView();
     fetchActivePinsCount(); // Call the new function
     setInterval(() => fetchActivePinsCount({ checkForChanges: true, enableAnimation: true }), 180000); // Check for changes every 3 minutes
 }
@@ -6326,13 +6458,28 @@ function getUserIp() {
         });
 }
 
-function editPin(id) {
+function editPin(id, options = {}) {
     const markerEntry = markers.find((marker) => marker && marker.pin && marker.pin._id === id);
     if (!markerEntry || !markerEntry.pin) {
         console.warn('Pin not found for editing', id);
         return;
     }
     const pin = markerEntry.pin;
+    const shouldEditLocation = options.startLocationSelection === true;
+    setPinListCollapsed(true);
+    closeActionMenu();
+    hideFilterDropdown();
+    setTemporaryMarkerLocation(new google.maps.LatLng(pin.lat, pin.lng), {
+        panToLocation: shouldEditLocation,
+        message: shouldEditLocation
+            ? 'Lokasi pin sedang diedit. Klik peta untuk pindahkan titik lalu simpan.'
+            : 'Lokasi pin saat ini.'
+    });
+    if (shouldEditLocation) {
+        startPinLocationSelection();
+        setPinLocationHint('Klik peta untuk pindahkan lokasi pin, lalu simpan.');
+    }
+
     resetPinImages({ keepExisting: true });
     pinAddedImages = [];
     const timestamp = Date.now();
@@ -6426,6 +6573,7 @@ async function updatePin(id) {
     const linkInputEl = pinLinkInput || document.getElementById('link');
     const lifetimeSelectEl = pinLifetimeSelectElement || document.getElementById('lifetime-select');
     const lifetimeInputEl = pinLifetimeDateInput || document.getElementById('lifetime-date-picker');
+    const coords = toLatLngLiteral(temporaryMarker?.position || temporaryMarker);
 
     const title = titleInputEl ? titleInputEl.value : '';
     const description = descriptionInputEl ? descriptionInputEl.value : '';
@@ -6435,6 +6583,12 @@ async function updatePin(id) {
 
     if (!title || !description || !category || !lifetimeType) {
         alert('Please fill out all fields');
+        return;
+    }
+
+    if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number') {
+        alert('Silakan pilih lokasi pin baru di peta sebelum menyimpan.');
+        startPinLocationSelection();
         return;
     }
 
@@ -6471,6 +6625,8 @@ async function updatePin(id) {
         description,
         category,
         link,
+        lat: coords.lat,
+        lng: coords.lng,
         lifetime
     };
 
@@ -6525,6 +6681,7 @@ async function updatePin(id) {
         if (lifetimeInputEl) {
             lifetimeInputEl.style.display = 'none';
         }
+        clearTemporaryMarkerSelection('Lokasi pin diperbarui.');
         editingPinId = null;
         refreshPins();
     } catch (error) {
