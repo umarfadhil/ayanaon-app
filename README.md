@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.3.2
+- **Admin Pin Filters:** Added category dropdown plus Link/Date/Photo radio filters with a cleaner layout and search button for quicker curation.
+- **Category Sync:** Admin category filter now auto-populates from existing pin categories so options stay accurate without manual edits.
+- **Metrics Defaults:** Business Metrics tab now opens on per-day view with the current month and year preselected for faster checks.
+
 ### What's New in v2.3.1
 - **Maintenance Mode:** Admins can toggle website maintenance from the dashboard with a custom visitor message; visitors see a banner and dimmed controls while active.
 - **Live Notice Refresh:** The public site polls the maintenance status periodically so notices appear/clear without a full reload.

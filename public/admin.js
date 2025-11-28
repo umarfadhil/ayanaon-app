@@ -11,6 +11,13 @@
     const state = {
         pins: [],
         filteredPins: [],
+        filters: {
+            category: '',
+            link: 'any',
+            startDate: 'any',
+            endDate: 'any',
+            photo: 'any'
+        },
         selectedPin: null,
         existingImages: [],
         addedImages: [],
@@ -21,7 +28,7 @@
         topCities: [],
         metricsLoaded: false,
         metricsFilter: {
-            granularity: 'month',
+            granularity: 'day',
             year: new Date().getFullYear(),
             month: new Date().getMonth() + 1,
             startYear: new Date().getFullYear() - 2,
@@ -45,6 +52,12 @@
         els.refreshPinsBtn = document.getElementById('refresh-pins-btn');
         els.pinList = document.getElementById('pin-list');
         els.pinSearch = document.getElementById('pin-search');
+        els.pinSearchBtn = document.getElementById('pin-search-btn');
+        els.filterCategory = document.getElementById('filter-category');
+        els.filterLinkRadios = Array.from(document.querySelectorAll('input[name="filter-link"]')) || [];
+        els.filterStartRadios = Array.from(document.querySelectorAll('input[name="filter-start"]')) || [];
+        els.filterEndRadios = Array.from(document.querySelectorAll('input[name="filter-end"]')) || [];
+        els.filterPhotoRadios = Array.from(document.querySelectorAll('input[name="filter-photo"]')) || [];
         els.message = document.getElementById('admin-message');
         els.editorTitle = document.getElementById('editor-title');
         els.form = document.getElementById('pin-edit-form');
@@ -145,8 +158,8 @@
         }
         if (els.maintenanceMeta) {
             els.maintenanceMeta.textContent = enabled
-                ? 'Pengunjung melihat pengumuman maintenance.'
-                : 'Pengunjung melihat situs seperti biasa.';
+                ? 'Visitors see the maintenance announcement.'
+                : 'Visitors see the site as usual.';
         }
     }
 
@@ -822,19 +835,112 @@
         });
     }
 
-    function applySearchFilter() {
-        const query = (els.pinSearch?.value || '').trim().toLowerCase();
-        if (!query) {
-            state.filteredPins = state.pins.slice();
-            renderPinList();
+    function normalizeText(value) {
+        return (value || '').trim().toLowerCase();
+    }
+
+    function getCheckedValue(radios = [], fallback = '') {
+        const selected = radios.find((input) => input && input.checked);
+        return selected ? selected.value : fallback;
+    }
+
+    function setRadioGroupValue(radios = [], value = '') {
+        if (!radios.length) return;
+        let matched = false;
+        radios.forEach((input) => {
+            const isMatch = input.value === value;
+            input.checked = isMatch;
+            if (isMatch) {
+                matched = true;
+            }
+        });
+        if (!matched) {
+            radios[0].checked = true;
+        }
+    }
+
+    function populateCategoryFilter() {
+        if (!els.filterCategory) {
             return;
         }
+        const current = state.filters.category || '';
+        const categories = Array.from(
+            new Set(
+                state.pins
+                    .map((pin) => (pin.category || '').trim())
+                    .filter(Boolean)
+            )
+        ).sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+        els.filterCategory.innerHTML = '';
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Semua kategori';
+        els.filterCategory.appendChild(defaultOption);
+        categories.forEach((category) => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            els.filterCategory.appendChild(option);
+        });
+        const matched =
+            categories.find((category) => category.toLowerCase() === current.toLowerCase()) || '';
+        els.filterCategory.value = matched;
+        state.filters.category = matched;
+    }
+
+    function applyPinFilters() {
+        const query = normalizeText(els.pinSearch?.value);
+        state.filters = {
+            category: els.filterCategory?.value || '',
+            link: getCheckedValue(els.filterLinkRadios, 'any'),
+            startDate: getCheckedValue(els.filterStartRadios, 'any'),
+            endDate: getCheckedValue(els.filterEndRadios, 'any'),
+            photo: getCheckedValue(els.filterPhotoRadios, 'any')
+        };
         state.filteredPins = state.pins.filter((pin) => {
-            const haystack = [pin.title, pin.description, pin.category, pin.city]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-            return haystack.includes(query);
+            if (query) {
+                const haystack = [pin.title, pin.description, pin.category, pin.city]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                if (!haystack.includes(query)) {
+                    return false;
+                }
+            }
+            if (state.filters.category && normalizeText(pin.category) !== normalizeText(state.filters.category)) {
+                return false;
+            }
+            const hasLink = Boolean(normalizeText(pin.link));
+            if (state.filters.link === 'with' && !hasLink) {
+                return false;
+            }
+            if (state.filters.link === 'without' && hasLink) {
+                return false;
+            }
+            const lifetime = pin.lifetime || {};
+            const startFilled = Boolean(normalizeText(lifetime.start || lifetime.value));
+            if (state.filters.startDate === 'filled' && !startFilled) {
+                return false;
+            }
+            if (state.filters.startDate === 'empty' && startFilled) {
+                return false;
+            }
+            const endFilled = Boolean(normalizeText(lifetime.end));
+            if (state.filters.endDate === 'filled' && !endFilled) {
+                return false;
+            }
+            if (state.filters.endDate === 'empty' && endFilled) {
+                return false;
+            }
+            const hasPhoto =
+                (Array.isArray(pin.images) && pin.images.length > 0) || Number(pin.imageCount || 0) > 0;
+            if (state.filters.photo === 'with' && !hasPhoto) {
+                return false;
+            }
+            if (state.filters.photo === 'without' && hasPhoto) {
+                return false;
+            }
+            return true;
         });
         renderPinList();
     }
@@ -870,8 +976,8 @@
             const response = await fetch('/api/pins?lean=1', { cache: 'no-store' });
             const pins = await response.json().catch(() => []);
             state.pins = Array.isArray(pins) ? pins : [];
-            state.filteredPins = state.pins.slice();
-            applySearchFilter();
+            populateCategoryFilter();
+            applyPinFilters();
             await refreshPinCount();
             if (state.selectedPin) {
                 const selectedId = getPinId(state.selectedPin);
@@ -881,8 +987,9 @@
                     return;
                 }
             }
-            if (state.pins.length) {
-                selectPin(getPinId(state.pins[0]), { silentMessage: true });
+            const initialList = state.filteredPins.length ? state.filteredPins : state.pins;
+            if (initialList.length) {
+                selectPin(getPinId(initialList[0]), { silentMessage: true });
             } else {
                 clearSelection();
             }
@@ -1272,7 +1379,7 @@
         if (!state.existingImages.length) {
             const empty = document.createElement('div');
             empty.className = 'pin-list-empty';
-            empty.textContent = 'Belum ada foto tersimpan.';
+            empty.textContent = 'No saved photos.';
             els.existingImages.appendChild(empty);
             return;
         }
@@ -1358,7 +1465,7 @@
         }
         const keptExisting = state.existingImages.filter((image) => !image.removed).length;
         const remaining = Math.max(0, MAX_PIN_PHOTO_COUNT - keptExisting - state.addedImages.length);
-        els.photoRemaining.textContent = `Sisa ${remaining} foto lagi`;
+        els.photoRemaining.textContent = `${remaining} photos remaining`;
     }
 
     function readFileAsDataUrl(file) {
@@ -1550,9 +1657,9 @@
             if (idx !== -1) {
                 state.pins[idx] = updatedPin;
             }
-            state.filteredPins = state.pins.slice();
+            populateCategoryFilter();
+            applyPinFilters();
             selectPin(pinId, { silentMessage: true });
-            renderPinList();
             showMessage('success', 'Pin berhasil diperbarui.');
             await refreshPinCount();
         } catch (error) {
@@ -1593,10 +1700,10 @@
                 throw new Error(data?.message || 'Gagal menghapus pin.');
             }
             state.pins = state.pins.filter((pin) => getPinId(pin) !== pinId);
-            state.filteredPins = state.pins.slice();
             state.selectedPin = null;
-            renderPinList();
             clearSelection();
+            populateCategoryFilter();
+            applyPinFilters();
             await refreshPinCount();
             showMessage('success', 'Pin berhasil dihapus.');
         } catch (error) {
@@ -1609,8 +1716,26 @@
 
     function bindEvents() {
         if (els.pinSearch) {
-            els.pinSearch.addEventListener('input', applySearchFilter);
+            els.pinSearch.addEventListener('input', applyPinFilters);
         }
+        if (els.pinSearchBtn) {
+            els.pinSearchBtn.addEventListener('click', applyPinFilters);
+        }
+        if (els.filterCategory) {
+            els.filterCategory.addEventListener('change', applyPinFilters);
+        }
+        (els.filterLinkRadios || []).forEach((input) => {
+            input.addEventListener('change', applyPinFilters);
+        });
+        (els.filterStartRadios || []).forEach((input) => {
+            input.addEventListener('change', applyPinFilters);
+        });
+        (els.filterEndRadios || []).forEach((input) => {
+            input.addEventListener('change', applyPinFilters);
+        });
+        (els.filterPhotoRadios || []).forEach((input) => {
+            input.addEventListener('change', applyPinFilters);
+        });
         if (els.refreshPinsBtn) {
             els.refreshPinsBtn.addEventListener('click', () => {
                 loadPins();
@@ -1702,12 +1827,19 @@
         if (els.metricsMonth) {
             els.metricsMonth.value = state.metricsFilter.month;
         }
+        if (els.metricsGranularity) {
+            els.metricsGranularity.value = state.metricsFilter.granularity;
+        }
         if (els.metricsStartYear) {
             els.metricsStartYear.value = state.metricsFilter.startYear;
         }
         if (els.metricsEndYear) {
             els.metricsEndYear.value = state.metricsFilter.endYear;
         }
+        setRadioGroupValue(els.filterLinkRadios, state.filters.link);
+        setRadioGroupValue(els.filterStartRadios, state.filters.startDate);
+        setRadioGroupValue(els.filterEndRadios, state.filters.endDate);
+        setRadioGroupValue(els.filterPhotoRadios, state.filters.photo);
         try {
             await ensureAdminSession();
         } catch (error) {
