@@ -19,7 +19,7 @@ const {
 } = process.env;
 
 // Establish the database connection outside of the handler
-const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+const client = new MongoClient(MONGODB_URI);
 let db;
 let indexesEnsured = false;
 
@@ -38,6 +38,18 @@ async function connectToDatabase() {
 
 // Immediately connect to the database when the function is initialized
 connectToDatabase();
+
+function isTruthy(value) {
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function computeImageCount(doc) {
+    if (!doc || !Array.isArray(doc.images)) return 0;
+    return doc.images.length;
+}
 
 async function ensureIndexes(database) {
     if (indexesEnsured || !database) return;
@@ -1414,8 +1426,36 @@ router.get('/pins', async (req, res) => {
         query.city = city;
     }
 
-    console.log('Executing pins query:', query);
-    const pins = await db.collection('pins').find(query).toArray();
+    const includeImages = isTruthy(req.query.includeImages) && !isTruthy(req.query.lean) && !isTruthy(req.query.noImages);
+
+    console.log('Executing pins query:', { ...query, includeImages });
+
+    if (includeImages) {
+        const pins = await db
+            .collection('pins')
+            .aggregate([
+                { $match: query },
+                { $addFields: { imageCount: { $size: { $ifNull: ['$images', []] } } } }
+            ])
+            .toArray();
+        res.json(
+            pins.map((pin) => ({
+                ...pin,
+                images: Array.isArray(pin.images) ? pin.images : [],
+                imageCount: computeImageCount(pin)
+            }))
+        );
+        return;
+    }
+
+    const pins = await db
+        .collection('pins')
+        .aggregate([
+            { $match: query },
+            { $addFields: { imageCount: { $size: { $ifNull: ['$images', []] } } } },
+            { $project: { images: 0 } }
+        ])
+        .toArray();
     res.json(pins);
 });
 
@@ -1423,6 +1463,20 @@ router.get('/pins/count', async (req, res) => {
     const db = await connectToDatabase();
     const count = await db.collection('pins').countDocuments({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] });
     res.json({ count: count });
+});
+
+router.get('/pins/:id', async (req, res) => {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: 'Pin id tidak valid.' });
+    }
+    const db = await connectToDatabase();
+    const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
+    if (!pin) {
+        return res.status(404).json({ message: 'Pin not found.' });
+    }
+    pin.imageCount = computeImageCount(pin);
+    res.json(pin);
 });
 
 router.get('/maintenance', async (req, res) => {
@@ -1849,6 +1903,7 @@ router.post('/pins', async (req, res) => {
     if (Array.isArray(pin.images) && pin.images.length) {
         pin.images = normalizeIncomingPinImages([], pin.images);
     }
+    pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
 
     // Get city from lat/lng
     try {
@@ -1924,8 +1979,10 @@ router.put('/pins/:id', async (req, res) => {
     }
     if (Array.isArray(incomingImages)) {
         updatedPin.images = normalizeIncomingPinImages(pin.images, incomingImages);
+        updatedPin.imageCount = Array.isArray(updatedPin.images) ? updatedPin.images.length : 0;
     } else if (incomingImages === null) {
         updatedPin.images = [];
+        updatedPin.imageCount = 0;
     }
 
     if (latLngUpdated) {

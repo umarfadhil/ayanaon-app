@@ -5813,25 +5813,35 @@ async function initMap() {
     refreshResidentShareMarkers({ force: true });
     startResidentShareRefreshLoop();
 
-    function addPinToMap(pin) {
+    async function fetchPinDetailsById(pinId) {
+        if (!pinId) {
+            return null;
+        }
+        const response = await fetch(`/api/pins/${pinId}`, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error('Gagal memuat detail pin.');
+        }
+        return response.json();
+    }
+
+    function buildPinInfoWindow(marker) {
+        const pin = marker.pin;
+        if (!pin) {
+            return;
+        }
+
+        if (marker.infoWindow) {
+            marker.infoWindow.setMap(null);
+        }
+
         const icon = getIconForCategory(pin.category);
-        const markerElement = document.createElement('div');
-        markerElement.textContent = icon;
-        markerElement.style.fontSize = '24px';
-    
-        const searchableText = buildSearchableBlob(pin);
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-            position: { lat: pin.lat, lng: pin.lng },
-            title: pin.title,
-            content: markerElement
-        });
-    
-        // Store category on marker object
-        marker.category = pin.category;
-        marker.pin = pin;
-        marker.searchText = searchableText;
-        marker.isVisible = true;
-    
+        const markerElement = marker.content || document.createElement('div');
+        if (!marker.content) {
+            markerElement.textContent = icon;
+            markerElement.style.fontSize = '24px';
+            marker.content = markerElement;
+        }
+
         let linkElement = '';
         if (pin.link) {
             linkElement = `<div class="info-window-link"><a href="${pin.link}" target="_blank" style="text-decoration: none; color: #90f2a8">${pin.link}</a></div>`;
@@ -5841,9 +5851,9 @@ async function initMap() {
         if (userIp === pin.reporter) {
             editButton = `<button type="button" class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
         }
-    
+
         const when = getPinWhenLabel(pin) || 'N/A';
-    
+
         const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
         const safeTitleForData = (pin.title || '').replace(/"/g, '&quot;');
         const pinImageSources = Array.isArray(pin.images)
@@ -5901,7 +5911,7 @@ async function initMap() {
                 </div>
             </div>
         `;
-    
+
         const infowindow = new CustomInfoWindow(pin, contentString);
         infowindow.setMap(map);
         marker.infoWindow = infowindow;
@@ -5922,7 +5932,6 @@ async function initMap() {
             }
         }
 
-        // Attach event listeners programmatically
         const upvoteButton = infowindow.container.querySelector(`#upvote-btn-${pin._id}`);
         if (upvoteButton) {
             upvoteButton.addEventListener('click', () => upvotePin(pin._id));
@@ -5939,16 +5948,78 @@ async function initMap() {
         }
 
         const closeButton = infowindow.container.querySelector('.close-info-window');
-        closeButton.addEventListener('click', () => {
-            infowindow.hide();
+        if (closeButton) {
+            closeButton.addEventListener('click', () => {
+                infowindow.hide();
+            });
+        }
+    }
+
+    async function ensurePinDetails(marker) {
+        const pin = marker.pin;
+        if (!pin || pin.imagesLoading) {
+            return;
+        }
+        const needsImages = (!Array.isArray(pin.images) || pin.images.length === 0) && Number(pin.imageCount || 0) > 0;
+        if (!needsImages) {
+            return;
+        }
+        pin.imagesLoading = true;
+        try {
+            const fullPin = await fetchPinDetailsById(pin._id);
+            if (fullPin) {
+                marker.pin = {
+                    ...pin,
+                    ...fullPin,
+                    images: Array.isArray(fullPin.images) ? fullPin.images : []
+                };
+                const wasOpen = marker.infoWindow && marker.infoWindow.container.style.display === 'block';
+                buildPinInfoWindow(marker);
+                if (wasOpen && marker.infoWindow) {
+                    marker.infoWindow.show();
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load pin details', error);
+        } finally {
+            pin.imagesLoading = false;
+        }
+    }
+
+    function addPinToMap(pin) {
+        const icon = getIconForCategory(pin.category);
+        const markerElement = document.createElement('div');
+        markerElement.textContent = icon;
+        markerElement.style.fontSize = '24px';
+    
+        const searchableText = buildSearchableBlob(pin);
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+            position: { lat: pin.lat, lng: pin.lng },
+            title: pin.title,
+            content: markerElement
         });
     
-        marker.addListener('gmp-click', () => {
-            if (infowindow.container.style.display === 'block') {
-                infowindow.hide();
+        marker.category = pin.category;
+        marker.pin = {
+            ...pin,
+            images: Array.isArray(pin.images) ? pin.images : [],
+            imageCount: Number(pin.imageCount || (Array.isArray(pin.images) ? pin.images.length : 0))
+        };
+        marker.searchText = searchableText;
+        marker.isVisible = true;
+
+        buildPinInfoWindow(marker);
+    
+        marker.addListener('gmp-click', async () => {
+            await ensurePinDetails(marker);
+            if (!marker.infoWindow) {
+                return;
+            }
+            if (marker.infoWindow.container.style.display === 'block') {
+                marker.infoWindow.hide();
             } else {
-                infowindow.show();
-                recordPinView(pin);
+                marker.infoWindow.show();
+                recordPinView(marker.pin);
             }
         });
 
@@ -5962,7 +6033,7 @@ async function initMap() {
         }
         isFetchingPins = true;
         DEBUG_LOGGER.log('Fetching pins from server');
-        const url = '/api/pins';
+        const url = '/api/pins?lean=1';
         return fetch(url)
         .then(response => response.json())
         .then(pins => {
@@ -6495,12 +6566,13 @@ function getUserIp() {
         });
 }
 
-function editPin(id, options = {}) {
+async function editPin(id, options = {}) {
     const markerEntry = markers.find((marker) => marker && marker.pin && marker.pin._id === id);
     if (!markerEntry || !markerEntry.pin) {
         console.warn('Pin not found for editing', id);
         return;
     }
+    await ensurePinDetails(markerEntry);
     const pin = markerEntry.pin;
     const shouldEditLocation = options.startLocationSelection === true;
     setPinListCollapsed(true);

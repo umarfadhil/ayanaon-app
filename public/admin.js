@@ -867,7 +867,7 @@
 
     async function loadPins() {
         try {
-            const response = await fetch('/api/pins', { cache: 'no-store' });
+            const response = await fetch('/api/pins?lean=1', { cache: 'no-store' });
             const pins = await response.json().catch(() => []);
             state.pins = Array.isArray(pins) ? pins : [];
             state.filteredPins = state.pins.slice();
@@ -890,6 +890,17 @@
             console.error('Gagal memuat pin', error);
             showMessage('error', 'Gagal memuat data pin. Coba refresh kembali.');
         }
+    }
+
+    async function fetchPinDetailsById(pinId) {
+        if (!pinId) {
+            return null;
+        }
+        const response = await fetch(`/api/pins/${pinId}`, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error('Gagal memuat detail pin.');
+        }
+        return response.json();
     }
 
     function clearSelection() {
@@ -968,6 +979,30 @@
         renderPinList();
         showMessage(null, '');
         centerMiniMapOnCurrentCoords();
+
+        const needsImages = (!Array.isArray(pin.images) || pin.images.length === 0) && Number(pin.imageCount || 0) > 0;
+        if (needsImages) {
+            fetchPinDetailsById(getPinId(pin))
+                .then((fullPin) => {
+                    if (!fullPin) {
+                        return;
+                    }
+                    const targetId = getPinId(fullPin);
+                    const idx = state.pins.findIndex((entry) => getPinId(entry) === targetId);
+                    if (idx !== -1) {
+                        state.pins[idx] = fullPin;
+                    }
+                    if (state.selectedPin && getPinId(state.selectedPin) === targetId) {
+                        state.selectedPin = fullPin;
+                        state.existingImages = normalizeImages(fullPin);
+                        renderImages();
+                        renderPinList();
+                    }
+                })
+                .catch((error) => {
+                    console.error('Gagal memuat detail pin', error);
+                });
+        }
     }
 
     function formatCoord(value) {
@@ -1381,6 +1416,10 @@
     }
 
     function buildImagesPayload() {
+        const expectedExisting = Number(state.selectedPin?.imageCount || 0);
+        if (expectedExisting > 0 && state.existingImages.length === 0 && state.addedImages.length === 0) {
+            return null;
+        }
         const existingPayload = state.existingImages
             .filter((image) => !image.removed)
             .map((image) => ({
@@ -1476,7 +1515,10 @@
             payload.lifetime = lifetime;
         }
 
-        payload.images = buildImagesPayload();
+        const imagesPayload = buildImagesPayload();
+        if (imagesPayload !== null) {
+            payload.images = imagesPayload;
+        }
         if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
             payload.lat = latNum;
             payload.lng = lngNum;
