@@ -40,6 +40,25 @@
                 <div class="summary-value" id="admin-name">Admin</div>
                 <div class="summary-meta" id="admin-username"></div>
             </div>
+            <div class="summary-card maintenance-card">
+                <div class="maintenance-row">
+                    <div>
+                        <div class="summary-label">Website Maintenance</div>
+                        <div class="summary-value maintenance-status" id="maintenance-status-label">Normal</div>
+                        <div class="summary-meta" id="maintenance-meta">Pengunjung melihat situs seperti biasa.</div>
+                    </div>
+                    <label class="maintenance-switch" aria-label="Toggle maintenance">
+                        <input type="checkbox" id="maintenance-toggle">
+                        <span class="maintenance-slider"></span>
+                    </label>
+                </div>
+                <label class="maintenance-message-label" for="maintenance-message">Pesan untuk pengunjung</label>
+                <textarea id="maintenance-message" rows="2" placeholder="Contoh: Situs sedang maintenance hingga 14.00"></textarea>
+                <div class="maintenance-actions">
+                    <button type="button" id="maintenance-save-btn" class="chip-btn">Simpan</button>
+                    <span class="maintenance-hint">Perubahan langsung terlihat di halaman utama.</span>
+                </div>
+            </div>
         </section>
 
         <div id="admin-message" class="admin-message" role="status" aria-live="polite"></div>

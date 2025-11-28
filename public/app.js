@@ -63,6 +63,9 @@ let pinLocationHint;
 let isSelectingPinLocation = false;
 let geocoder = null;
 let pinLocationConfirmWindow = null;
+let maintenanceStatus = { enabled: false, message: '' };
+let maintenanceNoticeElement = null;
+let maintenanceNoticeMessageElement = null;
 
 function showPinLocationSearchBar(show = false) {
     if (!pinLocationSearchBarElement) {
@@ -151,6 +154,40 @@ function recordPinView(pin) {
         lng: coords?.lng,
         city: pin.city || undefined
     });
+}
+
+function renderMaintenanceNotice(status = maintenanceStatus) {
+    if (!maintenanceNoticeElement) {
+        maintenanceNoticeElement = document.getElementById('maintenance-notice');
+    }
+    if (!maintenanceNoticeMessageElement) {
+        maintenanceNoticeMessageElement = document.getElementById('maintenance-notice-message');
+    }
+    if (!maintenanceNoticeElement || !maintenanceNoticeMessageElement) {
+        return;
+    }
+    const enabled = Boolean(status?.enabled);
+    const message = (status?.message || '').trim() || 'Website sedang maintenance.';
+    maintenanceNoticeElement.classList.toggle('hidden', !enabled);
+    maintenanceNoticeElement.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+    maintenanceNoticeMessageElement.textContent = message;
+    if (document.body) {
+        document.body.classList.toggle('maintenance-active', enabled);
+    }
+}
+
+async function refreshMaintenanceStatus() {
+    try {
+        const response = await fetch('/api/maintenance', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        maintenanceStatus = {
+            enabled: Boolean(payload?.enabled),
+            message: typeof payload?.message === 'string' ? payload.message : ''
+        };
+        renderMaintenanceNotice();
+    } catch (error) {
+        console.warn('Gagal memuat status maintenance', error);
+    }
 }
 
 function readAdminEditHandoff() {
@@ -6747,6 +6784,9 @@ function scheduleDailyRefresh() {
 }
 
 scheduleDailyRefresh();
+
+refreshMaintenanceStatus();
+setInterval(refreshMaintenanceStatus, 180000);
 
 function fetchUniqueIpCount(options = {}) {
     const { enableAnimation = false } = options;

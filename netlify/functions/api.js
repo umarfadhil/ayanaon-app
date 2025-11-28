@@ -74,6 +74,11 @@ async function getResidentsCollection() {
     return database.collection('residents');
 }
 
+async function getSettingsCollection() {
+    const database = await connectToDatabase();
+    return database.collection('settings');
+}
+
 function normalizePhoneNumber(rawPhone) {
     if (!rawPhone) return '';
     const trimmed = String(rawPhone).trim();
@@ -361,6 +366,33 @@ async function reverseGeocodeCity(lat, lng) {
         console.error('Reverse geocode failed', error);
         return null;
     }
+}
+
+async function readMaintenanceStatus() {
+    try {
+        const settings = await getSettingsCollection();
+        const doc = await settings.findOne({ key: 'maintenance' });
+        return {
+            enabled: Boolean(doc?.enabled),
+            message: typeof doc?.message === 'string' ? doc.message : ''
+        };
+    } catch (error) {
+        console.error('Failed to read maintenance status', error);
+        return { enabled: false, message: '' };
+    }
+}
+
+async function writeMaintenanceStatus(enabled, message) {
+    const settings = await getSettingsCollection();
+    const sanitizedMessage = typeof message === 'string' ? message.trim().slice(0, 500) : '';
+    const payload = {
+        key: 'maintenance',
+        enabled: Boolean(enabled),
+        message: sanitizedMessage,
+        updatedAt: new Date()
+    };
+    await settings.updateOne({ key: 'maintenance' }, { $set: payload }, { upsert: true });
+    return { enabled: payload.enabled, message: payload.message };
 }
 
 async function authenticateRequest(req, res) {
@@ -1391,6 +1423,27 @@ router.get('/pins/count', async (req, res) => {
     const db = await connectToDatabase();
     const count = await db.collection('pins').countDocuments({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] });
     res.json({ count: count });
+});
+
+router.get('/maintenance', async (req, res) => {
+    const status = await readMaintenanceStatus();
+    res.json(status);
+});
+
+router.put('/maintenance', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengubah status maintenance.' });
+    }
+    const { enabled, message } = req.body || {};
+    try {
+        const status = await writeMaintenanceStatus(enabled, message);
+        res.json(status);
+    } catch (error) {
+        console.error('Failed to update maintenance status', error);
+        res.status(500).json({ message: 'Tidak dapat memperbarui status maintenance.' });
+    }
 });
 
 router.get('/unique-ips', async (req, res) => {

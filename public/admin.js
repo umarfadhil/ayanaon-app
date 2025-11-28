@@ -26,6 +26,10 @@
             month: new Date().getMonth() + 1,
             startYear: new Date().getFullYear() - 2,
             endYear: new Date().getFullYear()
+        },
+        maintenance: {
+            enabled: false,
+            message: ''
         }
     };
 
@@ -59,6 +63,11 @@
         els.adminName = document.getElementById('admin-name');
         els.adminUsername = document.getElementById('admin-username');
         els.logoutBtn = document.getElementById('admin-logout-btn');
+        els.maintenanceToggle = document.getElementById('maintenance-toggle');
+        els.maintenanceMessage = document.getElementById('maintenance-message');
+        els.maintenanceSaveBtn = document.getElementById('maintenance-save-btn');
+        els.maintenanceStatusLabel = document.getElementById('maintenance-status-label');
+        els.maintenanceMeta = document.getElementById('maintenance-meta');
         els.latInput = document.getElementById('pin-lat');
         els.lngInput = document.getElementById('pin-lng');
         els.miniMapContainer = document.getElementById('admin-mini-map');
@@ -119,6 +128,88 @@
             els.message.classList.add('is-success');
         } else if (type === 'error') {
             els.message.classList.add('is-error');
+        }
+    }
+
+    function renderMaintenanceStatus(status = state.maintenance) {
+        const enabled = Boolean(status?.enabled);
+        if (els.maintenanceToggle) {
+            els.maintenanceToggle.checked = enabled;
+        }
+        if (els.maintenanceMessage && typeof status?.message === 'string') {
+            els.maintenanceMessage.value = status.message;
+        }
+        if (els.maintenanceStatusLabel) {
+            els.maintenanceStatusLabel.textContent = enabled ? 'Maintenance ON' : 'Normal';
+            els.maintenanceStatusLabel.classList.toggle('is-active', enabled);
+        }
+        if (els.maintenanceMeta) {
+            els.maintenanceMeta.textContent = enabled
+                ? 'Pengunjung melihat pengumuman maintenance.'
+                : 'Pengunjung melihat situs seperti biasa.';
+        }
+    }
+
+    function syncMaintenancePreviewFromInputs() {
+        renderMaintenanceStatus({
+            enabled: Boolean(els.maintenanceToggle?.checked),
+            message: els.maintenanceMessage?.value || ''
+        });
+    }
+
+    function setMaintenanceSaving(isSaving) {
+        if (!els.maintenanceSaveBtn) return;
+        els.maintenanceSaveBtn.disabled = isSaving;
+        els.maintenanceSaveBtn.textContent = isSaving ? 'Menyimpan...' : 'Simpan';
+    }
+
+    async function loadMaintenanceStatus() {
+        try {
+            const response = await fetch('/api/maintenance', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            state.maintenance = {
+                enabled: Boolean(payload?.enabled),
+                message: typeof payload?.message === 'string' ? payload.message : ''
+            };
+            renderMaintenanceStatus();
+        } catch (error) {
+            console.warn('Gagal memuat status maintenance', error);
+            showMessage('error', 'Tidak dapat memuat status maintenance.');
+        }
+    }
+
+    async function saveMaintenanceStatus() {
+        const enabled = Boolean(els.maintenanceToggle?.checked);
+        const message = (els.maintenanceMessage?.value || '').trim();
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        setMaintenanceSaving(true);
+        try {
+            const response = await fetch('/api/maintenance', {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify({ enabled, message })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload?.message || 'Gagal memperbarui maintenance.');
+            }
+            state.maintenance = {
+                enabled: Boolean(payload?.enabled),
+                message: typeof payload?.message === 'string' ? payload.message : message
+            };
+            renderMaintenanceStatus();
+            showMessage('success', enabled ? 'Mode maintenance diaktifkan.' : 'Mode maintenance dimatikan.');
+        } catch (error) {
+            console.error('Gagal memperbarui maintenance', error);
+            showMessage('error', error.message || 'Tidak dapat menyimpan status maintenance.');
+        } finally {
+            setMaintenanceSaving(false);
         }
     }
 
@@ -1483,6 +1574,15 @@
                 loadPins();
             });
         }
+        if (els.maintenanceToggle) {
+            els.maintenanceToggle.addEventListener('change', syncMaintenancePreviewFromInputs);
+        }
+        if (els.maintenanceMessage) {
+            els.maintenanceMessage.addEventListener('input', syncMaintenancePreviewFromInputs);
+        }
+        if (els.maintenanceSaveBtn) {
+            els.maintenanceSaveBtn.addEventListener('click', saveMaintenanceStatus);
+        }
         if (els.imageInput) {
             els.imageInput.addEventListener('change', handleImageInput);
         }
@@ -1572,6 +1672,7 @@
             showMessage('error', error.message || 'Gagal memuat sesi admin.');
             return;
         }
+        await loadMaintenanceStatus();
         initMiniMap();
         loadPins();
         setActiveTab('pins');

@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.3.1
+- **Maintenance Mode:** Admins can toggle website maintenance from the dashboard with a custom visitor message; visitors see a banner and dimmed controls while active.
+- **Live Notice Refresh:** The public site polls the maintenance status periodically so notices appear/clear without a full reload.
+- **PWA Cache Bump:** Service worker cache version bumped to pull the new assets immediately after deploys.
+
 ### What's New in v2.3.0
 - **Manage Pins:** Add Kelola Pin tab to manage pins (update information, add photos, relocate pin, remove, etc.) for admin.
 - **Business Metrics:** Add Business Metrics tab to control the web-app performances and gain insights for future developments.

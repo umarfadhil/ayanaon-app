@@ -17,6 +17,78 @@ body {
     overflow: hidden;
 }
 
+.maintenance-notice {
+    position: fixed;
+    top: calc(var(--ui-top-offset) + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.9);
+    color: #e2e8f0;
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+    border-radius: 14px;
+    padding: 12px 14px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(880px, calc(100% - 20px));
+    backdrop-filter: blur(8px);
+}
+
+.maintenance-notice.hidden {
+    display: none;
+}
+
+.maintenance-notice__icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.16);
+    color: #f59e0b;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.maintenance-notice__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.maintenance-notice__title {
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+}
+
+.maintenance-notice__message {
+    font-size: 14px;
+    color: #cbd5e1;
+    line-height: 1.4;
+}
+
+body.maintenance-active {
+    --app-disabled-opacity: 0.6;
+}
+
+body.maintenance-active #map {
+    filter: grayscale(0.15);
+}
+
+body.maintenance-active #add-pin-btn,
+body.maintenance-active #info-btn,
+body.maintenance-active #filter-btn,
+body.maintenance-active #reset-filter-btn,
+body.maintenance-active #locate-me-btn,
+body.maintenance-active #pin-list-toggle,
+body.maintenance-active #action-menu-toggle {
+    opacity: var(--app-disabled-opacity);
+}
+
 #map-type-control-container {
     position: absolute;
     top: 10px;
