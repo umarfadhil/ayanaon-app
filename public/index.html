@@ -21,16 +21,52 @@
             <div id="maintenance-notice-message" class="maintenance-notice__message">AyaNaon sedang maintenance.</div>
         </div>
     </div>
-    <div id="pin-list-panel" class="pin-list-panel pin-list-panel--collapsed">
-        <button id="pin-list-toggle" class="pin-list-toggle" type="button" aria-expanded="false" aria-controls="pin-list-container">
-            AyaNaon
-        </button>
+    <div id="pin-list-panel" class="pin-list-panel pin-list-panel--collapsed pin-list-panel--search-hidden">
+        <form id="pin-list-search-form" class="pin-list-search-wrapper" role="search">
+            <div class="pin-list-search-field">
+                <input type="search" id="pin-list-search-input" placeholder="Konser, Restoran Legendaris, atau Promo" aria-label="Cari pin atau promo terdekat" autocomplete="off">
+                <button type="submit" id="pin-list-search-btn" class="pin-list-search-submit">Search</button>
+                <button type="button" id="reset-filter-btn" class="pin-list-search-reset" aria-label="Reset Filter">Reset</button>
+            </div>
+            <div class="pin-list-search-advanced">
+                <div class="pin-list-advanced-control">
+                    <button type="button" id="pin-list-category-toggle" class="pin-list-advanced-btn" aria-expanded="false" aria-controls="pin-list-category-popover">
+                        <span class="pin-list-advanced-label">Category</span>
+                        <span id="pin-list-category-summary" class="pin-list-advanced-value">All</span>
+                    </button>
+                    <div id="pin-list-category-popover" class="pin-list-popover hidden" role="dialog" aria-label="Pilih kategori pin">
+                        <div class="pin-list-popover-header">
+                            <span>Select Category</span>
+                            <div class="pin-list-popover-header-actions">
+                                <button type="button" id="pin-list-category-select-all" class="pin-list-popover-reset">Select all</button>
+                                <button type="button" id="pin-list-category-clear-all" class="pin-list-popover-reset">Remove all</button>
+                            </div>
+                        </div>
+                        <div class="pin-list-category-list" id="pin-list-category-list"></div>
+                    </div>
+                </div>
+                <div class="pin-list-advanced-control">
+                    <button type="button" id="pin-list-date-toggle" class="pin-list-advanced-btn" aria-expanded="false" aria-controls="pin-list-date-popover">
+                        <span class="pin-list-advanced-label">Date</span>
+                        <span id="pin-list-date-summary" class="pin-list-advanced-value">Kapan saja</span>
+                    </button>
+                    <div id="pin-list-date-popover" class="pin-list-popover hidden" role="dialog" aria-label="Select date range">
+                        <div class="pin-list-popover-body">
+                            <input type="text" id="pin-list-date-range-input" placeholder="Select date or range" readonly>
+                        </div>
+                        <div class="pin-list-popover-actions">
+                            <button type="button" id="pin-list-date-reset" class="pin-list-popover-reset">Reset</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
         <div id="pin-list-container" class="pin-list-container" role="complementary" aria-label="Daftar pin terdekat dan hasil pencarian">
             <div class="pin-list-header">
-                <div class="pin-list-title" id="pin-list-title">Pin Terdekat</div>
-                <div class="pin-list-summary" id="pin-list-summary">Memuat pin...</div>
+                <div class="pin-list-title" id="pin-list-title">Nearest Pins</div>
+                <div class="pin-list-summary" id="pin-list-summary">Loading Pins...</div>
             </div>
-            <div class="pin-list-empty" id="pin-list-empty">Belum ada pin untuk ditampilkan.</div>
+            <div class="pin-list-empty" id="pin-list-empty">No pins to display.</div>
             <div class="pin-list" id="pin-list" role="list"></div>
         </div>
     </div>
@@ -38,84 +74,44 @@
     <div id="pin-location-search-bar" class="pin-location-search-bar hidden">
         <div class="pin-location-search-inner">
             <input type="text" id="pin-location-search" placeholder="Cari lokasi atau alamat" aria-label="Cari lokasi atau alamat">
-            <button type="button" id="pin-location-search-btn" aria-label="Cari lokasi">Cari</button>
+            <button type="button" id="pin-location-search-btn" aria-label="Cari lokasi">Search</button>
         </div>
         <p class="pin-location-search-note">Tap peta untuk menjatuhkan pin, atau cari lokasi lalu konfirmasi titik tersebut.</p>
     </div>
-    <div id="action-menu" class="action-menu">
-        <button id="action-menu-toggle" class="action-menu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="action-menu-content">Menu</button>
-        <div id="action-menu-content" class="action-menu-content hidden">
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Primary">
+        <button id="nav-home-btn" class="bottom-nav__btn" type="button" data-nav="home">
+            <span class="bottom-nav__label">Home</span>
+        </button>
+        <button id="nav-search-btn" class="bottom-nav__btn" type="button" data-nav="search">
+            <span class="bottom-nav__label">Search</span>
+        </button>
+        <button id="nav-list-btn" class="bottom-nav__btn" type="button" data-nav="list">
+            <span class="bottom-nav__label">List</span>
+        </button>
+        <button id="nav-saved-btn" class="bottom-nav__btn" type="button" data-nav="saved">
+            <span class="bottom-nav__label">Saved</span>
+        </button>
+        <div id="action-menu" class="action-menu bottom-nav__item bottom-nav__item--menu">
+            <button id="action-menu-toggle" class="action-menu-toggle bottom-nav__btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="action-menu-content" aria-label="Menu">
+                <span class="action-menu-toggle__avatar" aria-hidden="true">
+                    <img id="action-menu-toggle-photo" class="action-menu-toggle__photo" alt="">
+                    <span id="action-menu-toggle-fallback" class="action-menu-toggle__fallback">&#9776;</span>
+                </span>
+                <span class="bottom-nav__label">Menu</span>
+            </button>
+            <div id="action-menu-content" class="action-menu-content hidden">
             <section class="action-menu-section">
                 <button id="install-app-btn" type="button" hidden>Install App</button>
                 <button id="update-app-btn" type="button" hidden>Update Tersedia</button>
-                <h3 class="action-menu-heading">Statistik</h3>
-                <div id="metrics-container">
-                    <div id="unique-ips-count"></div>
-                    <div id="active-pins-count"></div>
-                    <div id="live-sellers-count"></div>
-                </div>
             </section>
             <section class="action-menu-section">
-                <h3 class="action-menu-heading">Tampilan Peta</h3>
-                <div class="action-menu-row map-type-row">
-                    <button id="map-view-btn" class="map-type-btn active">Map</button>
-                    <button id="satellite-view-btn" class="map-type-btn">Satellite</button>
-                </div>
-            </section>
-            <section class="action-menu-section">
-                <h3 class="action-menu-heading">Mode Perjalanan</h3>
+                <h3 class="action-menu-heading">Information</h3>
                 <div class="action-menu-row">
-                    <div id="fuel-toggle-wrapper" class="fuel-toggle-wrapper">
-                        <div id="fuel-toggle-container" data-mode="fuel" data-disabled="true">
-                            <span class="toggle-label toggle-label-fuel">FUEL</span>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="fuel-toggle" aria-label="Toggle SPBU/SPBG or SPKLU">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="toggle-label toggle-label-ev">EV</span>
-                        </div>
-                    </div>
-                    <button id="special-category-on-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Show fuel and EV stations">🚗</button>
-                    <button id="special-category-off-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Hide fuel and EV stations">🚶🏻</button>
-                    <span class="action-menu-row-note">🚗 untuk menampilkan SPBU / EV terdekat atau 🚶🏻 untuk menyembunyikan</span>
+                    <button id="info-btn" type="button" class="menu-pill-btn action-menu-info-btn">Info & Guide</button>
                 </div>
-            </section>
-            <section id="menu-gerobak-section" class="action-menu-section">
-                <h3 class="action-menu-heading">Gerobak Online</h3>
-                <div id="live-seller-panel" class="live-seller-panel hidden">
-                    <div class="live-seller-panel-header">
-                        <div class="live-seller-panel-title">
-                            <span id="live-seller-status-text" class="live-seller-status offline">Offline</span>
-                        </div>
-                        <div class="live-seller-panel-actions">
-                            <button id="live-seller-login-btn" type="button" class="live-seller-secondary-btn">Login</button>
-                            <button id="live-seller-logout-btn" type="button" class="live-seller-secondary-btn" hidden>Logout</button>
-                        </div>
-                    </div>
-                    <div id="live-seller-profile" class="live-seller-profile hidden">
-                        <img id="live-seller-photo" class="live-seller-photo hidden" alt="Foto lapak penjual">
-                        <div class="live-seller-profile-text">
-                            <div id="live-seller-name" class="live-seller-name"></div>
-                            <div id="live-seller-brand" class="live-seller-brand hidden"></div>
-                            <div id="live-seller-community-badge" class="live-seller-community-badge hidden">Verified by Warga</div>
-                            <a id="live-seller-phone" class="live-seller-phone hidden" href="#"></a>
-                            <div id="live-seller-phone-note" class="live-seller-phone-note hidden"></div>
-                        </div>
-                    </div>
-                    <button id="live-seller-toggle-btn" type="button" class="live-seller-primary-btn" disabled>Start Live</button>
-                    <div class="live-seller-links live-seller-links-authenticated">
-                        <button id="live-seller-edit-profile-btn" type="button" class="menu-pill-btn live-seller-menu-link">Edit Profil Gerobak</button>
-                        <a href="verify.html" class="menu-pill-btn live-seller-menu-link">Cara Dapatkan Insentif</a>
-                    </div>
-                </div>
-                <div id="live-seller-auth-links" class="live-seller-links live-seller-auth-links">
-                    <a id="live-seller-auth-primary" href="login.html" class="menu-pill-btn live-seller-menu-link">Masuk</a>
-                    <a id="live-seller-auth-secondary" href="register.html" class="menu-pill-btn live-seller-menu-link">Daftar</a>
-                </div>
-                <p id="liveSeller-prompt" class="liveSeller-prompt">Daftar Gerobak Online dan dapatkan insentif hingga 1 Juta!</p>
             </section>
             <section id="menu-resident-section" class="action-menu-section">
-                <h3 class="action-menu-heading">Warga Ayanaon</h3>
+                <h3 class="action-menu-heading">Profile Warga</h3>
                 <div id="resident-authenticated" class="live-seller-panel resident-panel hidden">
                     <div class="live-seller-panel-header">
                         <div class="live-seller-panel-title">
@@ -136,15 +132,14 @@
                             <div class="resident-status-input-group">
                                 <label for="resident-status-input" class="resident-status-label">Status</label>
                                 <input type="text" id="resident-status-input" maxlength="30" placeholder="Tulis status singkat">
-                                <button id="resident-status-save-btn" type="button" class="resident-status-save-btn">Simpan</button>
+                                <button id="resident-status-save-btn" type="button" class="resident-status-save-btn">Save</button>
                             </div>
                             <button id="resident-share-toggle-btn" type="button" class="live-seller-primary-btn resident-share-btn">Start Live</button>
                             <div id="resident-share-status" class="resident-share-status">Stop Live.</div>
                             <div id="resident-status-message" class="resident-status-message" role="status" aria-live="polite"></div>
                         </div>
                         <div class="resident-panel-links">
-                            <button id="resident-edit-toggle" type="button" class="menu-pill-btn live-seller-menu-link resident-edit-toggle">Edit Profil</button>
-                            <button id="admin-page-btn" type="button" class="menu-pill-btn live-seller-menu-link resident-edit-toggle hidden">Admin Page</button>
+                            <button id="resident-edit-toggle" type="button" class="menu-pill-btn live-seller-menu-link resident-edit-toggle">Edit Profile</button>
                         </div>
                     </div>
                     <form id="resident-edit-form" class="resident-edit-form hidden" novalidate>
@@ -183,39 +178,108 @@
                 </div>
                 <p id="resident-prompt" class="resident-prompt">Bagikan rekomendasi ke penjual favoritmu untuk membantu Gerobak Online.</p>
             </section>
-        </div>
+            <section id="menu-gerobak-section" class="action-menu-section">
+                <h3 class="action-menu-heading">Online Carts</h3>
+                <div id="live-seller-panel" class="live-seller-panel hidden">
+                    <div class="live-seller-panel-header">
+                        <div class="live-seller-panel-title">
+                            <span id="live-seller-status-text" class="live-seller-status offline">Offline</span>
+                        </div>
+                        <div class="live-seller-panel-actions">
+                            <button id="live-seller-login-btn" type="button" class="live-seller-secondary-btn">Login</button>
+                            <button id="live-seller-logout-btn" type="button" class="live-seller-secondary-btn" hidden>Logout</button>
+                        </div>
+                    </div>
+                    <div id="live-seller-profile" class="live-seller-profile hidden">
+                        <img id="live-seller-photo" class="live-seller-photo hidden" alt="Foto lapak penjual">
+                        <div class="live-seller-profile-text">
+                            <div id="live-seller-name" class="live-seller-name"></div>
+                            <div id="live-seller-brand" class="live-seller-brand hidden"></div>
+                            <div id="live-seller-community-badge" class="live-seller-community-badge hidden">Verified by Warga</div>
+                            <a id="live-seller-phone" class="live-seller-phone hidden" href="#"></a>
+                            <div id="live-seller-phone-note" class="live-seller-phone-note hidden"></div>
+                        </div>
+                    </div>
+                    <button id="live-seller-toggle-btn" type="button" class="live-seller-primary-btn" disabled>Start Live</button>
+                    <div class="live-seller-links live-seller-links-authenticated">
+                        <button id="live-seller-edit-profile-btn" type="button" class="menu-pill-btn live-seller-menu-link">Edit Profil Gerobak</button>
+                        <a href="verify.html" class="menu-pill-btn live-seller-menu-link">Cara Dapatkan Insentif</a>
+                    </div>
+                </div>
+                <div id="live-seller-auth-links" class="live-seller-links live-seller-auth-links">
+                    <a id="live-seller-auth-primary" href="login.html" class="menu-pill-btn live-seller-menu-link">Masuk</a>
+                    <a id="live-seller-auth-secondary" href="register.html" class="menu-pill-btn live-seller-menu-link">Daftar</a>
+                </div>
+                <p id="liveSeller-prompt" class="liveSeller-prompt">Daftar Gerobak Online dan dapatkan insentif hingga 1 Juta!</p>
+            </section>
+            <section id="action-menu-resident-actions" class="action-menu-section hidden">
+                <h3 class="action-menu-heading">Contributor</h3>
+                <div class="action-menu-row">
+                    <button id="add-pin-btn" type="button" class="action-menu-add-pin" hidden>Add Pin</button>
+                </div>
+            </section>
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Statistics</h3>
+                <div id="metrics-container">
+                    <div id="unique-ips-count"></div>
+                    <div id="active-pins-count"></div>
+                    <div id="live-sellers-count"></div>
+                </div>
+            </section>
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Travel Mode</h3>
+                <div class="action-menu-row">
+                    <div id="fuel-toggle-wrapper" class="fuel-toggle-wrapper">
+                        <div id="fuel-toggle-container" data-mode="fuel" data-disabled="true">
+                            <span class="toggle-label toggle-label-fuel">FUEL</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="fuel-toggle" aria-label="Toggle SPBU/SPBG or SPKLU">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label toggle-label-ev">EV</span>
+                        </div>
+                    </div>
+                    <button id="special-category-on-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Show fuel and EV stations">🚗</button>
+                    <button id="special-category-off-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Hide fuel and EV stations">🚶🏻</button>
+                    <span class="action-menu-row-note">🚗 untuk menampilkan SPBU / EV terdekat atau 🚶🏻 untuk menyembunyikan</span>
+                </div>
+            </section>
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Theme</h3>
+                <div class="theme-toggle" role="group" aria-label="Pilih tema">
+                    <button type="button" id="theme-toggle-light" class="theme-toggle-btn" aria-pressed="false">Light</button>
+                    <button type="button" id="theme-toggle-dark" class="theme-toggle-btn" aria-pressed="false">Dark</button>
+                </div>
+            </section>
+            <section class="action-menu-section">
+                <h3 class="action-menu-heading">Map View</h3>
+                <div class="action-menu-row map-type-row">
+                    <button id="map-view-btn" class="map-type-btn active">Map</button>
+                    <button id="satellite-view-btn" class="map-type-btn">Satellite</button>
+                </div>
+            </section>
+            </div>
     </div>
-    <button id="add-pin-btn" title="Add Pin" aria-label="Add Pin">+</button>
-    <button id="info-btn" title="Info" aria-label="Info">ⓘ</button>
-    <button id="filter-btn" title="Filter" aria-label="Filter">🔍︎</button>
-    <button id="reset-filter-btn" title="Reset Filter" aria-label="Reset Filter">♻</button>
+    </nav>
+
     <button id="locate-me-btn" title="Locate Me" aria-label="Locate Me">➤</button>
-    <div id="filter-dropdown" class="hidden">
-        <div id="filter-container">
-            <div class="filter-search">
-                <input type="text" id="filter-search-input" placeholder="Bakso, Marathon 5K, Konser Noah, dll." aria-label="Cari pin">
-            </div>
-            <div class="filter-date-range" aria-label="Filter tanggal">
-                <input type="text" id="filter-date-range-input" placeholder="Pilih tanggal atau rentang" aria-label="Filter tanggal" readonly>
-                <button id="filter-search-btn" type="button">Cari</button>
-            </div>
-            <label><input type="checkbox" id="select-all-categories" checked> Select All</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🏡 Akomodasi Pilihan" checked> 🏡 Akomodasi Pilihan</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🐾 Barang & Hewan Hilang" checked> 🐾 Barang & Hewan Hilang</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🎭 Budaya & Hiburan" checked> 🎭 Budaya & Hiburan</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🎓 Edukasi" checked> 🎓 Edukasi</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🤝 Jual-Beli Barang" checked> 🤝 Jual-Beli Barang</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🎉 Konser Musik & Acara" checked> 🎉 Konser Musik & Acara</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🏃🏻 Olahraga & Aktivitas Hobi" checked> 🏃🏻 Olahraga & Aktivitas Hobi</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🛍️ Pasar Lokal & Pameran" checked> 🛍️ Pasar Lokal & Pameran</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🍔 Promo & Diskon Makanan / Minuman" checked> 🍔 Promo & Diskon Makanan/Minuman</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="💸 Promo & Diskon Lainnya" checked> 💸 Promo & Diskon Lainnya</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="🏆 Restoran Legendaris" checked> 🏆 Restoran Legendaris</label><br>            
-            <label><input type="checkbox" class="category-checkbox" value="🧑‍🤝‍🧑 Sosial & Kopdar" checked> 🧑‍🤝‍🧑 Sosial & Kopdar</label><br>            
-            <label><input type="checkbox" class="category-checkbox" value="⛽ SPBU/SPBG" checked> ⛽ SPBU/SPBG</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="⚡ SPKLU" checked> ⚡ SPKLU</label><br>
-            <label><input type="checkbox" class="category-checkbox" value="💡 Lain-lain" checked> 💡 Lain-lain</label><br>
-        </div>
+    <div id="category-source" hidden>
+        <label><input type="checkbox" id="select-all-categories" checked> Select All</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🏡 Akomodasi Pilihan" checked> 🏡 Akomodasi Pilihan</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🐾 Barang & Hewan Hilang" checked> 🐾 Barang & Hewan Hilang</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🎭 Budaya & Hiburan" checked> 🎭 Budaya & Hiburan</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🎓 Edukasi" checked> 🎓 Edukasi</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🤝 Jual-Beli Barang" checked> 🤝 Jual-Beli Barang</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🎉 Konser Musik & Acara" checked> 🎉 Konser Musik & Acara</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🏃🏻 Olahraga & Aktivitas Hobi" checked> 🏃🏻 Olahraga & Aktivitas Hobi</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🛍️ Pasar Lokal & Pameran" checked> 🛍️ Pasar Lokal & Pameran</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🍔 Promo & Diskon Makanan / Minuman" checked> 🍔 Promo & Diskon Makanan/Minuman</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="💸 Promo & Diskon Lainnya" checked> 💸 Promo & Diskon Lainnya</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🏆 Restoran Legendaris" checked> 🏆 Restoran Legendaris</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="🧑‍🤝‍🧑 Sosial & Kopdar" checked> 🧑‍🤝‍🧑 Sosial & Kopdar</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="⛽ SPBU/SPBG" checked> ⛽ SPBU/SPBG</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="⚡ SPKLU" checked> ⚡ SPKLU</label><br>
+        <label><input type="checkbox" class="category-checkbox" value="💡 Lain-lain" checked> 💡 Lain-lain</label><br>
     </div>
     <div id="pin-form" class="hidden">
         <h2>Aya Naon?</h2>
@@ -223,25 +287,14 @@
             <input type="text" id="title" placeholder="Judul" required>
             <textarea id="description" placeholder="Deskripsi" required></textarea>
             <select id="category" required>
-                <option value="" disabled selected>Pilih Kategori</option>
-                <option value="🎭 Budaya & Hiburan">🎭 Budaya & Hiburan</option>
-                <option value="🐾 Barang & Hewan Hilang">🐾 Barang & Hewan Hilang</option>
-                <option value="🎓 Edukasi">🎓 Edukasi</option>
-                <option value="🤝 Jual-Beli Barang">🤝 Jual-Beli Barang</option>
-                <option value="🎉 Konser Musik & Acara">🎉 Konser Musik & Acara</option>
-                <option value="🏃🏻 Olahraga & Aktivitas Hobi">🏃🏻 Olahraga & Aktivitas Hobi</option>
-                <option value="🛍️ Pasar Lokal & Pameran">🛍️ Pasar Lokal & Pameran</option>
-                <option value="🍔 Promo & Diskon Makanan / Minuman">🍔 Promo & Diskon Makanan / Minuman</option>
-                <option value="💸 Promo & Diskon Lainnya">💸 Promo & Diskon Lainnya</option>                
-                <option value="🧑‍🤝‍🧑 Sosial & Kopdar">🧑‍🤝‍🧑 Sosial & Kopdar</option>                
-                <option value="💡 Lain-lain">💡 Lain-lain</option>
+                <option value="" disabled selected>Select Category</option>
             </select>
             <select id="lifetime-select" required>
-                <option value="" disabled selected>Pilih Waktu</option>
-                <option value="today">Hari Ini</option>
-                <option value="date">Pilih Tanggal</option>
+                <option value="" disabled selected>Select Time</option>
+                <option value="today">Today</option>
+                <option value="date">Select Date</option>
             </select>
-            <input type="date" id="lifetime-date-picker" placeholder="Pilih Tanggal">
+            <input type="date" id="lifetime-date-picker" placeholder="Select Date">
             <div class="pin-location-field">
                 <div class="pin-location-header">
                     <button type="button" id="pin-location-btn" class="pin-location-btn">Tentukan Titik Lokasi</button>
@@ -329,15 +382,17 @@
             <h2>Selamat Datang di <b>AyaNaon?</b></h2>
             <p>Ini adalah peta berbasis komunitas untuk berbagi informasi, promosi, hingga laporan untuk membantu sesama warga di sekitar kita.</p>
             <p><strong>Navigasi:</strong></p>
-                <p>✚ : Menambah Pin</p>
-                <p>🔍︎ : Filter</p>
-                <p>♻ : Reset Filter</p>
-                <p>➤ : Lokasi Saat Ini</p>
-                <p>ⓘ : Informasi</p>
+                <p>Home : Halaman Utama</p>
+                <p>Search : Pencarian</p>
+                <p>List : Daftar Pin Aktif</p>
+                <p>Saved : Daftar Pin Tersimpan</p>
+                <p>Menu : Menu Informasi dan Pengaturan</p>
                 <p>_</p>
 
             <p><strong>Mulai Berbagi:</strong></p>
-                Klik tanda <b>➕</b> ➜ Zoom atau cari lokasi yang ingin kamu pin ➜ Tekan hingga muncul pin merah 📍 ➜  Lengkapi informasi ➜ Bagikan
+                Klik Add Pin ➜ Isi Judul ➜ Lengkapi Deskripsi ➜  Pilih Kategori 
+                ➜ Pilih Tanggal ➜ Tentukan Titik Lokasi ➜ Tambahkan Link (Jika Ada) 
+                ➜ Berikan Foto (Jika Ada) ➜ Bagikan
             <p><strong>Aturan Umum:</strong></p>
             <ul>
                 <li>Layanan ini bersifat terbuka dan gratis tanpa biaya.</li>
@@ -354,7 +409,7 @@
             <p> </p>
             <p><b>Terima kasih dan selamat berselancar, Warga 🏄‍♀️🌊</b></p>
             <p><i>Silahkan email <a href="mailto:contact@petalytix.id">contact@petalytix.id</a> jika ingin kontak dengan developer</i></p>
-            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.3.2</div>
+            <div style="font-size: 10px;;">Powered by Petalytix │ Ver. 2.4.0</div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr" defer></script>

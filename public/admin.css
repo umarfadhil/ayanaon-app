@@ -21,6 +21,7 @@ body {
     background: radial-gradient(120% 120% at 12% 10%, #1f2a52, var(--bg) 58%);
     color: var(--text);
     padding: 18px;
+    display: block;
 }
 
 a {
@@ -29,7 +30,8 @@ a {
 }
 
 .admin-page {
-    max-width: 1220px;
+    max-width: 100%;
+    width: 100%;
     margin: 0 0;
     display: flex;
     flex-direction: column;
@@ -46,6 +48,9 @@ a {
     border-radius: 18px;
     box-shadow: var(--shadow);
     gap: 12px;
+    position: sticky;
+    top: 18px;
+    z-index: 20;
 }
 
 .admin-title-block h1 {
@@ -81,6 +86,9 @@ a {
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
     padding: 10px 14px;
     border-radius: 12px;
     font-weight: 700;
@@ -252,6 +260,59 @@ a {
     color: var(--muted);
     font-size: 13px;
     font-weight: 700;
+}
+
+.admin-features {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.feature-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.feature-card {
+    gap: 12px;
+}
+
+.feature-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.feature-title {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+
+.feature-meta {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.feature-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.feature-hint {
+    color: var(--muted);
+    font-size: 13px;
 }
 
 .admin-metrics {
@@ -492,11 +553,116 @@ a {
     background: rgba(239, 68, 68, 0.16);
 }
 
+.admin-users {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.users-table {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.users-table__body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.users-table__row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--card);
+}
+
+.users-table__header {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.users-table__cell--actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-self: start;
+}
+
+.users-role-select {
+    min-width: 140px;
+}
+
+.users-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.users-badge--admin {
+    color: #fcd34d;
+    border-color: rgba(252, 211, 77, 0.45);
+    background: rgba(252, 211, 77, 0.12);
+}
+
+.users-save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.users-delete-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.users-empty {
+    padding: 16px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+    color: var(--muted);
+}
+
 .admin-grid {
     display: grid;
     grid-template-columns: 1.05fr 1.6fr;
     gap: 14px;
     margin-top: 10px;
+}
+
+@media (max-width: 720px) {
+    .users-table__header {
+        display: none;
+    }
+    .users-table__row {
+        grid-template-columns: 1fr;
+        align-items: start;
+    }
+    .users-table__cell--actions {
+        justify-self: stretch;
+    }
 }
 
 .admin-tabs {
@@ -964,6 +1130,16 @@ textarea {
         height: 220px;
     }
 }
+
+@media (max-width: 640px) {
+    .feature-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .feature-actions {
+        align-items: flex-start;
+    }
+}
 .form-actions {
     display: flex;
     justify-content: flex-end;
@@ -983,6 +1159,7 @@ textarea {
     }
     .admin-header {
         flex-direction: column;
+        top: 12px;
     }
     .admin-actions {
         width: 100%;

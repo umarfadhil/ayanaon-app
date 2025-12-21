@@ -23,7 +23,9 @@
         </header>
         <div class="admin-tabs" role="tablist" aria-label="Admin Navigation">
             <button class="admin-tab admin-tab--active" data-tab="pins" role="tab" aria-selected="true">Manage Pins</button>
-            <button class="admin-tab" data-tab="metrics" role="tab" aria-selected="false">Business Metrics</button>
+            <button class="admin-tab" data-tab="users" role="tab" aria-selected="false" data-admin-only="true">Manage Users</button>
+            <button class="admin-tab" data-tab="metrics" role="tab" aria-selected="false" data-admin-only="true">Business Metrics</button>
+            <button class="admin-tab" data-tab="features" role="tab" aria-selected="false" data-admin-only="true">Features</button>
         </div>
 
         <section id="admin-pin-content" class="admin-tab-content">
@@ -40,7 +42,7 @@
                 <div class="summary-value" id="admin-name">Admin</div>
                 <div class="summary-meta" id="admin-username"></div>
             </div>
-            <div class="summary-card maintenance-card">
+            <div class="summary-card maintenance-card" data-admin-only="true">
                 <div class="maintenance-row">
                     <div>
                         <div class="summary-label">Website Maintenance</div>
@@ -244,7 +246,32 @@
         </section>
         </section>
 
-        <div id="admin-metrics-pane" class="admin-tab-content hidden metrics-two-col">
+        <div id="admin-users-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-users">
+                <div class="panel-header">
+                    <div>
+                        <h2>User Management</h2>
+                        <p class="panel-sub">Kelola status warga terdaftar.</p>
+                    </div>
+                    <div class="panel-actions">
+                        <button type="button" id="users-refresh-btn" class="ghost-btn chip-btn">Refresh</button>
+                    </div>
+                </div>
+                <div id="admin-users-message" class="admin-message" role="status" aria-live="polite"></div>
+                <div class="users-table" role="table" aria-label="Daftar warga terdaftar">
+                    <div class="users-table__row users-table__header" role="row">
+                        <div role="columnheader">Display Name</div>
+                        <div role="columnheader">Username</div>
+                        <div role="columnheader">Last Login</div>
+                        <div role="columnheader">Status</div>
+                        <div role="columnheader">Action</div>
+                    </div>
+                    <div id="users-table-body" class="users-table__body" role="rowgroup"></div>
+                </div>
+            </section>
+        </div>
+
+        <div id="admin-metrics-pane" class="admin-tab-content hidden metrics-two-col" data-admin-only="true">
             <section id="admin-metrics-content" class="admin-metrics">
                 <div class="panel-header">
                     <div>
@@ -354,6 +381,38 @@
                     <iframe id="dashboard-frame" title="Business Metrics Dashboard" loading="lazy"></iframe>
                 </div>
                 <div id="dashboard-error" class="metrics-note"></div>
+            </section>
+        </div>
+
+        <div id="admin-features-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-features">
+                <div class="panel-header">
+                    <div>
+                        <h2>Feature Management</h2>
+                        <p class="panel-sub">Enable or disable modules shown on the main page.</p>
+                    </div>
+                </div>
+                <div id="admin-feature-message" class="admin-message" role="status" aria-live="polite"></div>
+                <div class="feature-grid">
+                    <div class="summary-card feature-card">
+                        <div class="feature-row">
+                            <div>
+                                <div class="feature-title">Gerobak Online</div>
+                                <div id="feature-gerobak-description" class="feature-meta">
+                                    Show seller login, live map markers, and statistics.
+                                </div>
+                            </div>
+                            <label class="maintenance-switch" aria-label="Toggle Gerobak Online feature">
+                                <input type="checkbox" id="feature-gerobak-toggle" aria-describedby="feature-gerobak-description">
+                                <span class="maintenance-slider"></span>
+                            </label>
+                        </div>
+                        <div class="feature-actions">
+                            <button type="button" id="feature-save-btn" class="chip-btn">Save</button>
+                            <span class="feature-hint">Changes are visible on the main page within a few minutes.</span>
+                        </div>
+                    </div>
+                </div>
             </section>
         </div>
     </main>

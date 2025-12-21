@@ -1,12 +1,18 @@
 const DEFAULT_MAP_CENTER = { lat: -6.2088, lng: 106.8456 };
 
 let map;
+let suppressNextMapClick = false;
+let suppressMapClickTimer = null;
 let temporaryMarker;
 let userMarker;
 let userCity;
+let mapViewButton;
+let satelliteViewButton;
 let markers = [];
+const pinMarkersById = new Map();
 let isFetchingPins = false;
 let pendingPinsRefresh = false;
+let applyFiltersCallback = null;
 let lastKnownPinsCount = null;
 let refreshPins = () => Promise.resolve();
 let lastKnownVisitorCount = null;
@@ -22,6 +28,9 @@ let selectedEndDate = '';
 let navigationModal;
 let navigationOptionsContainer;
 let navigationCancelBtn;
+let calendarModal;
+let calendarOptionsContainer;
+let calendarCancelBtn;
 let clusterManager;
 let userLocation = null;
 let fuelToggle;
@@ -37,6 +46,35 @@ let pendingAdminEditPinId = null;
 let trackedPinViews = new Set();
 let hasTrackedPageview = false;
 let analyticsLocationSent = false;
+const THEME_STORAGE_KEY = 'ayanaon_theme';
+const THEME_LIGHT = 'light';
+const THEME_DARK = 'dark';
+const DEFAULT_MAP_ID = 'e85cc0ea26a0de30a02f13b1';
+const DARK_MAP_ID = 'e85cc0ea26a0de30a02f13b1';
+let themeToggleLightButton;
+let themeToggleDarkButton;
+let activeMapId = DEFAULT_MAP_ID;
+let pendingMapThemeReload = false;
+const DARK_MAP_STYLES = [
+    { elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#0b1220' }] },
+    { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#1f2937' }] },
+    { featureType: 'administrative.country', elementType: 'labels.text.fill', stylers: [{ color: '#cbd5e1' }] },
+    { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#111827' }] },
+    { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#0b1220' }] },
+    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+    { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1f2937' }] },
+    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0b1220' }] },
+    { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1e40af' }] },
+    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1e293b' }] },
+    { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#0b1220' }] },
+    { featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{ color: '#93c5fd' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#38bdf8' }] }
+];
 
 let specialCategoryOnButton;
 let specialCategoryOffButton;
@@ -47,6 +85,7 @@ let hasRefreshedForServiceWorker = false;
 
 let pinFormContainer;
 let addPinFormElement;
+let addPinButton;
 let pinTitleInput;
 let pinDescriptionInput;
 let pinCategorySelectElement;
@@ -66,6 +105,9 @@ let pinLocationConfirmWindow = null;
 let maintenanceStatus = { enabled: false, message: '' };
 let maintenanceNoticeElement = null;
 let maintenanceNoticeMessageElement = null;
+let featureFlags = { gerobakOnline: true };
+let isGerobakOnlineEnabled = true;
+let isFetchingFeatureFlags = false;
 
 function showPinLocationSearchBar(show = false) {
     if (!pinLocationSearchBarElement) {
@@ -176,6 +218,159 @@ function renderMaintenanceNotice(status = maintenanceStatus) {
     }
 }
 
+function normalizeFeatureFlags(flags = {}) {
+    const raw = flags?.gerobakOnline;
+    const disabled = raw === false || raw === 'false' || raw === 0 || raw === '0';
+    return {
+        gerobakOnline: !disabled
+    };
+}
+
+function applyFeatureFlags(flags = featureFlags) {
+    const normalized = normalizeFeatureFlags(flags);
+    const wasGerobakEnabled = isGerobakOnlineEnabled;
+    const nextGerobakEnabled = normalized.gerobakOnline;
+    featureFlags = normalized;
+    isGerobakOnlineEnabled = nextGerobakEnabled;
+
+    if (liveSellersCountElement) {
+        liveSellersCountElement.hidden = !nextGerobakEnabled;
+    }
+
+    if (wasGerobakEnabled && !nextGerobakEnabled) {
+        stopLiveSellerRefreshLoop();
+        updateLiveSellerMarkers(null);
+        clearLiveSellerHeartbeat();
+        closeLiveSellerEditModal();
+    } else if (!wasGerobakEnabled && nextGerobakEnabled && map) {
+        startLiveSellerRefreshLoop();
+    }
+
+    updateLiveSellerUI(sellerSessionState);
+    syncMenuVisibility();
+}
+
+function getStoredTheme() {
+    try {
+        const value = localStorage.getItem(THEME_STORAGE_KEY);
+        if (value === THEME_LIGHT || value === THEME_DARK) {
+            return value;
+        }
+    } catch (error) {
+        console.warn('Gagal membaca tema', error);
+    }
+    return null;
+}
+
+function getSystemTheme() {
+    if (typeof window.matchMedia !== 'function') {
+        return THEME_DARK;
+    }
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? THEME_LIGHT : THEME_DARK;
+}
+
+function applyTheme(theme, { persist = true } = {}) {
+    const normalized = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+    if (document.body) {
+        document.body.setAttribute('data-theme', normalized);
+    }
+    if (document.documentElement) {
+        document.documentElement.setAttribute('data-theme', normalized);
+    }
+    if (persist) {
+        try {
+            localStorage.setItem(THEME_STORAGE_KEY, normalized);
+        } catch (error) {
+            console.warn('Gagal menyimpan tema', error);
+        }
+    }
+    updateThemeToggleUI(normalized);
+    applyMapTheme(normalized);
+    return normalized;
+}
+
+function updateThemeToggleUI(theme) {
+    const current = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+    const isLight = current === THEME_LIGHT;
+    if (themeToggleLightButton) {
+        themeToggleLightButton.classList.toggle('is-active', isLight);
+        themeToggleLightButton.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+    }
+    if (themeToggleDarkButton) {
+        themeToggleDarkButton.classList.toggle('is-active', !isLight);
+        themeToggleDarkButton.setAttribute('aria-pressed', !isLight ? 'true' : 'false');
+    }
+}
+
+function getActiveTheme() {
+    const theme = document.body?.getAttribute('data-theme');
+    return theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+}
+
+function getDesiredMapId(theme) {
+    const normalized = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+    if (normalized === THEME_DARK && DARK_MAP_ID) {
+        return DARK_MAP_ID;
+    }
+    return DEFAULT_MAP_ID;
+}
+
+function applyMapTheme(theme = getActiveTheme()) {
+    if (!map || typeof map.setOptions !== 'function') {
+        return;
+    }
+    const desiredMapId = getDesiredMapId(theme);
+    if (desiredMapId !== activeMapId) {
+        requestMapThemeReload();
+        return;
+    }
+    const useStyles = theme !== THEME_LIGHT && !DARK_MAP_ID;
+    map.setOptions({ styles: useStyles ? DARK_MAP_STYLES : null });
+}
+
+function requestMapThemeReload() {
+    if (pendingMapThemeReload) {
+        return;
+    }
+    pendingMapThemeReload = true;
+    setTimeout(() => {
+        window.location.reload();
+    }, 80);
+}
+
+function initializeThemeControls() {
+    themeToggleLightButton = document.getElementById('theme-toggle-light');
+    themeToggleDarkButton = document.getElementById('theme-toggle-dark');
+    if (themeToggleLightButton) {
+        themeToggleLightButton.addEventListener('click', () => {
+            applyTheme(THEME_LIGHT);
+        });
+    }
+    if (themeToggleDarkButton) {
+        themeToggleDarkButton.addEventListener('click', () => {
+            applyTheme(THEME_DARK);
+        });
+    }
+
+    const storedTheme = getStoredTheme();
+    const initialTheme = storedTheme || getSystemTheme();
+    applyTheme(initialTheme, { persist: Boolean(storedTheme) });
+
+    if (!storedTheme && typeof window.matchMedia === 'function') {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
+        const handler = (event) => {
+            if (!getStoredTheme()) {
+                applyTheme(event.matches ? THEME_LIGHT : THEME_DARK, { persist: false });
+            }
+        };
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', handler);
+        } else if (typeof mediaQuery.addListener === 'function') {
+            mediaQuery.addListener(handler);
+        }
+    }
+}
+
 async function refreshMaintenanceStatus() {
     try {
         const response = await fetch('/api/maintenance', { cache: 'no-store' });
@@ -187,6 +382,25 @@ async function refreshMaintenanceStatus() {
         renderMaintenanceNotice();
     } catch (error) {
         console.warn('Gagal memuat status maintenance', error);
+    }
+}
+
+async function refreshFeatureFlags() {
+    if (isFetchingFeatureFlags) {
+        return;
+    }
+    isFetchingFeatureFlags = true;
+    try {
+        const response = await fetch('/api/features', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload?.message || 'Gagal memuat status fitur.');
+        }
+        applyFeatureFlags(payload);
+    } catch (error) {
+        console.warn('Gagal memuat status fitur', error);
+    } finally {
+        isFetchingFeatureFlags = false;
     }
 }
 
@@ -270,7 +484,6 @@ let pinExistingImagesList;
 let pinExistingImages = [];
 let pinAddedImages = [];
 let pinImageSequence = 0;
-let filterDropdownElement;
 
 let liveSellerMarkers = [];
 let liveSellerRefreshTimer = null;
@@ -314,6 +527,7 @@ let residentLiveIndicator;
 let residentEditToggleButton;
 let residentEditForm;
 let adminPageButton;
+let residentActionSection;
 let residentEditDisplayNameInput;
 let residentEditPhotoInput;
 let residentEditPhotoPreview;
@@ -352,14 +566,48 @@ let liveSellerEditSubmitting = false;
 let lastKnownLiveSellerCount = null;
 let actionMenu;
 let actionMenuToggleButton;
+let actionMenuTogglePhoto;
+let actionMenuToggleFallback;
 let actionMenuContent;
 let pinListPanelElement;
-let pinListToggleButton;
 let pinListContainerElement;
 let pinListTitleElement;
 let pinListSummaryElement;
 let pinListItemsContainer;
 let pinListEmptyElement;
+let pinListSearchFormElement;
+let pinListSearchInputElement;
+let pinListCategoryToggleButton;
+let pinListCategoryPopoverElement;
+let pinListCategoryListElement;
+let pinListCategorySelectAllButton;
+let pinListCategoryClearAllButton;
+let pinListCategorySummaryElement;
+let pinListDateToggleButton;
+let pinListDatePopoverElement;
+let pinListDateRangeInputElement;
+let pinListDateResetButton;
+let pinListDateSummaryElement;
+let pinListDatePicker = null;
+let activePinListPopover = null;
+const quickCategoryCheckboxMap = new Map();
+let suppressQuickCategoryInputUpdates = false;
+let pinListAdvancedRevealed = false;
+const PIN_LIST_VIEW_MODE = {
+    HOME: 'home',
+    SEARCH: 'search',
+    LIST: 'list',
+    SAVED: 'saved'
+};
+let pinListViewMode = PIN_LIST_VIEW_MODE.HOME;
+let pinListSearchVisible = false;
+let bottomNavHomeButton;
+let bottomNavSearchButton;
+let bottomNavListButton;
+let bottomNavSavedButton;
+let savedPinIds = new Set();
+let savedPinsSyncInFlight = false;
+let savedPinsSyncPending = false;
 
 let liveSellerPhotoOverlayElement = null;
 let liveSellerPhotoOverlayImagesContainer = null;
@@ -698,6 +946,8 @@ function closePinImageOverlay() {
 document.addEventListener('DOMContentLoaded', () => {
     actionMenu = document.getElementById('action-menu');
     actionMenuToggleButton = document.getElementById('action-menu-toggle');
+    actionMenuTogglePhoto = document.getElementById('action-menu-toggle-photo');
+    actionMenuToggleFallback = document.getElementById('action-menu-toggle-fallback');
     actionMenuContent = document.getElementById('action-menu-content');
 
     if (actionMenuToggleButton) {
@@ -708,6 +958,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    updateActionMenuToggleAvatar();
     ensurePinImageOverlay();
 
     document.addEventListener('click', (event) => {
@@ -861,6 +1112,7 @@ function clearMarkers() {
     }
     if (!Array.isArray(markers) || !markers.length) {
         markers = [];
+        pinMarkersById.clear();
         return;
     }
     markers.forEach(marker => {
@@ -876,6 +1128,7 @@ function clearMarkers() {
         }
     });
     markers = [];
+    pinMarkersById.clear();
 }
 
 function refreshMarkerCluster(visibleMarkers) {
@@ -980,9 +1233,7 @@ function handleLocationEnabled() {
 function handleLocationDisabled() {
     userLocation = null;
     updateFuelToggleUI();
-    if (typeof window.applyFilters === 'function') {
-        window.applyFilters();
-    }
+    applyFilters();
     refreshResidentShareMarkers({ force: true });
 }
 
@@ -992,9 +1243,7 @@ function setSpecialCategoryVisibility(enabled) {
     }
     showSpecialCategories = enabled;
     updateFuelToggleUI();
-    if (typeof window.applyFilters === 'function') {
-        window.applyFilters();
-    }
+    applyFilters();
 }
 
 function animateMetricChange(element) {
@@ -1010,9 +1259,13 @@ function animateMetricChange(element) {
 function updateLiveSellersCountDisplay(count, { enableAnimation = false } = {}) {
     const previousCount = lastKnownLiveSellerCount;
     lastKnownLiveSellerCount = count;
-    if (!liveSellersCountElement) {
+    if (!liveSellersCountElement || !isGerobakOnlineEnabled) {
+        if (liveSellersCountElement) {
+            liveSellersCountElement.hidden = true;
+        }
         return;
     }
+    liveSellersCountElement.hidden = false;
     liveSellersCountElement.textContent = `Gerobak Online : ${count} Live`;
     if (enableAnimation && previousCount !== null && count !== previousCount) {
         animateMetricChange(liveSellersCountElement);
@@ -1063,6 +1316,38 @@ function handleSellerSessionChange(state) {
 }
 
 function updateLiveSellerUI(state) {
+    if (!isGerobakOnlineEnabled) {
+        if (liveSellerPanel) {
+            liveSellerPanel.classList.add('hidden');
+        }
+        if (liveSellerLoginButton) {
+            liveSellerLoginButton.hidden = true;
+        }
+        if (liveSellerLogoutButton) {
+            liveSellerLogoutButton.hidden = true;
+        }
+        if (liveSellerLinksAuthenticated) {
+            liveSellerLinksAuthenticated.classList.add('hidden');
+        }
+        if (liveSellerAuthLinks) {
+            liveSellerAuthLinks.classList.add('hidden');
+        }
+        if (liveSellerEditProfileButton) {
+            liveSellerEditProfileButton.disabled = true;
+        }
+        if (liveSellerToggleButton) {
+            liveSellerToggleButton.disabled = true;
+            liveSellerToggleButton.textContent = 'Nonaktif';
+        }
+        isLiveSellerActive = false;
+        setLiveSellerStatusIndicator(false);
+        syncMenuVisibility();
+        updateActionMenuToggleAvatar();
+        syncResidentShareMarkersFromCache();
+        refreshResidentShareMarkers();
+        return;
+    }
+
     const isLoggedIn = Boolean(state && state.isLoggedIn);
     const seller = state ? state.seller : null;
 
@@ -1121,6 +1406,7 @@ function updateLiveSellerUI(state) {
         SellerSession.refreshProfile().catch(() => undefined);
     }
 
+    updateActionMenuToggleAvatar();
     syncMenuVisibility();
     syncResidentShareMarkersFromCache();
     refreshResidentShareMarkers();
@@ -1155,10 +1441,12 @@ function configureLiveSellerLinks(isLoggedIn) {
 
 function syncMenuVisibility() {
     if (gerobakMenuSection) {
-        gerobakMenuSection.classList.toggle('hidden', Boolean(residentSessionState?.isLoggedIn));
+        const shouldHideGerobak = !isGerobakOnlineEnabled || Boolean(residentSessionState?.isLoggedIn);
+        gerobakMenuSection.classList.toggle('hidden', shouldHideGerobak);
     }
     if (residentMenuSection) {
-        residentMenuSection.classList.toggle('hidden', Boolean(sellerSessionState?.isLoggedIn));
+        const shouldHideResident = isGerobakOnlineEnabled && Boolean(sellerSessionState?.isLoggedIn);
+        residentMenuSection.classList.toggle('hidden', shouldHideResident);
     }
 }
 
@@ -1176,6 +1464,15 @@ function getResidentMarkerInitial(resident) {
     const text = String(baseValue || '').trim();
     if (!text) {
         return 'W';
+    }
+    return text.charAt(0).toUpperCase();
+}
+
+function getSellerMarkerInitial(seller) {
+    const baseValue = seller?.nama || seller?.merk || seller?.username || 'Gerobak';
+    const text = String(baseValue || '').trim();
+    if (!text) {
+        return 'G';
     }
     return text.charAt(0).toUpperCase();
 }
@@ -1669,6 +1966,8 @@ function initializeResidentControls() {
 function handleResidentSessionChange(state) {
     residentSessionState = state || { isLoggedIn: false, resident: null };
     updateResidentUI(residentSessionState);
+    syncSavedPinsFromResident(residentSessionState?.resident || null);
+    updateBottomNavAvailability();
     syncMenuVisibility();
 }
 
@@ -1702,6 +2001,68 @@ function getResidentPhotoDataUrl(resident) {
     return null;
 }
 
+function getSellerPhotoDataUrl(seller) {
+    const photo = seller?.photo;
+    if (photo && photo.data) {
+        const contentType = photo.contentType || 'image/jpeg';
+        return `data:${contentType};base64,${photo.data}`;
+    }
+    return null;
+}
+
+function updateActionMenuToggleAvatar() {
+    if (!actionMenuToggleButton) {
+        return;
+    }
+    if (!actionMenuTogglePhoto) {
+        actionMenuTogglePhoto = document.getElementById('action-menu-toggle-photo');
+    }
+    if (!actionMenuToggleFallback) {
+        actionMenuToggleFallback = document.getElementById('action-menu-toggle-fallback');
+    }
+
+    const resident = residentSessionState?.resident || null;
+    const seller = sellerSessionState?.seller || null;
+    const isResidentLoggedIn = Boolean(residentSessionState?.isLoggedIn && resident);
+    const isSellerLoggedIn = Boolean(!isResidentLoggedIn && sellerSessionState?.isLoggedIn && seller);
+
+    let photoUrl = null;
+    let fallbackText = '\u2630';
+    let label = 'Menu';
+
+    if (isResidentLoggedIn) {
+        photoUrl = getResidentPhotoDataUrl(resident);
+        fallbackText = getResidentMarkerInitial(resident);
+        const name = String(resident?.displayName || resident?.username || '').trim();
+        if (name) {
+            label = `Menu (${name})`;
+        }
+    } else if (isSellerLoggedIn) {
+        photoUrl = getSellerPhotoDataUrl(seller);
+        fallbackText = getSellerMarkerInitial(seller);
+        const name = String(seller?.nama || seller?.merk || seller?.username || '').trim();
+        if (name) {
+            label = `Menu (${name})`;
+        }
+    }
+
+    if (actionMenuTogglePhoto) {
+        if (photoUrl) {
+            if (actionMenuTogglePhoto.src !== photoUrl) {
+                actionMenuTogglePhoto.src = photoUrl;
+            }
+        } else if (actionMenuTogglePhoto.getAttribute('src')) {
+            actionMenuTogglePhoto.removeAttribute('src');
+        }
+    }
+    if (actionMenuToggleFallback) {
+        actionMenuToggleFallback.textContent = fallbackText;
+    }
+
+    actionMenuToggleButton.classList.toggle('action-menu-toggle--has-photo', Boolean(photoUrl));
+    actionMenuToggleButton.setAttribute('aria-label', label);
+}
+
 function updateResidentEditPhotoPreview(dataUrl) {
     if (!residentEditPhotoPreview) {
         return;
@@ -1731,7 +2092,7 @@ function updateResidentEditToggleState() {
     if (!residentEditToggleButton) {
         return;
     }
-    residentEditToggleButton.textContent = residentEditFormOpen ? 'Tutup Edit Profil' : 'Edit Profil';
+    residentEditToggleButton.textContent = residentEditFormOpen ? 'Close Edit Profile' : 'Edit Profile';
 }
 
 function refreshResidentEditForm(resident, { force = false } = {}) {
@@ -1880,10 +2241,15 @@ async function handleResidentEditFormSubmit(event) {
 function updateResidentUI(state) {
     const isLoggedIn = Boolean(state && state.isLoggedIn);
     const resident = state ? state.resident : null;
-    const isAdmin =
-        Boolean(resident?.isAdmin) ||
-        (typeof resident?.role === 'string' && resident.role.toLowerCase() === 'admin') ||
-        (typeof resident?.username === 'string' && resident.username.toLowerCase() === 'admin');
+    const residentUsername = typeof resident?.username === 'string'
+        ? resident.username.trim().toLowerCase()
+        : '';
+    const residentRole = typeof resident?.role === 'string'
+        ? resident.role.trim().toLowerCase()
+        : '';
+    const isAdmin = Boolean(resident?.isAdmin) || residentRole === 'admin' || residentUsername === 'admin';
+    const isPinManager = Boolean(resident?.isPinManager) || residentRole === 'pin_manager';
+    const canManagePins = isAdmin || isPinManager;
 
     if (residentAuthLinksContainer) {
         residentAuthLinksContainer.classList.toggle('hidden', isLoggedIn);
@@ -1936,9 +2302,18 @@ function updateResidentUI(state) {
     if (residentEditToggleButton) {
         residentEditToggleButton.disabled = !isLoggedIn || residentEditSubmitting;
     }
+    if (residentActionSection) {
+        residentActionSection.classList.toggle('hidden', !isLoggedIn);
+    }
+    if (addPinButton) {
+        addPinButton.hidden = !isLoggedIn;
+    }
     if (!isLoggedIn) {
         closeResidentEditForm({ reset: true });
         refreshResidentEditForm(null, { force: true });
+        if (pinFormContainer && !pinFormContainer.classList.contains('hidden')) {
+            pinFormContainer.classList.add('hidden');
+        }
     } else {
         refreshResidentEditForm(resident, { force: !residentEditFormDirty || !residentEditFormOpen });
     }
@@ -1946,7 +2321,9 @@ function updateResidentUI(state) {
         setResidentEditMessage(null, '');
     }
     if (adminPageButton) {
-        adminPageButton.classList.toggle('hidden', !isAdmin);
+        adminPageButton.hidden = !canManagePins;
+        adminPageButton.classList.toggle('hidden', !canManagePins);
+        adminPageButton.setAttribute('aria-hidden', canManagePins ? 'false' : 'true');
         if (!adminPageButton.dataset.bound) {
             adminPageButton.addEventListener('click', () => {
                 window.location.href = 'admin.html';
@@ -1955,6 +2332,7 @@ function updateResidentUI(state) {
         }
     }
 
+    updateActionMenuToggleAvatar();
     updateUserMarkerAppearance();
     syncResidentShareMarkersFromCache();
     refreshResidentShareMarkers(isLoggedIn ? { force: true } : {});
@@ -2481,12 +2859,14 @@ function updateLiveSellerMarkers(sellers) {
 
     liveSellerMarkers = nextEntries;
     updateLiveSellersCountDisplay(nextEntries.length, { enableAnimation: lastKnownLiveSellerCount !== null });
-    if (typeof window.applyFilters === 'function') {
-        window.applyFilters();
-    }
+    applyFilters();
 }
 
 async function fetchLiveSellers() {
+    if (!isGerobakOnlineEnabled) {
+        updateLiveSellerMarkers(null);
+        return;
+    }
     if (!map) {
         return;
     }
@@ -2502,6 +2882,10 @@ async function fetchLiveSellers() {
             throw new Error(payload.message || 'Gagal memuat data Gerobak Online.');
         }
         const sellers = Array.isArray(payload?.sellers) ? payload.sellers : [];
+        if (!isGerobakOnlineEnabled) {
+            updateLiveSellerMarkers(null);
+            return;
+        }
         updateLiveSellerMarkers(sellers);
     } catch (error) {
         DEBUG_LOGGER.log('Live seller fetch failed', error);
@@ -2523,6 +2907,9 @@ function stopLiveSellerRefreshLoop() {
 
 function startLiveSellerRefreshLoop() {
     stopLiveSellerRefreshLoop();
+    if (!isGerobakOnlineEnabled) {
+        return;
+    }
     fetchLiveSellers().catch(() => undefined);
     liveSellerRefreshTimer = setInterval(() => {
         fetchLiveSellers().catch(() => undefined);
@@ -2571,6 +2958,9 @@ function getLatestUserLocation() {
 }
 
 async function startLiveSellerBroadcast() {
+    if (!isGerobakOnlineEnabled) {
+        return;
+    }
     if (liveSellerRequestInFlight) {
         return;
     }
@@ -3195,16 +3585,6 @@ function truncateWithEllipsis(value, maxLength = 200) {
     return `${text.slice(0, maxLength).trim()}...`;
 }
 
-function truncateText(value, maxLength = 160) {
-    if (typeof value !== 'string') {
-        return '';
-    }
-    if (value.length <= maxLength) {
-        return value;
-    }
-    return `${value.slice(0, maxLength)}…`;
-}
-
 function renderTextWithLineBreaks(element, text) {
     if (!element) {
         return;
@@ -3231,17 +3611,299 @@ function getPinListReferencePosition() {
     return null;
 }
 
+function normalizePinId(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    if (typeof value === 'object') {
+        const nestedId = value._id || value.id;
+        if (nestedId) {
+            return String(nestedId);
+        }
+    }
+    return String(value);
+}
+
+function normalizeExternalLink(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (/^(mailto|tel):/i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('//')) {
+        return `https:${trimmed}`;
+    }
+    return `https://${trimmed}`;
+}
+
+function isPinSaved(pinId) {
+    const normalized = normalizePinId(pinId);
+    if (!normalized) {
+        return false;
+    }
+    return savedPinIds.has(normalized);
+}
+
+function updateSavedButtonState(button, pinId) {
+    if (!button) {
+        return;
+    }
+    const saved = isPinSaved(pinId);
+    button.classList.toggle('is-saved', saved);
+    button.setAttribute('aria-pressed', saved ? 'true' : 'false');
+    button.textContent = saved ? 'Saved' : 'Save';
+}
+
+function updateSavedPinIndicators() {
+    if (pinListItemsContainer) {
+        const items = pinListItemsContainer.querySelectorAll('.pin-list-item');
+        items.forEach((item) => {
+            const id = normalizePinId(item.dataset.pinId || '');
+            const saved = id && savedPinIds.has(id);
+            item.classList.toggle('pin-list-item--saved', Boolean(saved));
+            const saveButton = item.querySelector('.pin-list-item__save');
+            if (saveButton) {
+                updateSavedButtonState(saveButton, id);
+            }
+        });
+    }
+    markers.forEach((marker) => {
+        const id = normalizePinId(marker?.pin?._id || marker?.pin?.id);
+        const container = marker?.infoWindow?.container;
+        if (!container) {
+            return;
+        }
+        const saveButton = container.querySelector('.save-pin-btn');
+        if (saveButton) {
+            updateSavedButtonState(saveButton, id);
+        }
+    });
+}
+
+function applyFilters() {
+    if (typeof applyFiltersCallback === 'function') {
+        applyFiltersCallback();
+        return true;
+    }
+    return false;
+}
+
+function setPinListSearchVisible(visible) {
+    pinListSearchVisible = Boolean(visible);
+    if (pinListPanelElement) {
+        pinListPanelElement.classList.toggle('pin-list-panel--search-hidden', !pinListSearchVisible);
+    }
+    if (pinListSearchVisible) {
+        showPinListAdvancedControls();
+    } else {
+        hidePinListAdvancedControls();
+    }
+}
+
+function setPinListListVisible(visible) {
+    if (!pinListPanelElement) {
+        return;
+    }
+    pinListPanelElement.classList.toggle('pin-list-panel--list-hidden', !visible);
+}
+
+function setNavButtonActive(button, isActive) {
+    if (!button) {
+        return;
+    }
+    button.classList.toggle('is-active', Boolean(isActive));
+    button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+}
+
+function updateBottomNavActiveState() {
+    setNavButtonActive(bottomNavHomeButton, pinListViewMode === PIN_LIST_VIEW_MODE.HOME);
+    setNavButtonActive(bottomNavSearchButton, pinListViewMode === PIN_LIST_VIEW_MODE.SEARCH);
+    setNavButtonActive(bottomNavListButton, pinListViewMode === PIN_LIST_VIEW_MODE.LIST);
+    setNavButtonActive(bottomNavSavedButton, pinListViewMode === PIN_LIST_VIEW_MODE.SAVED);
+}
+
+function updateBottomNavAvailability() {
+    const canSave = Boolean(residentSessionState?.isLoggedIn);
+    if (bottomNavSavedButton) {
+        bottomNavSavedButton.classList.toggle('is-disabled', !canSave);
+        bottomNavSavedButton.setAttribute('aria-disabled', canSave ? 'false' : 'true');
+        bottomNavSavedButton.title = canSave ? '' : 'Login untuk melihat pin tersimpan';
+    }
+}
+
+function setPinListViewMode(mode) {
+    if (!mode) {
+        return;
+    }
+    const nextMode = Object.values(PIN_LIST_VIEW_MODE).includes(mode)
+        ? mode
+        : PIN_LIST_VIEW_MODE.HOME;
+    const previous = pinListViewMode;
+    pinListViewMode = nextMode;
+    updateBottomNavActiveState();
+    const savedModeChanged = (previous === PIN_LIST_VIEW_MODE.SAVED) !== (nextMode === PIN_LIST_VIEW_MODE.SAVED);
+    if (savedModeChanged) {
+        if (!applyFilters()) {
+            updatePinListPanel({ reason: 'view' });
+        }
+        return;
+    }
+    updatePinListPanel({ reason: 'view' });
+}
+
+function setActiveNavMode(mode) {
+    if (mode === PIN_LIST_VIEW_MODE.SAVED && !residentSessionState?.isLoggedIn) {
+        alert('Silakan login untuk melihat pin tersimpan.');
+        return;
+    }
+    setPinListViewMode(mode);
+    if (mode === PIN_LIST_VIEW_MODE.SEARCH) {
+        setPinListSearchVisible(true);
+        setPinListListVisible(false);
+        setPinListCollapsed(false);
+        if (pinListSearchInputElement) {
+            pinListSearchInputElement.focus();
+        }
+        return;
+    }
+    if (mode === PIN_LIST_VIEW_MODE.LIST) {
+        setPinListSearchVisible(false);
+        setPinListListVisible(true);
+        setPinListCollapsed(false);
+        return;
+    }
+    if (mode === PIN_LIST_VIEW_MODE.SAVED) {
+        setPinListSearchVisible(false);
+        setPinListListVisible(true);
+        setPinListCollapsed(false);
+        return;
+    }
+    setPinListSearchVisible(false);
+    setPinListListVisible(true);
+    setPinListCollapsed(true);
+    closeActionMenu();
+}
+
+async function persistSavedPins() {
+    if (!residentSessionState?.isLoggedIn) {
+        return;
+    }
+    if (typeof window.ResidentSession === 'undefined' || typeof ResidentSession.updateResidentProfile !== 'function') {
+        return;
+    }
+    if (savedPinsSyncInFlight) {
+        savedPinsSyncPending = true;
+        return;
+    }
+    savedPinsSyncInFlight = true;
+    try {
+        await ResidentSession.updateResidentProfile({
+            savedPins: Array.from(savedPinIds)
+        });
+    } catch (error) {
+        console.warn('Failed to sync saved pins', error);
+    } finally {
+        savedPinsSyncInFlight = false;
+        if (savedPinsSyncPending) {
+            savedPinsSyncPending = false;
+            persistSavedPins();
+        }
+    }
+}
+
+function syncSavedPinsFromResident(resident) {
+    if (!residentSessionState?.isLoggedIn || !resident) {
+        savedPinIds = new Set();
+        updateSavedPinIndicators();
+        if (pinListViewMode === PIN_LIST_VIEW_MODE.SAVED) {
+            setActiveNavMode(PIN_LIST_VIEW_MODE.HOME);
+        }
+        return;
+    }
+    const savedPins = Array.isArray(resident.savedPins) ? resident.savedPins : [];
+    savedPinIds = new Set(savedPins.map((entry) => normalizePinId(entry)).filter(Boolean));
+    updateSavedPinIndicators();
+    if (pinListViewMode === PIN_LIST_VIEW_MODE.SAVED) {
+        applyFilters();
+    }
+}
+
+function syncSavedPinsWithMarkers() {
+    if (!residentSessionState?.isLoggedIn || !savedPinIds.size) {
+        return;
+    }
+    const availableIds = new Set(
+        markers
+            .map((marker) => normalizePinId(marker?.pin?._id || marker?.pin?.id))
+            .filter(Boolean)
+    );
+    let changed = false;
+    const nextSaved = new Set();
+    savedPinIds.forEach((id) => {
+        if (availableIds.has(id)) {
+            nextSaved.add(id);
+            return;
+        }
+        changed = true;
+    });
+    if (!changed) {
+        return;
+    }
+    savedPinIds = nextSaved;
+    updateSavedPinIndicators();
+    if (pinListViewMode === PIN_LIST_VIEW_MODE.SAVED) {
+        applyFilters();
+    }
+    persistSavedPins();
+}
+
+async function toggleSavedPinById(pinId) {
+    const normalized = normalizePinId(pinId);
+    if (!normalized) {
+        return;
+    }
+    if (!residentSessionState?.isLoggedIn) {
+        alert('Silakan login untuk menyimpan pin.');
+        return;
+    }
+    const nextSaved = new Set(savedPinIds);
+    if (nextSaved.has(normalized)) {
+        nextSaved.delete(normalized);
+    } else {
+        nextSaved.add(normalized);
+    }
+    savedPinIds = nextSaved;
+    updateSavedPinIndicators();
+    if (pinListViewMode === PIN_LIST_VIEW_MODE.SAVED) {
+        applyFilters();
+    }
+    await persistSavedPins();
+}
+
 function setPinListCollapsed(collapsed) {
     if (!collapsed) {
         closeActionMenu();
-        hideFilterDropdown();
         hidePinForm();
+        if (pinListSearchVisible) {
+            showPinListAdvancedControls();
+        } else {
+            hidePinListAdvancedControls();
+        }
     }
     if (pinListPanelElement) {
         pinListPanelElement.classList.toggle('pin-list-panel--collapsed', collapsed);
     }
-    if (pinListToggleButton) {
-        pinListToggleButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (collapsed) {
+        closeAllPinListPopovers();
+        hidePinListAdvancedControls();
     }
 }
 
@@ -3255,7 +3917,6 @@ function setActionMenuOpen(isOpen) {
     }
     if (shouldOpen) {
         setPinListCollapsed(true);
-        hideFilterDropdown();
         hidePinForm();
     }
 }
@@ -3264,17 +3925,83 @@ function closeActionMenu() {
     setActionMenuOpen(false);
 }
 
-function hideFilterDropdown() {
-    if (filterDropdownElement) {
-        filterDropdownElement.classList.add('hidden');
-    }
-}
-
 function hidePinForm() {
     const formContainer = pinFormContainer || document.getElementById('pin-form');
     if (formContainer) {
         formContainer.classList.add('hidden');
     }
+}
+
+function closeAllPinListPopovers() {
+    closePinListPopover();
+}
+
+function togglePinListPopover(popover, toggleButton) {
+    if (!popover || !toggleButton) {
+        return;
+    }
+    if (activePinListPopover && activePinListPopover.popover === popover) {
+        closePinListPopover();
+        return;
+    }
+    openPinListPopover(popover, toggleButton);
+}
+
+function openPinListPopover(popover, toggleButton) {
+    closePinListPopover();
+    popover.classList.remove('hidden');
+    toggleButton.setAttribute('aria-expanded', 'true');
+    activePinListPopover = { popover, toggleButton };
+    document.addEventListener('mousedown', handlePinListPopoverOutsideClick, true);
+    document.addEventListener('keydown', handlePinListPopoverKeydown);
+}
+
+function closePinListPopover(targetPopover) {
+    if (!activePinListPopover) {
+        return;
+    }
+    if (targetPopover && activePinListPopover.popover !== targetPopover) {
+        return;
+    }
+    const { popover, toggleButton } = activePinListPopover;
+    popover.classList.add('hidden');
+    toggleButton.setAttribute('aria-expanded', 'false');
+    activePinListPopover = null;
+    document.removeEventListener('mousedown', handlePinListPopoverOutsideClick, true);
+    document.removeEventListener('keydown', handlePinListPopoverKeydown);
+}
+
+function handlePinListPopoverOutsideClick(event) {
+    if (!activePinListPopover) {
+        return;
+    }
+    const { popover, toggleButton } = activePinListPopover;
+    if (popover.contains(event.target) || toggleButton.contains(event.target)) {
+        return;
+    }
+    closePinListPopover();
+}
+
+function handlePinListPopoverKeydown(event) {
+    if (event.key === 'Escape') {
+        closePinListPopover();
+    }
+}
+
+function showPinListAdvancedControls() {
+    if (pinListAdvancedRevealed || !pinListSearchFormElement) {
+        return;
+    }
+    pinListAdvancedRevealed = true;
+    pinListSearchFormElement.classList.add('pin-list-search-wrapper--advanced-visible');
+}
+
+function hidePinListAdvancedControls() {
+    if (!pinListAdvancedRevealed || !pinListSearchFormElement) {
+        return;
+    }
+    pinListAdvancedRevealed = false;
+    pinListSearchFormElement.classList.remove('pin-list-search-wrapper--advanced-visible');
 }
 
 function updatePinListPlacement() {
@@ -3300,6 +4027,9 @@ function focusOnPinMarker(marker) {
             map.setZoom(15);
         }
     }
+    if (!marker.infoWindow && typeof marker.ensureInfoWindow === 'function') {
+        marker.ensureInfoWindow();
+    }
     if (marker.infoWindow && typeof marker.infoWindow.show === 'function') {
         marker.infoWindow.show();
     }
@@ -3313,6 +4043,7 @@ function updatePinListPanel(context = {}) {
     const referencePosition = getPinListReferencePosition();
     const hasUserLocation = Boolean(userLocation && Number.isFinite(userLocation?.lat) && Number.isFinite(userLocation?.lng));
     const hasSearchQuery = currentSearchTokens.length > 0;
+    const isSavedView = pinListViewMode === PIN_LIST_VIEW_MODE.SAVED;
     const visiblePins = markers
         .filter(marker => marker && marker.pin && marker.isVisible)
         .map(marker => {
@@ -3336,24 +4067,33 @@ function updatePinListPanel(context = {}) {
             return distanceA - distanceB;
         });
 
-    pinListTitleElement.textContent = hasSearchQuery ? 'Hasil pencarian' : 'Pin terdekat';
+    pinListTitleElement.textContent = isSavedView
+        ? 'Saved Pins'
+        : (hasSearchQuery ? 'Search Results' : 'Nearest Pins');
     const totalVisible = visiblePins.length;
     const resultsToRender = visiblePins.slice(0, 30);
 
     if (pinListSummaryElement) {
         if (!totalVisible) {
-            pinListSummaryElement.textContent = 'Tidak ada pin yang cocok dengan filter.';
+            pinListSummaryElement.textContent = isSavedView
+                ? 'No saved pins yet.'
+                : 'No pins match the filters.';
+        } else if (isSavedView) {
+            pinListSummaryElement.textContent = `${resultsToRender.length} saved pins`;
         } else if (hasSearchQuery) {
-            pinListSummaryElement.textContent = `${resultsToRender.length} dari ${totalVisible} hasil pencarian`;
+            pinListSummaryElement.textContent = `${resultsToRender.length} of ${totalVisible} search results`;
         } else if (referencePosition) {
-            pinListSummaryElement.textContent = `${resultsToRender.length} pin terdekat diurut berdasarkan jarak`;
+            pinListSummaryElement.textContent = `${resultsToRender.length} nearest pins sorted by distance`;
         } else {
-            pinListSummaryElement.textContent = `${resultsToRender.length} pin terdekat`;
+            pinListSummaryElement.textContent = `${resultsToRender.length} nearest pins`;
         }
     }
 
     pinListItemsContainer.innerHTML = '';
     if (pinListEmptyElement) {
+        pinListEmptyElement.textContent = isSavedView
+            ? 'Belum ada pin tersimpan.'
+            : 'Belum ada pin untuk ditampilkan.';
         pinListEmptyElement.classList.toggle('hidden', totalVisible > 0);
     }
 
@@ -3396,11 +4136,13 @@ function updatePinListPanel(context = {}) {
         const endParts = formatDateParts(endDateValue);
         const hasDateInfo = startParts.isValid || endParts.isValid;
 
-        const item = document.createElement('button');
-        item.type = 'button';
+        const pinId = normalizePinId(pin._id || pin.id);
+        const item = document.createElement('div');
         item.className = 'pin-list-item';
         item.setAttribute('role', 'listitem');
-        item.dataset.pinId = pin._id || '';
+        item.tabIndex = 0;
+        item.dataset.pinId = pinId;
+        item.classList.toggle('pin-list-item--saved', isPinSaved(pinId));
 
         const header = document.createElement('div');
         header.className = 'pin-list-item__header';
@@ -3409,6 +4151,35 @@ function updatePinListPanel(context = {}) {
         title.className = 'pin-list-item__title';
         title.textContent = pin.title || 'Pin tanpa judul';
         header.appendChild(title);
+
+        if (pinId) {
+            const actions = document.createElement('div');
+            actions.className = 'pin-list-item__actions';
+            const saveButton = document.createElement('button');
+            saveButton.type = 'button';
+            saveButton.className = 'pin-list-item__save';
+            saveButton.dataset.pinId = pinId;
+            updateSavedButtonState(saveButton, pinId);
+            saveButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                toggleSavedPinById(pinId);
+            });
+            actions.appendChild(saveButton);
+            if (isSavedView) {
+                const calendarButton = document.createElement('button');
+                calendarButton.type = 'button';
+                calendarButton.className = 'pin-list-item__calendar';
+                calendarButton.textContent = 'Calendar';
+                calendarButton.setAttribute('aria-label', 'Add to calendar');
+                calendarButton.disabled = !hasDateInfo;
+                calendarButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    showCalendarOptions(pin);
+                });
+                actions.appendChild(calendarButton);
+            }
+            header.appendChild(actions);
+        }
 
         const meta = document.createElement('div');
         meta.className = 'pin-list-item__meta';
@@ -3473,7 +4244,7 @@ function updatePinListPanel(context = {}) {
         if (isExpandable) {
             moreButton = document.createElement('span');
             moreButton.className = 'pin-list-item__more-btn';
-            moreButton.textContent = 'Lihat lebih banyak...';
+            moreButton.textContent = 'Show more...';
             moreButton.setAttribute('data-expanded', 'false');
             moreButton.setAttribute('role', 'button');
             moreButton.tabIndex = 0;
@@ -3484,7 +4255,7 @@ function updatePinListPanel(context = {}) {
                 moreButton.setAttribute('data-expanded', nextExpanded ? 'true' : 'false');
                 const textToRender = nextExpanded ? fullDescription : previewText;
                 renderTextWithLineBreaks(description, textToRender || 'Tidak ada deskripsi.');
-                moreButton.textContent = nextExpanded ? 'Sembunyikan' : 'Lihat lebih banyak...';
+                moreButton.textContent = nextExpanded ? 'Show less' : 'Show more...';
             });
             moreButton.addEventListener('keydown', (event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -3507,6 +4278,12 @@ function updatePinListPanel(context = {}) {
         item.addEventListener('click', () => {
             focusOnPinMarker(entry.marker);
             setPinListCollapsed(true);
+        });
+        item.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                item.click();
+            }
         });
 
         fragment.appendChild(item);
@@ -4265,6 +5042,139 @@ function hideNavigationModal() {
     navigationModal.classList.remove('navigation-modal--open');
 }
 
+function initializeCalendarModal() {
+    if (calendarModal) {
+        return;
+    }
+
+    calendarModal = document.createElement('div');
+    calendarModal.id = 'calendar-modal';
+    calendarModal.className = 'navigation-modal calendar-modal';
+    calendarModal.innerHTML = `
+        <div class="navigation-modal__sheet">
+            <div class="navigation-modal__handle"></div>
+            <h3 class="navigation-modal__title">Pilih Kalender</h3>
+            <div class="navigation-modal__options"></div>
+            <button type="button" class="navigation-modal__cancel">Batal</button>
+        </div>
+    `;
+
+    document.body.appendChild(calendarModal);
+
+    calendarOptionsContainer = calendarModal.querySelector('.navigation-modal__options');
+    calendarCancelBtn = calendarModal.querySelector('.navigation-modal__cancel');
+
+    calendarModal.addEventListener('click', (event) => {
+        if (event.target === calendarModal) {
+            hideCalendarModal();
+        }
+    });
+
+    if (calendarCancelBtn) {
+        calendarCancelBtn.addEventListener('click', () => {
+            hideCalendarModal();
+        });
+    }
+}
+
+function hideCalendarModal() {
+    if (!calendarModal) {
+        return;
+    }
+    calendarModal.classList.remove('navigation-modal--open');
+}
+
+function openExternalCalendarUrl(url) {
+    if (!url) {
+        return;
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function buildCalendarOptions() {
+    return [
+        {
+            key: 'google',
+            label: 'Google Calendar',
+            hint: 'Buka Google Calendar'
+        },
+        {
+            key: 'apple',
+            label: 'Apple Calendar',
+            hint: 'Unduh file .ics'
+        },
+        {
+            key: 'outlook',
+            label: 'Outlook',
+            hint: 'Buka Outlook Calendar'
+        }
+    ];
+}
+
+function showCalendarOptions(pin) {
+    if (!pin) {
+        return;
+    }
+    const payload = getPinCalendarPayload(pin);
+    if (!payload) {
+        alert('Tanggal pin tidak tersedia untuk kalender.');
+        return;
+    }
+    hideNavigationModal();
+    initializeCalendarModal();
+    if (!calendarOptionsContainer) {
+        return;
+    }
+    calendarOptionsContainer.innerHTML = '';
+
+    const options = buildCalendarOptions();
+    options.forEach((option) => {
+        const optionButton = document.createElement('button');
+        optionButton.type = 'button';
+        optionButton.className = 'navigation-modal__option';
+        optionButton.innerHTML = `
+            <div class="navigation-modal__option-text">
+                <span class="navigation-modal__option-title">${option.label}</span>
+                ${option.hint ? `<span class="navigation-modal__option-hint">${option.hint}</span>` : ''}
+            </div>
+            <span class="navigation-modal__option-arrow">\u203a</span>
+        `;
+        optionButton.addEventListener('click', () => openCalendarOption(option, pin));
+        calendarOptionsContainer.appendChild(optionButton);
+    });
+
+    calendarModal.classList.add('navigation-modal--open');
+}
+
+function openCalendarOption(option, pin) {
+    if (!option || !pin) {
+        return;
+    }
+    hideCalendarModal();
+    const payload = getPinCalendarPayload(pin);
+    if (!payload) {
+        alert('Tanggal pin tidak tersedia untuk kalender.');
+        return;
+    }
+    if (option.key === 'apple') {
+        downloadPinCalendarIcs(pin);
+        return;
+    }
+    if (option.key === 'google') {
+        openExternalCalendarUrl(buildGoogleCalendarUrl(payload));
+        return;
+    }
+    if (option.key === 'outlook') {
+        openExternalCalendarUrl(buildOutlookCalendarUrl(payload));
+    }
+}
+
 function openNavigationOption(option) {
     if (!option) {
         return;
@@ -5007,25 +5917,39 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeModalBtn = document.getElementById('close-modal-btn');
     const infoBtn = document.getElementById('info-btn');
     const locateMeBtn = document.getElementById('locate-me-btn');
-    const filterBtn = document.getElementById('filter-btn');
     const installAppBtn = document.getElementById('install-app-btn');
     updateAppBtn = document.getElementById('update-app-btn');
-    filterDropdownElement = document.getElementById('filter-dropdown');
+    initializeThemeControls();
     const selectAllCategories = document.getElementById('select-all-categories');
     const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
     const categoryCheckboxList = Array.from(categoryCheckboxes);
-    const filterSearchInput = document.getElementById('filter-search-input');
-    const filterSearchButton = document.getElementById('filter-search-btn');
-    const filterDateRangeInput = document.getElementById('filter-date-range-input');
     const resetFilterBtn = document.getElementById('reset-filter-btn');
     pinListPanelElement = document.getElementById('pin-list-panel');
-    pinListToggleButton = document.getElementById('pin-list-toggle');
     pinListContainerElement = document.getElementById('pin-list-container');
     pinListTitleElement = document.getElementById('pin-list-title');
     pinListSummaryElement = document.getElementById('pin-list-summary');
     pinListItemsContainer = document.getElementById('pin-list');
     pinListEmptyElement = document.getElementById('pin-list-empty');
+    pinListSearchFormElement = document.getElementById('pin-list-search-form');
+    pinListSearchInputElement = document.getElementById('pin-list-search-input');
+    bottomNavHomeButton = document.getElementById('nav-home-btn');
+    bottomNavSearchButton = document.getElementById('nav-search-btn');
+    bottomNavListButton = document.getElementById('nav-list-btn');
+    bottomNavSavedButton = document.getElementById('nav-saved-btn');
+    pinListCategoryToggleButton = document.getElementById('pin-list-category-toggle');
+    pinListCategoryPopoverElement = document.getElementById('pin-list-category-popover');
+    pinListCategoryListElement = document.getElementById('pin-list-category-list');
+    pinListCategorySelectAllButton = document.getElementById('pin-list-category-select-all');
+    pinListCategoryClearAllButton = document.getElementById('pin-list-category-clear-all');
+    pinListCategorySummaryElement = document.getElementById('pin-list-category-summary');
+    pinListDateToggleButton = document.getElementById('pin-list-date-toggle');
+    pinListDatePopoverElement = document.getElementById('pin-list-date-popover');
+    pinListDateRangeInputElement = document.getElementById('pin-list-date-range-input');
+    pinListDateResetButton = document.getElementById('pin-list-date-reset');
+    pinListDateSummaryElement = document.getElementById('pin-list-date-summary');
     addPinFormElement = document.getElementById('add-pin-form');
+    addPinButton = document.getElementById('add-pin-btn');
+    residentActionSection = document.getElementById('action-menu-resident-actions');
     pinFormContainer = document.getElementById('pin-form');
     pinTitleInput = document.getElementById('title');
     pinDescriptionInput = document.getElementById('description');
@@ -5073,7 +5997,6 @@ document.addEventListener('DOMContentLoaded', () => {
             startPinLocationSelection({ collapseForm: true });
             setPinListCollapsed(true);
             closeActionMenu();
-            hideFilterDropdown();
             if (temporaryMarker && temporaryMarker.position) {
                 updatePinLocationDisplay(temporaryMarker.position, 'Klik peta untuk mengganti lokasi atau gunakan pencarian.');
             }
@@ -5094,13 +6017,81 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    if (pinListToggleButton) {
-        pinListToggleButton.addEventListener('click', () => {
-            const isCollapsed = pinListPanelElement
-                ? pinListPanelElement.classList.contains('pin-list-panel--collapsed')
-                : false;
-            const nextCollapsed = !isCollapsed;
-            setPinListCollapsed(nextCollapsed);
+    const debouncedPinListSearch = pinListSearchInputElement
+        ? debounce(() => {
+            runPinListSearch();
+        }, 300)
+        : null;
+    if (bottomNavHomeButton) {
+        bottomNavHomeButton.addEventListener('click', () => {
+            setActiveNavMode(PIN_LIST_VIEW_MODE.HOME);
+        });
+    }
+    if (bottomNavSearchButton) {
+        bottomNavSearchButton.addEventListener('click', () => {
+            setActiveNavMode(PIN_LIST_VIEW_MODE.SEARCH);
+        });
+    }
+    if (bottomNavListButton) {
+        bottomNavListButton.addEventListener('click', () => {
+            setActiveNavMode(PIN_LIST_VIEW_MODE.LIST);
+        });
+    }
+    if (bottomNavSavedButton) {
+        bottomNavSavedButton.addEventListener('click', () => {
+            setActiveNavMode(PIN_LIST_VIEW_MODE.SAVED);
+        });
+    }
+    updateBottomNavAvailability();
+    updateBottomNavActiveState();
+    setPinListSearchVisible(false);
+    if (pinListSearchInputElement && debouncedPinListSearch) {
+        pinListSearchInputElement.addEventListener('input', () => {
+            debouncedPinListSearch();
+        });
+        pinListSearchInputElement.addEventListener('focus', () => {
+            setActiveNavMode(PIN_LIST_VIEW_MODE.SEARCH);
+        });
+    }
+    if (pinListSearchFormElement) {
+        pinListSearchFormElement.addEventListener('submit', (event) => {
+            event.preventDefault();
+            runPinListSearch({ shouldPan: true, collapseAfterSearch: false });
+            setActiveNavMode(PIN_LIST_VIEW_MODE.LIST);
+        });
+    }
+    if (pinListCategoryToggleButton && pinListCategoryPopoverElement) {
+        pinListCategoryToggleButton.addEventListener('click', () => {
+            togglePinListPopover(pinListCategoryPopoverElement, pinListCategoryToggleButton);
+        });
+    }
+    if (pinListCategorySelectAllButton) {
+        pinListCategorySelectAllButton.addEventListener('click', () => {
+            if (!selectAllCategories) {
+                return;
+            }
+            selectAllCategories.checked = true;
+            selectAllCategories.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+    if (pinListCategoryClearAllButton) {
+        pinListCategoryClearAllButton.addEventListener('click', () => {
+            if (!selectAllCategories) {
+                return;
+            }
+            selectAllCategories.checked = false;
+            selectAllCategories.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+    if (pinListDateToggleButton && pinListDatePopoverElement) {
+        pinListDateToggleButton.addEventListener('click', () => {
+            togglePinListPopover(pinListDatePopoverElement, pinListDateToggleButton);
+        });
+    }
+    if (pinListDateResetButton) {
+        pinListDateResetButton.addEventListener('click', () => {
+            updateSelectedDateRange('', '');
+            closePinListPopover(pinListDatePopoverElement);
         });
     }
     if (pinListPanelElement && pinListPanelElement.classList.contains('pin-list-panel--collapsed')) {
@@ -5203,7 +6194,6 @@ document.addEventListener('DOMContentLoaded', () => {
     fuelToggleEvLabel = document.querySelector('#fuel-toggle-container .toggle-label-ev');
     fuelCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === FUEL_CATEGORY) || null;
     evCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === EV_CATEGORY) || null;
-    let filterDatePicker = null;
 
     initializeNavigationModal();
     initializeLiveSellerControls();
@@ -5211,6 +6201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateLiveSellerUI(sellerSessionState);
     updateResidentUI(residentSessionState);
     syncMenuVisibility();
+    applyFeatureFlags(featureFlags);
 
     if (fuelToggle) {
         fuelToggle.addEventListener('change', () => {
@@ -5324,20 +6315,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    if (filterBtn) {
-        filterBtn.addEventListener('click', () => {
-            if (!filterDropdownElement) return;
-            const willOpen = filterDropdownElement.classList.contains('hidden');
-            if (willOpen) {
-                setPinListCollapsed(true);
-                closeActionMenu();
-                hidePinForm();
-                filterDropdownElement.classList.remove('hidden');
-            } else {
-                filterDropdownElement.classList.add('hidden');
-            }
-        });
-    }
 
     selectAllCategories.addEventListener('change', (e) => {
         const shouldCheck = e.target.checked;
@@ -5389,68 +6366,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    if (filterSearchInput) {
-        const debouncedFilter = debounce(() => {
-            currentSearchQuery = filterSearchInput.value.trim().toLowerCase();
-            currentSearchTokens = tokenizeSearchQuery(currentSearchQuery);
-            filterMarkers();
-        }, 300);
-        
-        filterSearchInput.addEventListener('input', debouncedFilter);
-    }
 
-    if (filterSearchButton) {
-        filterSearchButton.addEventListener('click', () => {
-            executeSearch();
-        });
-    }
 
-    if (filterDateRangeInput) {
-        if (typeof flatpickr === 'function') {
-            filterDatePicker = flatpickr(filterDateRangeInput, {
-                mode: 'range',
-                dateFormat: 'Y-m-d',
-                allowInput: false,
-                onChange(selectedDates) {
-                    if (!selectedDates.length) {
-                        selectedStartDate = '';
-                        selectedEndDate = '';
-                    } else if (selectedDates.length === 1) {
-                        const single = formatDateToYMD(selectedDates[0]);
-                        selectedStartDate = single;
-                        selectedEndDate = single;
-                    } else {
-                        const [start, end] = selectedDates;
-                        selectedStartDate = formatDateToYMD(start);
-                        selectedEndDate = formatDateToYMD(end);
-                    }
-                    filterMarkers();
-                },
-                onClose(selectedDates) {
-                    if (!selectedDates.length) {
-                        filterDateRangeInput.value = '';
-                    }
-                }
-            });
-        } else {
-            filterDateRangeInput.removeAttribute('readonly');
-            filterDateRangeInput.addEventListener('change', () => {
-                const raw = filterDateRangeInput.value.trim();
-                if (!raw) {
-                    selectedStartDate = '';
-                    selectedEndDate = '';
-                    filterMarkers();
-                    return;
-                }
-                const parts = raw.split(/\s*(?:to|—|-)\s*/);
-                const first = parts[0] ? parts[0].trim() : '';
-                const second = parts[1] ? parts[1].trim() : '';
-                selectedStartDate = first;
-                selectedEndDate = second || first;
-                filterMarkers();
-            });
-        }
+    if (pinListDateRangeInputElement) {
+        setupDateRangeInput(pinListDateRangeInputElement);
     }
+    updatePinListDateSummary();
 
     if (resetFilterBtn) {
         resetFilterBtn.addEventListener('click', () => {
@@ -5464,12 +6385,292 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let lastLiveSellerSearchResults = [];
 
+    const PIN_FORM_CATEGORY_ORDER = [
+        'Budaya & Hiburan',
+        'Barang & Hewan Hilang',
+        'Edukasi',
+        'Jual-Beli Barang',
+        'Konser Musik & Acara',
+        'Olahraga & Aktivitas Hobi',
+        'Pasar Lokal & Pameran',
+        'Promo & Diskon Makanan',
+        'Promo & Diskon Lainnya',
+        'Sosial & Kopdar',
+        'Lain-lain'
+    ];
+
+    function shouldIncludePinFormCategory(value) {
+        if (!value) {
+            return false;
+        }
+        if (isSpecialCategory(value)) {
+            return false;
+        }
+        if (value.includes('Akomodasi Pilihan') || value.includes('Restoran Legendaris')) {
+            return false;
+        }
+        return true;
+    }
+
+    function getPinFormCategoryOrderIndex(value) {
+        for (let i = 0; i < PIN_FORM_CATEGORY_ORDER.length; i += 1) {
+            if (value.includes(PIN_FORM_CATEGORY_ORDER[i])) {
+                return i;
+            }
+        }
+        return PIN_FORM_CATEGORY_ORDER.length;
+    }
+
+    function populatePinCategoryOptions() {
+        const selectEl = pinCategorySelectElement || document.getElementById('category');
+        if (!selectEl || !categoryCheckboxList.length) {
+            return;
+        }
+        const placeholder = selectEl.querySelector('option[value=""]');
+        const fallbackPlaceholder = placeholder || new Option('Pilih Kategori', '');
+        const available = categoryCheckboxList
+            .map((checkbox) => checkbox.value)
+            .filter(shouldIncludePinFormCategory);
+
+        if (!available.length) {
+            return;
+        }
+
+        const baseOrder = new Map(available.map((value, index) => [value, index]));
+        const ordered = available.slice().sort((a, b) => {
+            const aIndex = getPinFormCategoryOrderIndex(a);
+            const bIndex = getPinFormCategoryOrderIndex(b);
+            if (aIndex !== bIndex) {
+                return aIndex - bIndex;
+            }
+            return (baseOrder.get(a) || 0) - (baseOrder.get(b) || 0);
+        });
+
+        selectEl.innerHTML = '';
+        if (placeholder) {
+            selectEl.appendChild(placeholder);
+        } else {
+            fallbackPlaceholder.disabled = true;
+            fallbackPlaceholder.selected = true;
+            selectEl.appendChild(fallbackPlaceholder);
+        }
+
+        ordered.forEach((value) => {
+            const option = new Option(value, value);
+            selectEl.appendChild(option);
+        });
+    }
+
+    populatePinCategoryOptions();
+    renderPinListCategoryOptions();
+
+    function renderPinListCategoryOptions() {
+        if (!pinListCategoryListElement) {
+            updatePinListCategorySummary();
+            return;
+        }
+        pinListCategoryListElement.innerHTML = '';
+        quickCategoryCheckboxMap.clear();
+        categoryCheckboxList.forEach((checkbox) => {
+            const item = document.createElement('label');
+            item.className = 'pin-list-category-item';
+            const quickInput = document.createElement('input');
+            quickInput.type = 'checkbox';
+            quickInput.checked = checkbox.checked;
+            quickInput.dataset.category = checkbox.value;
+            quickInput.addEventListener('change', () => {
+                if (suppressQuickCategoryInputUpdates) {
+                    return;
+                }
+                updateCategorySelectionFromQuick(checkbox.value, quickInput.checked);
+            });
+            const text = document.createElement('span');
+            text.textContent = getQuickCategoryLabel(checkbox);
+            item.appendChild(quickInput);
+            item.appendChild(text);
+            pinListCategoryListElement.appendChild(item);
+            quickCategoryCheckboxMap.set(checkbox.value, quickInput);
+        });
+        updatePinListCategorySummary();
+    }
+
+    function getQuickCategoryLabel(checkbox) {
+        if (!checkbox) {
+            return '';
+        }
+        const label = checkbox.closest('label');
+        if (label) {
+            return label.textContent.trim();
+        }
+        return checkbox.value || '';
+    }
+
+    function updateCategorySelectionFromQuick(value, checked) {
+        const target = categoryCheckboxList.find(cb => cb.value === value);
+        if (!target) {
+            return;
+        }
+        if (target.checked === checked) {
+            updatePinListCategorySummary();
+            return;
+        }
+        target.checked = checked;
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function updatePinListCategorySummary() {
+        if (pinListCategorySummaryElement) {
+            const total = categoryCheckboxList.length;
+            const active = categoryCheckboxList.filter(cb => cb.checked).length;
+            let summary = 'All';
+            if (!active) {
+                summary = 'None';
+            } else if (active !== total) {
+                summary = `${active} Category`;
+            }
+            pinListCategorySummaryElement.textContent = summary;
+        }
+        if (!quickCategoryCheckboxMap.size) {
+            return;
+        }
+        suppressQuickCategoryInputUpdates = true;
+        categoryCheckboxList.forEach((checkbox) => {
+            const quickInput = quickCategoryCheckboxMap.get(checkbox.value);
+            if (quickInput) {
+                quickInput.checked = checkbox.checked;
+            }
+        });
+        suppressQuickCategoryInputUpdates = false;
+    }
+
+    function setupDateRangeInput(input) {
+        if (!input) {
+            return;
+        }
+        if (typeof flatpickr === 'function') {
+            const picker = flatpickr(input, {
+                mode: 'range',
+                dateFormat: 'Y-m-d',
+                allowInput: false,
+                onChange(selectedDates) {
+                    applyDateSelectionFromPicker(selectedDates);
+                },
+                onClose(selectedDates) {
+                    if (!selectedDates.length) {
+                        input.value = '';
+                    }
+                }
+            });
+            input.setAttribute('readonly', 'readonly');
+            pinListDatePicker = picker;
+            return;
+        }
+        input.removeAttribute('readonly');
+        input.addEventListener('change', () => {
+            const raw = input.value.trim();
+            if (!raw) {
+                updateSelectedDateRange('', '');
+                return;
+            }
+            const parts = raw.split(/\s*(?:to|[-\u2013\u2014])\s*/);
+            const first = normalizeManualDateValue(parts[0]);
+            const second = parts[1] ? normalizeManualDateValue(parts[1]) : '';
+            updateSelectedDateRange(first, second || first);
+        });
+    }
+
+    function applyDateSelectionFromPicker(selectedDates) {
+        if (!selectedDates || !selectedDates.length) {
+            updateSelectedDateRange('', '');
+            return;
+        }
+        if (selectedDates.length === 1) {
+            const single = formatDateToYMD(selectedDates[0]);
+            updateSelectedDateRange(single, single);
+            return;
+        }
+        const [start, end] = selectedDates;
+        updateSelectedDateRange(formatDateToYMD(start), formatDateToYMD(end));
+    }
+
+    function updateSelectedDateRange(startValue, endValue, options = {}) {
+        const { skipFilter = false } = options;
+        const normalizedStart = typeof startValue === 'string' ? startValue.trim() : '';
+        const normalizedEnd = typeof endValue === 'string' ? endValue.trim() : '';
+        selectedStartDate = normalizedStart;
+        selectedEndDate = normalizedStart ? (normalizedEnd || normalizedStart) : '';
+        syncSelectedDateInputs();
+        updatePinListDateSummary();
+        if (!skipFilter) {
+            filterMarkers();
+        }
+    }
+
+    function syncSelectedDateInputs() {
+        const range = getSelectedDateRangeForPicker();
+        if (pinListDatePicker) {
+            pinListDatePicker.setDate(range, true);
+        } else if (pinListDateRangeInputElement) {
+            pinListDateRangeInputElement.value = formatManualDateInputValue();
+        }
+    }
+    function getSelectedDateRangeForPicker() {
+        const range = [];
+        const start = parseDateInput(selectedStartDate);
+        const end = parseDateInput(selectedEndDate);
+        if (start) {
+            range.push(new Date(start));
+        }
+        if (end && (!start || end.getTime() !== start.getTime())) {
+            range.push(new Date(end));
+        }
+        return range;
+    }
+
+    function normalizeManualDateValue(value) {
+        if (!value) {
+            return '';
+        }
+        const parsed = parseDateInput(value.trim());
+        if (!parsed) {
+            return '';
+        }
+        return formatDateToYMD(parsed);
+    }
+
+    function formatManualDateInputValue() {
+        if (!selectedStartDate) {
+            return '';
+        }
+        if (selectedEndDate && selectedEndDate !== selectedStartDate) {
+            return `${selectedStartDate} to ${selectedEndDate}`;
+        }
+        return selectedStartDate;
+    }
+
+    function updatePinListDateSummary() {
+        if (!pinListDateSummaryElement) {
+            return;
+        }
+        if (!selectedStartDate || !selectedEndDate) {
+            pinListDateSummaryElement.textContent = 'Anytime';
+            return;
+        }
+        const startLabel = formatDateSummaryLabel(selectedStartDate) || selectedStartDate;
+        const endLabel = formatDateSummaryLabel(selectedEndDate) || selectedEndDate;
+        const summary = selectedStartDate === selectedEndDate
+            ? startLabel
+            : `${startLabel} – ${endLabel}`;
+        pinListDateSummaryElement.textContent = summary;
+    }
+
     function filterMarkers() {
         const selectedCategories = Array.from(categoryCheckboxes)
             .filter(checkbox => checkbox.checked)
             .map(checkbox => checkbox.value);
         const startDateBoundary = parseDateInput(selectedStartDate);
         const endDateBoundary = parseDateInput(selectedEndDate, true);
+        const isSavedView = pinListViewMode === PIN_LIST_VIEW_MODE.SAVED;
 
         const visibleMarkers = [];
         const visibleLiveSellerEntries = [];
@@ -5502,8 +6703,10 @@ document.addEventListener('DOMContentLoaded', () => {
             })();
 
             const passesSpecialCategory = passesSpecialCategoryRules(marker);
+            const pinId = normalizePinId(pin._id || pin.id);
+            const matchesSaved = !isSavedView || (pinId && savedPinIds.has(pinId));
 
-            if (matchesCategory && matchesSearch && matchesDate && passesSpecialCategory) {
+            if (matchesCategory && matchesSearch && matchesDate && passesSpecialCategory && matchesSaved) {
                 marker.isVisible = true;
                 visibleMarkers.push(marker);
             } else {
@@ -5517,6 +6720,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         liveSellerMarkers.forEach(entry => {
+            if (isSavedView) {
+                if (entry?.marker?.map) {
+                    entry.marker.map = null;
+                }
+                if (entry?.infoWindow && typeof entry.infoWindow.close === 'function') {
+                    entry.infoWindow.close();
+                    if (activeLiveSellerInfoWindow === entry.infoWindow) {
+                        activeLiveSellerInfoWindow = null;
+                    }
+                }
+                if (entry) {
+                    entry.isVisible = false;
+                }
+                return;
+            }
             const seller = entry ? entry.seller : null;
             let searchableText = entry?.searchText;
             if (typeof searchableText !== 'string') {
@@ -5554,23 +6772,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
         lastLiveSellerSearchResults = visibleLiveSellerEntries;
 
+        updatePinListCategorySummary();
+        updatePinListDateSummary();
         updatePinListPanel({ reason: 'filter' });
         refreshMarkerCluster(visibleMarkers);
     }
 
-    function executeSearch() {
-        if (!filterDropdownElement) {
+    function runPinListSearch(options = {}) {
+        if (!pinListSearchInputElement) {
             return;
         }
-
-        if (filterSearchInput) {
-            currentSearchQuery = filterSearchInput.value.trim().toLowerCase();
+        const extras = {
+            ...options,
+            suppressAutoExpand: Boolean(options.collapseAfterSearch)
+        };
+        applySearchQuery(pinListSearchInputElement.value, extras);
+        closeAllPinListPopovers();
+        if (options.collapseAfterSearch) {
+            setPinListCollapsed(true);
         }
-        currentSearchTokens = tokenizeSearchQuery(currentSearchQuery);
+    }
 
+    function applySearchQuery(rawValue, options = {}) {
+        const { shouldPan = false, suppressAutoExpand = false } = options;
+        const raw = typeof rawValue === 'string' ? rawValue : '';
+        const trimmed = raw.trim();
+        const normalized = trimmed.toLowerCase();
+        currentSearchQuery = normalized;
+        currentSearchTokens = tokenizeSearchQuery(normalized);
+        if (pinListSearchInputElement && pinListSearchInputElement.value !== raw) {
+            pinListSearchInputElement.value = raw;
+        }
         filterMarkers();
-        updatePinListPanel({ reason: 'search' });
+        if ((trimmed || shouldPan) && !suppressAutoExpand) {
+            setPinListCollapsed(false);
+        }
+        if (shouldPan) {
+            focusMapOnSearchResults();
+        }
+    }
 
+    function focusMapOnSearchResults() {
         if (!map) {
             return;
         }
@@ -5583,11 +6825,9 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
             return;
         }
-
-        if (filterSearchInput) {
-            filterSearchInput.blur();
+        if (pinListSearchInputElement) {
+            pinListSearchInputElement.blur();
         }
-        filterDropdownElement.classList.add('hidden');
 
         const pinCandidates = visibleMarkers
             .map(marker => ({
@@ -5651,23 +6891,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         currentSearchQuery = '';
         currentSearchTokens = [];
-        if (filterSearchInput) {
-            filterSearchInput.value = '';
+        if (pinListSearchInputElement) {
+            pinListSearchInputElement.value = '';
         }
-        selectedStartDate = '';
-        selectedEndDate = '';
-        if (filterDatePicker) {
-            filterDatePicker.clear();
-            if (filterDateRangeInput) {
-                filterDateRangeInput.setAttribute('readonly', 'readonly');
-            }
-        } else if (filterDateRangeInput) {
-            filterDateRangeInput.value = '';
-        }
+        updateSelectedDateRange('', '', { skipFilter: true });
         filterMarkers();
-        if (filterDropdownElement) {
-            filterDropdownElement.classList.add('hidden');
-        }
         if (map && typeof map.setZoom === 'function' && typeof map.panTo === 'function') {
             const targetPosition = userMarker ? toLatLngLiteral(userMarker.position) : DEFAULT_MAP_CENTER;
             map.panTo(targetPosition);
@@ -5676,7 +6904,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    window.applyFilters = filterMarkers;
+    applyFiltersCallback = filterMarkers;
 
     // Lifetime options logic
     pinLifetimeSelectElement = document.getElementById('lifetime-select');
@@ -5766,14 +6994,57 @@ async function initMap() {
         }
     }
 
+    activeMapId = getDesiredMapId(getActiveTheme());
     map = new Map(document.getElementById('map'), {
         center: DEFAULT_MAP_CENTER,
         zoom: 12,
-        mapId: '4504f8b37365c3d0',
+        mapId: activeMapId,
+        mapTypeId: 'roadmap',
         gestureHandling: 'greedy',
         disableDefaultUI: true,
         zoomControl: false,
         fullscreenControl: false
+    });
+    applyMapTheme();
+    function closeOpenPinInfoWindows() {
+        markers.forEach((marker) => {
+            if (!marker || !marker.infoWindow) {
+                return;
+            }
+            if (typeof marker.infoWindow.hide === 'function') {
+                marker.infoWindow.hide();
+            } else if (marker.infoWindow.container) {
+                marker.infoWindow.container.style.display = 'none';
+            }
+        });
+    }
+
+    function suppressMapClickOnce() {
+        suppressNextMapClick = true;
+        if (suppressMapClickTimer) {
+            clearTimeout(suppressMapClickTimer);
+        }
+        suppressMapClickTimer = setTimeout(() => {
+            suppressNextMapClick = false;
+            suppressMapClickTimer = null;
+        }, 350);
+    }
+
+    map.addListener('click', (event) => {
+        if (suppressNextMapClick) {
+            suppressNextMapClick = false;
+            if (suppressMapClickTimer) {
+                clearTimeout(suppressMapClickTimer);
+                suppressMapClickTimer = null;
+            }
+            return;
+        }
+        const target = event?.domEvent?.target;
+        if (target instanceof Element && target.closest('.custom-info-window')) {
+            return;
+        }
+        setPinListCollapsed(true);
+        closeOpenPinInfoWindows();
     });
 
     // Add Traffic Layer
@@ -5844,13 +7115,23 @@ async function initMap() {
 
         let linkElement = '';
         if (pin.link) {
-            linkElement = `<div class="info-window-link"><a href="${pin.link}" target="_blank" style="text-decoration: none; color: #90f2a8">${pin.link}</a></div>`;
+            const normalizedLink = normalizeExternalLink(pin.link);
+            if (normalizedLink) {
+                const linkLabel = typeof pin.link === 'string' ? pin.link.trim() : normalizedLink;
+                linkElement = `<div class="info-window-link"><a href="${normalizedLink}" target="_blank" rel="noopener">${linkLabel || normalizedLink}</a></div>`;
+            }
         }
 
         let editButton = '';
         if (userIp === pin.reporter) {
             editButton = `<button type="button" class="edit-btn" onclick="editPin('${pin._id}')" style="background-color: #4285f4; font-size: 15px">edit</button>`;
         }
+
+        const pinId = normalizePinId(pin._id || pin.id);
+        const isSavedPin = Boolean(pinId && isPinSaved(pinId));
+        const saveButton = pinId
+            ? `<button type="button" class="save-pin-btn${isSavedPin ? ' is-saved' : ''}" data-pin-id="${pinId}" aria-pressed="${isSavedPin ? 'true' : 'false'}">${isSavedPin ? 'Saved' : 'Save'}</button>`
+            : '';
 
         const when = getPinWhenLabel(pin) || 'N/A';
 
@@ -5899,6 +7180,7 @@ async function initMap() {
                 ${linkElement}
                 <div class="info-window-actions">
                     ${editButton}
+                    ${saveButton}
                 </div>
                 <div class="info-window-vote-actions">
                     <div class="info-window-vote">
@@ -5915,6 +7197,17 @@ async function initMap() {
         const infowindow = new CustomInfoWindow(pin, contentString);
         infowindow.setMap(map);
         marker.infoWindow = infowindow;
+
+        if (infowindow.container) {
+            const stopMapClick = (event) => {
+                suppressMapClickOnce();
+                event.stopPropagation();
+            };
+            infowindow.container.addEventListener('pointerdown', stopMapClick);
+            infowindow.container.addEventListener('mousedown', stopMapClick);
+            infowindow.container.addEventListener('touchstart', stopMapClick);
+            infowindow.container.addEventListener('click', stopMapClick);
+        }
 
         if (pinImageSources.length) {
             const imageNodes = infowindow.container.querySelectorAll('.info-window-images__item img');
@@ -5947,6 +7240,15 @@ async function initMap() {
             navigateButton.addEventListener('click', () => showNavigationOptions(pin));
         }
 
+        const saveButtonElement = infowindow.container.querySelector('.save-pin-btn');
+        if (saveButtonElement && pinId) {
+            updateSavedButtonState(saveButtonElement, pinId);
+            saveButtonElement.addEventListener('click', (event) => {
+                event.stopPropagation();
+                toggleSavedPinById(pinId);
+            });
+        }
+
         const closeButton = infowindow.container.querySelector('.close-info-window');
         if (closeButton) {
             closeButton.addEventListener('click', () => {
@@ -5968,11 +7270,13 @@ async function initMap() {
         try {
             const fullPin = await fetchPinDetailsById(pin._id);
             if (fullPin) {
-                marker.pin = {
-                    ...pin,
-                    ...fullPin,
-                    images: Array.isArray(fullPin.images) ? fullPin.images : []
-                };
+                const mergedPin = mergePinData(
+                    pin,
+                    normalizePinPayload(fullPin, { includeDefaults: true })
+                );
+                marker.pin = mergedPin;
+                marker.pinFingerprint = buildPinFingerprint(mergedPin);
+                marker.searchText = buildSearchableBlob(mergedPin);
                 const wasOpen = marker.infoWindow && marker.infoWindow.container.style.display === 'block';
                 buildPinInfoWindow(marker);
                 if (wasOpen && marker.infoWindow) {
@@ -5982,36 +7286,173 @@ async function initMap() {
         } catch (error) {
             console.error('Failed to load pin details', error);
         } finally {
-            pin.imagesLoading = false;
+            if (marker.pin) {
+                marker.pin.imagesLoading = false;
+            }
+        }
+    }
+
+    function createPinMarkerContent(category) {
+        const icon = getIconForCategory(category);
+        const markerElement = document.createElement('div');
+        markerElement.textContent = icon;
+        markerElement.style.fontSize = '24px';
+        return markerElement;
+    }
+
+    function normalizePinPayload(pin, options = {}) {
+        const { includeDefaults = false } = options;
+        const normalized = { ...(pin || {}) };
+        const hasImages = Array.isArray(pin?.images);
+        const hasImageCount = Object.prototype.hasOwnProperty.call(pin || {}, 'imageCount');
+        if (hasImages) {
+            normalized.images = pin.images;
+        } else if (includeDefaults) {
+            normalized.images = [];
+        }
+        if (hasImageCount || hasImages || includeDefaults) {
+            const imageCountValue = Number(pin?.imageCount || (hasImages ? pin.images.length : 0));
+            normalized.imageCount = Number.isFinite(imageCountValue) ? imageCountValue : 0;
+        }
+        return normalized;
+    }
+
+    function mergePinData(existing, incoming) {
+        const next = { ...(existing || {}), ...(incoming || {}) };
+        const incomingHasImages = incoming && Object.prototype.hasOwnProperty.call(incoming, 'images');
+        if (!incomingHasImages && Array.isArray(existing?.images)) {
+            next.images = existing.images;
+        }
+        const incomingHasImageCount = incoming && Object.prototype.hasOwnProperty.call(incoming, 'imageCount');
+        if (!incomingHasImageCount && Number.isFinite(existing?.imageCount)) {
+            next.imageCount = existing.imageCount;
+        }
+        if (existing?.imagesLoading) {
+            next.imagesLoading = existing.imagesLoading;
+        }
+        return next;
+    }
+
+    function buildPinFingerprint(pin) {
+        if (!pin) {
+            return '';
+        }
+        const lifetime = pin.lifetime || {};
+        const parts = [
+            pin.title,
+            pin.description,
+            pin.category,
+            pin.link,
+            pin.lat,
+            pin.lng,
+            pin.upvotes,
+            pin.downvotes,
+            lifetime.type,
+            lifetime.start,
+            lifetime.end,
+            lifetime.value,
+            pin.imageCount
+        ];
+        return parts.map((value) => (value === null || value === undefined ? '' : String(value))).join('|');
+    }
+
+    function updatePinMarkerFromData(marker, pin) {
+        if (!marker) {
+            return;
+        }
+        const incoming = normalizePinPayload(pin);
+        const mergedPin = mergePinData(marker.pin, incoming);
+        const nextFingerprint = buildPinFingerprint(mergedPin);
+        const hasChanged = marker.pinFingerprint !== nextFingerprint;
+
+        marker.pin = mergedPin;
+        marker.pinFingerprint = nextFingerprint;
+
+        const nextCategory = mergedPin.category;
+        if (marker.category !== nextCategory) {
+            marker.category = nextCategory;
+            const content = marker.content instanceof HTMLElement ? marker.content : null;
+            if (content) {
+                content.textContent = getIconForCategory(nextCategory);
+            } else {
+                marker.content = createPinMarkerContent(nextCategory);
+            }
+        }
+
+        const nextTitle = mergedPin.title || '';
+        if (marker.title !== nextTitle) {
+            marker.title = nextTitle;
+        }
+
+        if (Number.isFinite(mergedPin.lat) && Number.isFinite(mergedPin.lng)) {
+            const currentPosition = toLatLngLiteral(marker.position);
+            if (!currentPosition || currentPosition.lat !== mergedPin.lat || currentPosition.lng !== mergedPin.lng) {
+                marker.position = { lat: mergedPin.lat, lng: mergedPin.lng };
+            }
+        }
+
+        if (hasChanged || typeof marker.searchText !== 'string') {
+            marker.searchText = buildSearchableBlob(mergedPin);
+        }
+
+        if (hasChanged && marker.infoWindow) {
+            const wasOpen = marker.infoWindow.container && marker.infoWindow.container.style.display === 'block';
+            buildPinInfoWindow(marker);
+            if (wasOpen && marker.infoWindow) {
+                marker.infoWindow.show();
+            }
+        }
+    }
+
+    function removePinMarker(marker) {
+        if (!marker) {
+            return;
+        }
+        if (marker.infoWindow && typeof marker.infoWindow.setMap === 'function') {
+            marker.infoWindow.setMap(null);
+        }
+        if (marker.infoWindow && marker.infoWindow.container) {
+            marker.infoWindow.container.style.display = 'none';
+        }
+        if (marker.map) {
+            marker.map = null;
         }
     }
 
     function addPinToMap(pin) {
-        const icon = getIconForCategory(pin.category);
-        const markerElement = document.createElement('div');
-        markerElement.textContent = icon;
-        markerElement.style.fontSize = '24px';
-    
-        const searchableText = buildSearchableBlob(pin);
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-            position: { lat: pin.lat, lng: pin.lng },
-            title: pin.title,
-            content: markerElement
-        });
-    
-        marker.category = pin.category;
-        marker.pin = {
-            ...pin,
-            images: Array.isArray(pin.images) ? pin.images : [],
-            imageCount: Number(pin.imageCount || (Array.isArray(pin.images) ? pin.images.length : 0))
-        };
-        marker.searchText = searchableText;
-        marker.isVisible = true;
+        const pinId = normalizePinId(pin?._id || pin?.id);
+        if (!pinId) {
+            return null;
+        }
+        const existingMarker = pinMarkersById.get(pinId);
+        if (existingMarker) {
+            updatePinMarkerFromData(existingMarker, pin);
+            return existingMarker;
+        }
 
-        buildPinInfoWindow(marker);
+        const normalizedPin = normalizePinPayload(pin, { includeDefaults: true });
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+            position: { lat: normalizedPin.lat, lng: normalizedPin.lng },
+            title: normalizedPin.title || '',
+            content: createPinMarkerContent(normalizedPin.category)
+        });
+
+        marker.category = normalizedPin.category;
+        marker.pin = normalizedPin;
+        marker.pinFingerprint = buildPinFingerprint(normalizedPin);
+        marker.searchText = buildSearchableBlob(normalizedPin);
+        marker.isVisible = true;
+        marker.ensureInfoWindow = () => {
+            if (!marker.infoWindow) {
+                buildPinInfoWindow(marker);
+            }
+        };
     
         marker.addListener('gmp-click', async () => {
             await ensurePinDetails(marker);
+            if (typeof marker.ensureInfoWindow === 'function') {
+                marker.ensureInfoWindow();
+            }
             if (!marker.infoWindow) {
                 return;
             }
@@ -6024,6 +7465,8 @@ async function initMap() {
         });
 
         markers.push(marker);
+        pinMarkersById.set(pinId, marker);
+        return marker;
     }
 
     function fetchPins() {
@@ -6037,16 +7480,32 @@ async function initMap() {
         return fetch(url)
         .then(response => response.json())
         .then(pins => {
-            clearMarkers();
             const normalizedPins = Array.isArray(pins) ? pins : [];
+            const seenIds = new Set();
             normalizedPins.forEach(pin => {
-                addPinToMap(pin);
+                const pinId = normalizePinId(pin?._id || pin?.id);
+                if (!pinId) {
+                    return;
+                }
+                seenIds.add(pinId);
+                const marker = pinMarkersById.get(pinId);
+                if (marker) {
+                    updatePinMarkerFromData(marker, pin);
+                } else {
+                    addPinToMap(pin);
+                }
             });
-            if (typeof window.applyFilters === 'function') {
-                window.applyFilters();
-            }
+            pinMarkersById.forEach((marker, id) => {
+                if (!seenIds.has(id)) {
+                    removePinMarker(marker);
+                    pinMarkersById.delete(id);
+                }
+            });
+            markers = Array.from(pinMarkersById.values());
+            applyFilters();
+            syncSavedPinsWithMarkers();
             startAdminEditLocationIfPending();
-            lastKnownPinsCount = normalizedPins.length;
+            lastKnownPinsCount = seenIds.size;
             DEBUG_LOGGER.log('Pins synchronized', { count: lastKnownPinsCount });
         })
         .catch(error => {
@@ -6081,7 +7540,7 @@ async function initMap() {
         const title = titleInputEl ? titleInputEl.value : '';
         const description = descriptionInputEl ? descriptionInputEl.value : '';
         const category = categorySelectEl ? categorySelectEl.value : '';
-        const link = linkInputEl ? linkInputEl.value : '';
+        const link = linkInputEl ? normalizeExternalLink(linkInputEl.value) : '';
         const lifetimeType = lifetimeSelectEl ? lifetimeSelectEl.value : '';
 
         if (!title || !description || !category || !lifetimeType) {
@@ -6182,9 +7641,7 @@ async function initMap() {
 
             clearTemporaryMarkerSelection('Belum ada lokasi yang dipilih.');
             addPinToMap(data);
-            if (typeof window.applyFilters === 'function') {
-                window.applyFilters();
-            }
+            applyFilters();
             const formEl = addPinFormElement || document.getElementById('add-pin-form');
             if (formEl) {
                 formEl.reset();
@@ -6221,19 +7678,21 @@ function handleLocationError(browserHasGeolocation) {
     // Get user's current location
 
     // Custom Map Type Controls
-    const mapViewBtn = document.getElementById('map-view-btn');
-    const satelliteViewBtn = document.getElementById('satellite-view-btn');
+    mapViewButton = document.getElementById('map-view-btn');
+    satelliteViewButton = document.getElementById('satellite-view-btn');
 
-    mapViewBtn.addEventListener('click', () => {
-        map.setMapTypeId('terrain');
-        mapViewBtn.classList.add('active');
-        satelliteViewBtn.classList.remove('active');
+    mapViewButton.addEventListener('click', () => {
+        map.setMapTypeId('roadmap');
+        mapViewButton.classList.add('active');
+        satelliteViewButton.classList.remove('active');
+        applyMapTheme();
     });
 
-    satelliteViewBtn.addEventListener('click', () => {
+    satelliteViewButton.addEventListener('click', () => {
         map.setMapTypeId('hybrid');
-        satelliteViewBtn.classList.add('active');
-        mapViewBtn.classList.remove('active');
+        satelliteViewButton.classList.add('active');
+        mapViewButton.classList.remove('active');
+        applyMapTheme();
     });
 
     let locationWatchId = null;
@@ -6262,9 +7721,7 @@ function handleLocationError(browserHasGeolocation) {
             handleLocationEnabled();
             handleResidentLocationUpdate();
             trackLocationUpdate(newLocation.lat, newLocation.lng);
-            if (typeof window.applyFilters === 'function') {
-                window.applyFilters();
-            }
+            applyFilters();
         }, () => {
             handleLocationError(false);
             stopLocationWatch();
@@ -6302,9 +7759,7 @@ function handleLocationError(browserHasGeolocation) {
 
             handleLocationEnabled();
             handleResidentLocationUpdate();
-            if (typeof window.applyFilters === 'function') {
-                window.applyFilters();
-            }
+            applyFilters();
         }, () => {
             handleLocationError(true);
         });
@@ -6330,7 +7785,9 @@ function handleLocationError(browserHasGeolocation) {
     if (addPinFormElement) {
         addPinFormElement.addEventListener('submit', submitPin);
     }
-    const addPinButton = document.getElementById('add-pin-btn');
+    if (!addPinButton) {
+        addPinButton = document.getElementById('add-pin-btn');
+    }
     if (addPinButton) {
         addPinButton.addEventListener('click', () => {
             const formContainer = pinFormContainer || document.getElementById('pin-form');
@@ -6341,7 +7798,6 @@ function handleLocationError(browserHasGeolocation) {
             if (willOpen) {
                 setPinListCollapsed(true);
                 closeActionMenu();
-                hideFilterDropdown();
                 formContainer.classList.remove('hidden');
             } else {
                 formContainer.classList.add('hidden');
@@ -6437,6 +7893,267 @@ function formatDateParts(dateInput) {
     const day = String(date.getDate()).padStart(2, '0');
     const monthYear = `${months[date.getMonth()]} ${date.getFullYear()}`;
     return { day, monthYear, label: formatDate(date), isValid: true };
+}
+
+function formatDateSummaryLabel(value) {
+    if (!value) {
+        return '';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+}
+
+function formatDateToIcsDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return '';
+    }
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+}
+
+function formatDateToIcsTimestamp(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return '';
+    }
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+    return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+}
+
+function normalizeCalendarDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return null;
+    }
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function escapeIcsText(value) {
+    if (!value) {
+        return '';
+    }
+    return String(value)
+        .replace(/\\/g, '\\\\')
+        .replace(/\r/g, '')
+        .replace(/\n/g, '\\n')
+        .replace(/;/g, '\\;')
+        .replace(/,/g, '\\,');
+}
+
+function getPinCalendarLocationLabel(pin) {
+    if (!pin) {
+        return '';
+    }
+    const candidates = [
+        pin.address,
+        pin.locationName,
+        pin.location
+    ];
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return candidate.trim();
+        }
+    }
+    const city = typeof pin.city === 'string' ? pin.city.trim() : '';
+    if (city) {
+        return city;
+    }
+    const lat = Number(pin.lat);
+    const lng = Number(pin.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return `${lat}, ${lng}`;
+    }
+    return '';
+}
+
+function buildPinCalendarDescription(pin, mapUrl) {
+    if (!pin) {
+        return '';
+    }
+    const parts = [];
+    if (typeof pin.description === 'string' && pin.description.trim()) {
+        parts.push(pin.description.trim());
+    }
+    if (typeof pin.link === 'string' && pin.link.trim()) {
+        const normalizedLink = normalizeExternalLink(pin.link);
+        parts.push(`Link: ${normalizedLink || pin.link.trim()}`);
+    }
+    if (mapUrl) {
+        parts.push(mapUrl);
+    }
+    return parts.join('\n');
+}
+
+function buildPinCalendarFilename(pin) {
+    const rawTitle = typeof pin?.title === 'string' ? pin.title.trim() : '';
+    const base = rawTitle
+        ? rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+        : '';
+    const safeBase = base || 'pin';
+    return `pin-${safeBase}.ics`;
+}
+
+function getPinCalendarPayload(pin) {
+    if (!pin) {
+        return null;
+    }
+    const { start, end } = getPinDateRangeParts(pin);
+    const startDate = normalizeCalendarDate(start);
+    const endDate = normalizeCalendarDate(end);
+    if (!startDate && !endDate) {
+        return null;
+    }
+    let eventStart = startDate || endDate;
+    let eventEnd = endDate || startDate || eventStart;
+    if (!eventStart || !eventEnd) {
+        return null;
+    }
+    if (eventEnd < eventStart) {
+        const swap = eventStart;
+        eventStart = eventEnd;
+        eventEnd = swap;
+    }
+    const endExclusive = new Date(eventEnd.getFullYear(), eventEnd.getMonth(), eventEnd.getDate() + 1);
+
+    const lat = Number(pin.lat);
+    const lng = Number(pin.lng);
+    const mapUrl = Number.isFinite(lat) && Number.isFinite(lng)
+        ? `https://maps.google.com/?q=${lat},${lng}`
+        : '';
+    const summary = typeof pin.title === 'string' && pin.title.trim()
+        ? pin.title.trim()
+        : 'Pin tersimpan';
+    const location = getPinCalendarLocationLabel(pin);
+    const description = buildPinCalendarDescription(pin, mapUrl);
+
+    return {
+        summary,
+        description,
+        location,
+        mapUrl,
+        start: eventStart,
+        end: eventEnd,
+        endExclusive
+    };
+}
+
+function buildPinCalendarIcs(pin) {
+    const payload = getPinCalendarPayload(pin);
+    if (!payload) {
+        return '';
+    }
+    const summary = escapeIcsText(payload.summary);
+    const description = escapeIcsText(payload.description);
+    const location = escapeIcsText(payload.location);
+    const pinId = normalizePinId(pin?._id || pin?.id);
+    const uidBase = pinId ? String(pinId).replace(/[^A-Za-z0-9_-]/g, '') : `pin-${Date.now()}`;
+    const uid = `${uidBase || `pin-${Date.now()}`}@ayanaon`;
+    const dtstamp = formatDateToIcsTimestamp(new Date());
+    const startIcs = formatDateToIcsDate(payload.start);
+    const endIcs = formatDateToIcsDate(payload.endExclusive);
+    if (!startIcs || !endIcs || !dtstamp) {
+        return '';
+    }
+    const lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Ayanaon//Pins//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${dtstamp}`,
+        `SUMMARY:${summary}`,
+        `DTSTART;VALUE=DATE:${startIcs}`,
+        `DTEND;VALUE=DATE:${endIcs}`
+    ];
+    if (description) {
+        lines.push(`DESCRIPTION:${description}`);
+    }
+    if (location) {
+        lines.push(`LOCATION:${location}`);
+    }
+    if (payload.mapUrl) {
+        lines.push(`URL:${payload.mapUrl}`);
+    }
+    lines.push('END:VEVENT', 'END:VCALENDAR');
+    return lines.join('\r\n');
+}
+
+function downloadPinCalendarIcs(pin) {
+    const content = buildPinCalendarIcs(pin);
+    if (!content) {
+        alert('Tanggal pin tidak tersedia untuk kalender.');
+        return;
+    }
+    const filename = buildPinCalendarFilename(pin);
+    const blob = new Blob([content], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function buildGoogleCalendarUrl(payload) {
+    if (!payload) {
+        return '';
+    }
+    const start = formatDateToIcsDate(payload.start);
+    const end = formatDateToIcsDate(payload.endExclusive);
+    if (!start || !end) {
+        return '';
+    }
+    const params = new URLSearchParams({
+        action: 'TEMPLATE',
+        text: payload.summary || 'Pin tersimpan',
+        dates: `${start}/${end}`
+    });
+    if (payload.description) {
+        params.set('details', payload.description);
+    }
+    if (payload.location) {
+        params.set('location', payload.location);
+    }
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function buildOutlookCalendarUrl(payload) {
+    if (!payload) {
+        return '';
+    }
+    const start = formatDateToYMD(payload.start);
+    const end = formatDateToYMD(payload.endExclusive);
+    if (!start || !end) {
+        return '';
+    }
+    const params = new URLSearchParams({
+        path: '/calendar/action/compose',
+        rru: 'addevent',
+        subject: payload.summary || 'Pin tersimpan',
+        startdt: start,
+        enddt: end,
+        allday: 'true'
+    });
+    if (payload.description) {
+        params.set('body', payload.description);
+    }
+    if (payload.location) {
+        params.set('location', payload.location);
+    }
+    return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
 }
 
 function getCategoryEmoji(category) {
@@ -6577,7 +8294,6 @@ async function editPin(id, options = {}) {
     const shouldEditLocation = options.startLocationSelection === true;
     setPinListCollapsed(true);
     closeActionMenu();
-    hideFilterDropdown();
     setTemporaryMarkerLocation(new google.maps.LatLng(pin.lat, pin.lng), {
         panToLocation: shouldEditLocation,
         message: shouldEditLocation
@@ -6687,7 +8403,7 @@ async function updatePin(id) {
     const title = titleInputEl ? titleInputEl.value : '';
     const description = descriptionInputEl ? descriptionInputEl.value : '';
     const category = categorySelectEl ? categorySelectEl.value : '';
-    const link = linkInputEl ? linkInputEl.value : '';
+    const link = linkInputEl ? normalizeExternalLink(linkInputEl.value) : '';
     const lifetimeType = lifetimeSelectEl ? lifetimeSelectEl.value : '';
 
     if (!title || !description || !category || !lifetimeType) {
@@ -6859,6 +8575,9 @@ scheduleDailyRefresh();
 
 refreshMaintenanceStatus();
 setInterval(refreshMaintenanceStatus, 180000);
+
+refreshFeatureFlags();
+setInterval(refreshFeatureFlags, 180000);
 
 function fetchUniqueIpCount(options = {}) {
     const { enableAnimation = false } = options;

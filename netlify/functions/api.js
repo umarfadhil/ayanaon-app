@@ -107,6 +107,9 @@ const MAX_MAIN_PHOTO_BYTES = 1024 * 1024;
 const MAX_MENU_PHOTO_BYTES = 4 * 1024 * 1024;
 const MAX_MENU_PHOTO_COUNT = 3;
 const MAX_RESIDENT_PHOTO_BYTES = 1024 * 1024;
+const RESIDENT_ROLE_ADMIN = 'admin';
+const RESIDENT_ROLE_PIN_MANAGER = 'pin_manager';
+const RESIDENT_ROLE_RESIDENT = 'resident';
 
 function parseSellerPhoto(photoPayload, options = {}) {
     const {
@@ -221,6 +224,32 @@ function isAdminResident(doc) {
     return usernameLower === 'admin';
 }
 
+function normalizeResidentRole(role) {
+    if (role === RESIDENT_ROLE_PIN_MANAGER) {
+        return RESIDENT_ROLE_PIN_MANAGER;
+    }
+    return RESIDENT_ROLE_RESIDENT;
+}
+
+function getResidentRole(doc) {
+    if (isAdminResident(doc)) {
+        return RESIDENT_ROLE_ADMIN;
+    }
+    const rawRole = typeof doc?.role === 'string' ? doc.role.toLowerCase().trim() : '';
+    if (rawRole === RESIDENT_ROLE_PIN_MANAGER) {
+        return RESIDENT_ROLE_PIN_MANAGER;
+    }
+    return RESIDENT_ROLE_RESIDENT;
+}
+
+function isPinManagerResident(doc) {
+    return getResidentRole(doc) === RESIDENT_ROLE_PIN_MANAGER;
+}
+
+function canManagePinsResident(doc) {
+    return isAdminResident(doc) || isPinManagerResident(doc);
+}
+
 function sanitizeResident(doc) {
     if (!doc) return null;
     const {
@@ -258,9 +287,18 @@ function sanitizeResident(doc) {
         sanitized.lastLocation = null;
     }
     sanitized.displayName = sanitized.displayName || sanitized.username;
-    const adminFlag = isAdminResident(doc);
-    sanitized.isAdmin = adminFlag;
-    sanitized.role = adminFlag ? 'admin' : 'resident';
+    const savedPins = Array.isArray(doc.savedPins) ? doc.savedPins : [];
+    sanitized.savedPins = Array.from(
+        new Set(
+            savedPins
+                .map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+        )
+    );
+    const role = getResidentRole(doc);
+    sanitized.isAdmin = role === RESIDENT_ROLE_ADMIN;
+    sanitized.isPinManager = role === RESIDENT_ROLE_PIN_MANAGER;
+    sanitized.role = role;
     return sanitized;
 }
 
@@ -380,6 +418,41 @@ async function reverseGeocodeCity(lat, lng) {
     }
 }
 
+const DEFAULT_FEATURE_FLAGS = {
+    gerobakOnline: true
+};
+
+function normalizeFeatureFlags(flags = {}) {
+    const raw = flags?.gerobakOnline;
+    const disabled = raw === false || raw === 'false' || raw === 0 || raw === '0';
+    return {
+        gerobakOnline: !disabled
+    };
+}
+
+async function readFeatureFlags() {
+    try {
+        const settings = await getSettingsCollection();
+        const doc = await settings.findOne({ key: 'features' });
+        return normalizeFeatureFlags(doc || DEFAULT_FEATURE_FLAGS);
+    } catch (error) {
+        console.error('Failed to read feature flags', error);
+        return { ...DEFAULT_FEATURE_FLAGS };
+    }
+}
+
+async function writeFeatureFlags(flags = {}) {
+    const settings = await getSettingsCollection();
+    const normalized = normalizeFeatureFlags(flags);
+    const payload = {
+        key: 'features',
+        ...normalized,
+        updatedAt: new Date()
+    };
+    await settings.updateOne({ key: 'features' }, { $set: payload }, { upsert: true });
+    return normalized;
+}
+
 async function readMaintenanceStatus() {
     try {
         const settings = await getSettingsCollection();
@@ -438,8 +511,7 @@ function createResidentToken(resident) {
     if (!resident?._id) {
         throw new Error('Resident document tidak valid.');
     }
-    const isAdmin = isAdminResident(resident);
-    const role = isAdmin ? 'admin' : 'resident';
+    const role = getResidentRole(resident);
     return jwt.sign(
         {
             sub: resident._id.toString(),
@@ -463,7 +535,7 @@ async function authenticateResidentRequest(req, res, options = {}) {
     const token = authHeader.slice(7);
     try {
         const payload = jwt.verify(token, JWT_SECRET);
-        const allowedRoles = new Set(['resident', 'admin', undefined]);
+        const allowedRoles = new Set([RESIDENT_ROLE_RESIDENT, RESIDENT_ROLE_ADMIN, RESIDENT_ROLE_PIN_MANAGER, undefined]);
         if (!payload?.sub || (payload.role && !allowedRoles.has(payload.role))) {
             res.status(401).json({ message: 'Token tidak valid.' });
             return null;
@@ -474,11 +546,12 @@ async function authenticateResidentRequest(req, res, options = {}) {
             res.status(401).json({ message: 'Token tidak dikenal.' });
             return null;
         }
-        const isAdmin = isAdminResident(resident);
+        const role = getResidentRole(resident);
         return {
             ...resident,
-            isAdmin,
-            role: isAdmin ? 'admin' : 'resident'
+            isAdmin: role === RESIDENT_ROLE_ADMIN,
+            isPinManager: role === RESIDENT_ROLE_PIN_MANAGER,
+            role
         };
     } catch (error) {
         console.error('Resident authentication failed', error);
@@ -521,8 +594,10 @@ router.post('/residents/register', async (req, res) => {
             usernameLower,
             passwordHash,
             displayName: String(displayName || '').trim() || usernameTrimmed,
+            role: RESIDENT_ROLE_RESIDENT,
             statusMessage: '',
             badgesGiven: 0,
+            savedPins: [],
             shareLocation: false,
             lastLocation: null,
             createdAt: now,
@@ -595,7 +670,7 @@ router.put('/residents/me', async (req, res) => {
         const residents = await getResidentsCollection();
         const payload = req.body || {};
         const { displayName, photo, removePhoto } = payload;
-        const { statusMessage } = payload;
+        const { statusMessage, savedPins } = payload;
         const setFields = {};
         const unsetFields = {};
         let hasChanges = false;
@@ -624,6 +699,21 @@ router.put('/residents/me', async (req, res) => {
                 return res.status(400).json({ message: 'Status maksimal 30 karakter.' });
             }
             setFields.statusMessage = trimmedStatus;
+            hasChanges = true;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'savedPins')) {
+            if (!Array.isArray(savedPins)) {
+                return res.status(400).json({ message: 'Daftar pin tersimpan tidak valid.' });
+            }
+            const normalizedSavedPins = Array.from(
+                new Set(
+                    savedPins
+                        .map((entry) => String(entry || '').trim())
+                        .filter(Boolean)
+                )
+            );
+            setFields.savedPins = normalizedSavedPins;
             hasChanges = true;
         }
 
@@ -1500,6 +1590,131 @@ router.put('/maintenance', async (req, res) => {
     }
 });
 
+router.get('/features', async (req, res) => {
+    const flags = await readFeatureFlags();
+    res.json(flags);
+});
+
+router.put('/features', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengubah fitur.' });
+    }
+    try {
+        const flags = await writeFeatureFlags(req.body || {});
+        res.json(flags);
+    } catch (error) {
+        console.error('Failed to update feature flags', error);
+        res.status(500).json({ message: 'Tidak dapat memperbarui fitur.' });
+    }
+});
+
+router.get('/admin/residents', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat melihat daftar warga.' });
+    }
+    try {
+        const residents = await getResidentsCollection();
+        const docs = await residents
+            .find({})
+            .sort({ lastLoginAt: -1 })
+            .toArray();
+        const payload = docs.map((doc) => ({
+            id: doc._id ? doc._id.toString() : '',
+            displayName: doc.displayName || doc.username || '',
+            username: doc.username || '',
+            lastLoginAt: doc.lastLoginAt || null,
+            role: getResidentRole(doc),
+            isAdmin: isAdminResident(doc)
+        }));
+        res.json({ residents: payload });
+    } catch (error) {
+        console.error('Failed to fetch residents', error);
+        res.status(500).json({ message: 'Tidak dapat memuat daftar warga.' });
+    }
+});
+
+router.put('/admin/residents/:id/role', async (req, res) => {
+    const authResident = await authenticateResidentRequest(req, res);
+    if (!authResident) return;
+    if (!authResident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengubah status warga.' });
+    }
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: 'Resident id tidak valid.' });
+    }
+    const requestedRole = typeof req.body?.role === 'string'
+        ? req.body.role.toLowerCase().trim()
+        : '';
+    if (![RESIDENT_ROLE_RESIDENT, RESIDENT_ROLE_PIN_MANAGER].includes(requestedRole)) {
+        return res.status(400).json({ message: 'Status warga tidak valid.' });
+    }
+    try {
+        const residents = await getResidentsCollection();
+        const target = await residents.findOne({ _id: new ObjectId(id) });
+        if (!target) {
+            return res.status(404).json({ message: 'Warga tidak ditemukan.' });
+        }
+        if (isAdminResident(target)) {
+            return res.status(403).json({ message: 'Status admin tidak dapat diubah.' });
+        }
+        const nextRole = normalizeResidentRole(requestedRole);
+        const now = new Date();
+        await residents.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { role: nextRole, updatedAt: now } }
+        );
+        const updated = await residents.findOne({ _id: new ObjectId(id) });
+        if (!updated) {
+            return res.status(404).json({ message: 'Warga tidak ditemukan.' });
+        }
+        res.json({
+            resident: {
+                id: updated._id ? updated._id.toString() : '',
+                displayName: updated.displayName || updated.username || '',
+                username: updated.username || '',
+                lastLoginAt: updated.lastLoginAt || null,
+                role: getResidentRole(updated),
+                isAdmin: isAdminResident(updated)
+            }
+        });
+    } catch (error) {
+        console.error('Failed to update resident role', error);
+        res.status(500).json({ message: 'Tidak dapat memperbarui status warga.' });
+    }
+});
+
+router.delete('/admin/residents/:id', async (req, res) => {
+    const authResident = await authenticateResidentRequest(req, res);
+    if (!authResident) return;
+    if (!authResident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat menghapus warga.' });
+    }
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: 'Resident id tidak valid.' });
+    }
+    try {
+        const residents = await getResidentsCollection();
+        const target = await residents.findOne({ _id: new ObjectId(id) });
+        if (!target) {
+            return res.status(404).json({ message: 'Warga tidak ditemukan.' });
+        }
+        if (isAdminResident(target)) {
+            return res.status(403).json({ message: 'Akun admin tidak dapat dihapus.' });
+        }
+        await residents.deleteOne({ _id: new ObjectId(id) });
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Failed to delete resident', error);
+        res.status(500).json({ message: 'Tidak dapat menghapus warga.' });
+    }
+});
+
 router.get('/unique-ips', async (req, res) => {
     try {
         const db = await connectToDatabase();
@@ -1941,10 +2156,9 @@ router.put('/pins/:id', async (req, res) => {
         return res.status(404).json({ message: 'Pin not found.' });
     }
 
-    const isAdmin = Boolean(authResident?.isAdmin);
     const isReporter = pin.reporter === ip;
-
-    if (!isReporter && !isAdmin) {
+    const canManagePins = canManagePinsResident(authResident);
+    if (!isReporter && !canManagePins) {
         return res.status(403).json({ message: 'You are not authorized to edit this pin.' });
     }
 
@@ -2012,9 +2226,9 @@ router.delete('/pins/:id', async (req, res) => {
     if (!pin) {
         return res.status(404).json({ message: 'Pin not found.' });
     }
-    const isAdmin = Boolean(authResident?.isAdmin);
     const isReporter = pin.reporter === ip;
-    if (!isAdmin && !isReporter) {
+    const canManagePins = canManagePinsResident(authResident);
+    if (!canManagePins && !isReporter) {
         return res.status(403).json({ message: 'You are not authorized to delete this pin.' });
     }
     await db.collection('pins').deleteOne({ _id: new ObjectId(id) });

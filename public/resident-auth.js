@@ -212,11 +212,16 @@
             if (typeof api.isLoggedIn === 'function' && api.isLoggedIn()) {
                 const resident = typeof api.getCurrentResident === 'function' ? api.getCurrentResident() : null;
                 const name = resident?.displayName || resident?.username || 'warga';
+                const role = typeof resident?.role === 'string' ? resident.role.toLowerCase().trim() : '';
                 const isAdmin = typeof api.isAdmin === 'function' && api.isAdmin();
-                const target = isAdmin ? 'admin.html' : 'index.html';
-                const suffix = isAdmin ? ' Mengarahkan ke dashboard admin...' : '';
+                const isPinManager = typeof api.isPinManager === 'function'
+                    ? api.isPinManager()
+                    : role === 'pin_manager' || Boolean(resident?.isPinManager);
+                const canManagePins = isAdmin || isPinManager;
+                const target = canManagePins ? 'admin.html' : 'index.html';
+                const suffix = canManagePins ? ' Mengarahkan ke dashboard manajemen pin...' : '';
                 showMessage(messageEl, 'success', `Kamu sudah login sebagai ${name}.${suffix}`);
-                if (isAdmin) {
+                if (canManagePins) {
                     setTimeout(() => {
                         window.location.replace(target);
                     }, 700);
@@ -239,11 +244,17 @@
                 const api = ensureResidentAPI();
                 const resident = await api.loginResident({ username, password });
                 const usernameLower = username.toLowerCase();
-                const isAdmin = Boolean(resident?.isAdmin || resident?.role === 'admin' || usernameLower === 'admin');
-                const target = isAdmin ? 'admin.html' : 'index.html';
-                const message = isAdmin
-                    ? 'Login admin berhasil. Membuka dashboard...'
-                    : 'Login berhasil. Mengarahkan ke peta...';
+                const role = typeof resident?.role === 'string' ? resident.role.toLowerCase().trim() : '';
+                const isAdmin = Boolean(resident?.isAdmin || role === 'admin' || usernameLower === 'admin');
+                const isPinManager = Boolean(resident?.isPinManager || role === 'pin_manager');
+                const canManagePins = isAdmin || isPinManager;
+                const target = canManagePins ? 'admin.html' : 'index.html';
+                let message = 'Login berhasil. Mengarahkan ke peta...';
+                if (isAdmin) {
+                    message = 'Login admin berhasil. Membuka dashboard...';
+                } else if (isPinManager) {
+                    message = 'Login pin manager berhasil. Membuka dashboard pin...';
+                }
                 showMessage(messageEl, 'success', message);
                 setTimeout(() => {
                     window.location.replace(target);

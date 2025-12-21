@@ -234,7 +234,7 @@
     }
 
     async function updateResidentProfile(params = {}) {
-        const { displayName, photo, removePhoto, statusMessage } = params || {};
+        const { displayName, photo, removePhoto, statusMessage, savedPins } = params || {};
         const body = {};
         if (Object.prototype.hasOwnProperty.call(params, 'displayName')) {
             body.displayName = displayName;
@@ -247,6 +247,9 @@
         }
         if (Object.prototype.hasOwnProperty.call(params, 'statusMessage')) {
             body.statusMessage = statusMessage;
+        }
+        if (Object.prototype.hasOwnProperty.call(params, 'savedPins')) {
+            body.savedPins = savedPins;
         }
         if (!Object.keys(body).length) {
             throw new Error('Tidak ada perubahan yang dikirim.');
@@ -392,10 +395,30 @@
         return Boolean(currentSession.token && currentSession.resident);
     }
 
+    function getResidentRole() {
+        const resident = currentSession?.resident || null;
+        const username = typeof resident?.username === 'string' ? resident.username : '';
+        const role = typeof resident?.role === 'string' ? resident.role.toLowerCase().trim() : '';
+        if (resident?.isAdmin || role === 'admin' || username.toLowerCase() === 'admin') {
+            return 'admin';
+        }
+        if (resident?.isPinManager || role === 'pin_manager') {
+            return 'pin_manager';
+        }
+        return 'resident';
+    }
+
     function isAdmin() {
-        const username = currentSession?.resident?.username || '';
-        const usernameLower = username.toLowerCase();
-        return Boolean(currentSession?.resident?.isAdmin || usernameLower === 'admin');
+        return getResidentRole() === 'admin';
+    }
+
+    function isPinManager() {
+        return getResidentRole() === 'pin_manager';
+    }
+
+    function canManagePins() {
+        const role = getResidentRole();
+        return role === 'admin' || role === 'pin_manager';
     }
 
     function getToken() {
@@ -447,6 +470,8 @@
         getCurrentResident,
         isLoggedIn,
         isAdmin,
+        isPinManager,
+        canManagePins,
         getToken,
         subscribe
     };

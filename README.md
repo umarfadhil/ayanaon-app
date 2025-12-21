@@ -96,6 +96,15 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.0
+- **Navigation Improvements:** Bottom navigation adds Home, Search, List, and Saved modes with clearer panel behavior.
+- **Save Pins Feature:** Save pins from the list or map popups and see them in a dedicated Saved view, synced to Warga profiles.
+- **Theme Feature:** Light/Dark theme toggle with map styling and persisted preference.
+- **Performance Improvements:** Debounced search, cached search text for faster filtering, and in-flight guards to avoid duplicate requests.
+- **Pin List Filters Refresh:** Category/date popovers with select-all/clear-all and a date-range picker to refine results faster.
+- **Pin Location Search:** Search for addresses while choosing a pin location before confirming the marker.
+- **PWA Cache Update:** Service worker cache bumped to v2.4.0 for fresh assets on deploy.
+
 ### What's New in v2.3.2
 - **Admin Pin Filters:** Added category dropdown plus Link/Date/Photo radio filters with a cleaner layout and search button for quicker curation.
 - **Category Sync:** Admin category filter now auto-populates from existing pin categories so options stay accurate without manual edits.

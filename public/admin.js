@@ -27,6 +27,8 @@
         heatmapPoints: [],
         topCities: [],
         metricsLoaded: false,
+        usersLoaded: false,
+        usersLoading: false,
         metricsFilter: {
             granularity: 'day',
             year: new Date().getFullYear(),
@@ -37,6 +39,14 @@
         maintenance: {
             enabled: false,
             message: ''
+        },
+        features: {
+            gerobakOnline: true
+        },
+        residents: [],
+        permissions: {
+            isAdmin: false,
+            canManagePins: false
         }
     };
 
@@ -125,6 +135,14 @@
         els.dashboardFrame = document.getElementById('dashboard-frame');
         els.dashboardError = document.getElementById('dashboard-error');
         els.dashboardReloadBtn = document.getElementById('dashboard-reload-btn');
+        els.featuresContent = document.getElementById('admin-features-pane');
+        els.featureGerobakToggle = document.getElementById('feature-gerobak-toggle');
+        els.featureSaveBtn = document.getElementById('feature-save-btn');
+        els.featureMessage = document.getElementById('admin-feature-message');
+        els.usersContent = document.getElementById('admin-users-pane');
+        els.usersRefreshBtn = document.getElementById('users-refresh-btn');
+        els.usersMessage = document.getElementById('admin-users-message');
+        els.usersTableBody = document.getElementById('users-table-body');
     }
 
     function showMessage(type, text) {
@@ -141,6 +159,82 @@
             els.message.classList.add('is-success');
         } else if (type === 'error') {
             els.message.classList.add('is-error');
+        }
+    }
+
+    function showUsersMessage(type, text) {
+        if (!els.usersMessage) {
+            return;
+        }
+        els.usersMessage.textContent = text || '';
+        els.usersMessage.classList.remove('is-success', 'is-error', 'is-visible');
+        if (!text) {
+            return;
+        }
+        els.usersMessage.classList.add('is-visible');
+        if (type === 'success') {
+            els.usersMessage.classList.add('is-success');
+        } else if (type === 'error') {
+            els.usersMessage.classList.add('is-error');
+        }
+    }
+
+    function resolveResidentRole(resident) {
+        const username = typeof resident?.username === 'string' ? resident.username.toLowerCase().trim() : '';
+        const role = typeof resident?.role === 'string' ? resident.role.toLowerCase().trim() : '';
+        if (resident?.isAdmin || role === 'admin' || username === 'admin') {
+            return 'admin';
+        }
+        if (resident?.isPinManager || role === 'pin_manager') {
+            return 'pin_manager';
+        }
+        return 'resident';
+    }
+
+    function getRoleLabel(role) {
+        if (role === 'admin') {
+            return 'Admin';
+        }
+        if (role === 'pin_manager') {
+            return 'Pin Manager';
+        }
+        return 'Warga';
+    }
+
+    function formatLastLogin(value) {
+        if (!value) {
+            return '-';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return '-';
+        }
+        return new Intl.DateTimeFormat('id-ID', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        }).format(date);
+    }
+
+    function applyAdminPermissions() {
+        const isAdmin = Boolean(state.permissions?.isAdmin);
+        const adminOnlyElements = Array.from(document.querySelectorAll('[data-admin-only="true"]'));
+        adminOnlyElements.forEach((element) => {
+            element.hidden = !isAdmin;
+            element.setAttribute('aria-hidden', isAdmin ? 'false' : 'true');
+        });
+        if (!isAdmin) {
+            if (els.metricsContent) {
+                els.metricsContent.classList.add('hidden');
+            }
+            if (els.featuresContent) {
+                els.featuresContent.classList.add('hidden');
+            }
+            if (els.usersContent) {
+                els.usersContent.classList.add('hidden');
+            }
         }
     }
 
@@ -226,6 +320,327 @@
         }
     }
 
+    function normalizeFeatureFlags(flags = {}) {
+        const raw = flags?.gerobakOnline;
+        const disabled = raw === false || raw === 'false' || raw === 0 || raw === '0';
+        return {
+            gerobakOnline: !disabled
+        };
+    }
+
+    function renderFeatureFlags(flags = state.features) {
+        const normalized = normalizeFeatureFlags(flags);
+        state.features = normalized;
+        if (els.featureGerobakToggle) {
+            els.featureGerobakToggle.checked = normalized.gerobakOnline;
+        }
+    }
+
+    function showFeatureMessage(type, text) {
+        if (!els.featureMessage) {
+            return;
+        }
+        els.featureMessage.textContent = text || '';
+        els.featureMessage.classList.remove('is-success', 'is-error', 'is-visible');
+        if (!text) {
+            return;
+        }
+        els.featureMessage.classList.add('is-visible');
+        if (type === 'success') {
+            els.featureMessage.classList.add('is-success');
+        } else if (type === 'error') {
+            els.featureMessage.classList.add('is-error');
+        }
+    }
+
+    function setFeatureSaving(isSaving) {
+        if (els.featureSaveBtn) {
+            els.featureSaveBtn.disabled = isSaving;
+            els.featureSaveBtn.textContent = isSaving ? 'Saving...' : 'Save';
+        }
+        if (els.featureGerobakToggle) {
+            els.featureGerobakToggle.disabled = isSaving;
+        }
+    }
+
+    async function loadFeatureFlags() {
+        try {
+            const response = await fetch('/api/features', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload?.message || 'Tidak dapat memuat fitur.');
+            }
+            renderFeatureFlags(payload);
+        } catch (error) {
+            console.warn('Gagal memuat fitur', error);
+            showFeatureMessage('error', error.message || 'Tidak dapat memuat fitur.');
+        }
+    }
+
+    async function saveFeatureFlags() {
+        const payload = {
+            gerobakOnline: Boolean(els.featureGerobakToggle?.checked)
+        };
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        setFeatureSaving(true);
+        showFeatureMessage(null, '');
+        try {
+            const response = await fetch('/api/features', {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Tidak dapat menyimpan fitur.');
+            }
+            renderFeatureFlags(data);
+            showFeatureMessage('success', 'Pengaturan fitur berhasil disimpan.');
+        } catch (error) {
+            console.error('Gagal menyimpan fitur', error);
+            showFeatureMessage('error', error.message || 'Tidak dapat menyimpan fitur.');
+        } finally {
+            setFeatureSaving(false);
+        }
+    }
+
+    function renderUsersTable() {
+        if (!els.usersTableBody) {
+            return;
+        }
+        els.usersTableBody.innerHTML = '';
+        if (!state.residents.length) {
+            const empty = document.createElement('div');
+            empty.className = 'users-empty';
+            empty.textContent = 'Belum ada warga terdaftar.';
+            els.usersTableBody.appendChild(empty);
+            return;
+        }
+        state.residents.forEach((resident) => {
+            const row = document.createElement('div');
+            row.className = 'users-table__row';
+
+            const nameCell = document.createElement('div');
+            nameCell.textContent = resident.displayName || resident.username || '-';
+
+            const usernameCell = document.createElement('div');
+            usernameCell.textContent = resident.username ? `@${resident.username}` : '-';
+
+            const loginCell = document.createElement('div');
+            loginCell.textContent = formatLastLogin(resident.lastLoginAt);
+
+            const statusCell = document.createElement('div');
+            const actionsCell = document.createElement('div');
+            actionsCell.className = 'users-table__cell--actions';
+
+            const roleValue = resolveResidentRole(resident);
+            if (roleValue === 'admin') {
+                const badge = document.createElement('span');
+                badge.className = 'users-badge users-badge--admin';
+                badge.textContent = getRoleLabel(roleValue);
+                statusCell.appendChild(badge);
+                actionsCell.textContent = '—';
+            } else {
+                const select = document.createElement('select');
+                select.className = 'users-role-select';
+                const residentOption = document.createElement('option');
+                residentOption.value = 'resident';
+                residentOption.textContent = 'Warga';
+                const managerOption = document.createElement('option');
+                managerOption.value = 'pin_manager';
+                managerOption.textContent = 'Pin Manager';
+                select.appendChild(residentOption);
+                select.appendChild(managerOption);
+                select.value = roleValue;
+                select.dataset.originalRole = roleValue;
+
+                const saveBtn = document.createElement('button');
+                saveBtn.type = 'button';
+                saveBtn.className = 'chip-btn users-save-btn';
+                saveBtn.textContent = 'Save';
+                saveBtn.disabled = true;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'ghost-btn ghost-btn--danger chip-btn users-delete-btn';
+                deleteBtn.textContent = 'Delete';
+
+                select.addEventListener('change', () => {
+                    saveBtn.disabled = select.value === select.dataset.originalRole;
+                });
+
+                saveBtn.addEventListener('click', () => {
+                    updateResidentRole(resident.id, select.value, select, saveBtn);
+                });
+
+                deleteBtn.addEventListener('click', () => {
+                    deleteResident(resident.id, resident.username, deleteBtn, saveBtn, select);
+                });
+
+                statusCell.appendChild(select);
+                actionsCell.appendChild(saveBtn);
+                actionsCell.appendChild(deleteBtn);
+            }
+
+            row.appendChild(nameCell);
+            row.appendChild(usernameCell);
+            row.appendChild(loginCell);
+            row.appendChild(statusCell);
+            row.appendChild(actionsCell);
+            els.usersTableBody.appendChild(row);
+        });
+    }
+
+    async function loadResidents(options = {}) {
+        if (!state.permissions.isAdmin || state.usersLoading) {
+            return;
+        }
+        state.usersLoading = true;
+        if (els.usersTableBody) {
+            els.usersTableBody.innerHTML = '';
+            const loading = document.createElement('div');
+            loading.className = 'users-empty';
+            loading.textContent = 'Memuat daftar warga...';
+            els.usersTableBody.appendChild(loading);
+        }
+        showUsersMessage(null, '');
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        try {
+            const response = await fetch('/api/admin/residents', { headers, cache: 'no-store' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Tidak dapat memuat daftar warga.');
+            }
+            state.residents = Array.isArray(data?.residents) ? data.residents : [];
+            state.usersLoaded = true;
+            renderUsersTable();
+        } catch (error) {
+            console.error('Gagal memuat daftar warga', error);
+            showUsersMessage('error', error.message || 'Tidak dapat memuat daftar warga.');
+        } finally {
+            state.usersLoading = false;
+        }
+    }
+
+    async function updateResidentRole(residentId, nextRole, selectEl, saveBtn) {
+        if (!state.permissions.isAdmin) {
+            return;
+        }
+        if (!residentId || !selectEl || !saveBtn) {
+            return;
+        }
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        const originalText = saveBtn.textContent || 'Save';
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        try {
+            const response = await fetch(`/api/admin/residents/${residentId}/role`, {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify({ role: nextRole })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Tidak dapat memperbarui status warga.');
+            }
+            const updated = data?.resident || null;
+            if (updated) {
+                const idx = state.residents.findIndex((entry) => entry.id === residentId);
+                if (idx !== -1) {
+                    state.residents[idx] = { ...state.residents[idx], ...updated };
+                }
+                const updatedRole = resolveResidentRole(updated);
+                selectEl.value = updatedRole;
+                selectEl.dataset.originalRole = updatedRole;
+                showUsersMessage('success', `Status ${updated.username ? `@${updated.username}` : 'warga'} diperbarui.`);
+            } else {
+                selectEl.dataset.originalRole = nextRole;
+                showUsersMessage('success', 'Status warga diperbarui.');
+            }
+        } catch (error) {
+            console.error('Gagal memperbarui status warga', error);
+            showUsersMessage('error', error.message || 'Tidak dapat memperbarui status warga.');
+        } finally {
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = selectEl.value === selectEl.dataset.originalRole;
+        }
+    }
+
+    async function deleteResident(residentId, username, deleteBtn, saveBtn, selectEl) {
+        if (!state.permissions.isAdmin) {
+            return;
+        }
+        if (!residentId || !deleteBtn) {
+            return;
+        }
+        const label = username ? `@${username}` : 'warga ini';
+        const confirmed = window.confirm(`Hapus ${label}? Tindakan ini permanen.`);
+        if (!confirmed) {
+            return;
+        }
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        const originalText = deleteBtn.textContent || 'Delete';
+        deleteBtn.textContent = 'Deleting...';
+        deleteBtn.disabled = true;
+        if (saveBtn) {
+            saveBtn.disabled = true;
+        }
+        if (selectEl) {
+            selectEl.disabled = true;
+        }
+        let deleted = false;
+        try {
+            const response = await fetch(`/api/admin/residents/${residentId}`, {
+                method: 'DELETE',
+                headers
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Tidak dapat menghapus warga.');
+            }
+            state.residents = state.residents.filter((resident) => resident.id !== residentId);
+            renderUsersTable();
+            showUsersMessage('success', `Akun ${label} dihapus.`);
+            deleted = true;
+        } catch (error) {
+            console.error('Gagal menghapus warga', error);
+            showUsersMessage('error', error.message || 'Tidak dapat menghapus warga.');
+        } finally {
+            if (!deleted) {
+                deleteBtn.textContent = originalText;
+                deleteBtn.disabled = false;
+                if (saveBtn && selectEl) {
+                    saveBtn.disabled = selectEl.value === selectEl.dataset.originalRole;
+                    selectEl.disabled = false;
+                }
+            }
+        }
+    }
+
     function redirectToLogin() {
         window.location.replace('warga-login.html');
     }
@@ -296,14 +711,19 @@
             redirectToLogin();
             return;
         }
-        if (!ResidentSession.isAdmin || !ResidentSession.isAdmin()) {
-            showMessage('error', 'Halaman ini hanya untuk admin.');
-            setTimeout(() => redirectToLogin(), 900);
-            return;
-        }
         const resident = typeof ResidentSession.getCurrentResident === 'function'
             ? ResidentSession.getCurrentResident()
             : null;
+        const role = resolveResidentRole(resident);
+        const isAdmin = role === 'admin';
+        const canManagePins = role === 'admin' || role === 'pin_manager';
+        state.permissions = { isAdmin, canManagePins };
+        applyAdminPermissions();
+        if (!canManagePins) {
+            showMessage('error', 'Halaman ini hanya untuk admin atau pin manager.');
+            setTimeout(() => redirectToLogin(), 900);
+            return;
+        }
         if (resident) {
             if (els.adminName) {
                 els.adminName.textContent = resident.displayName || resident.username || 'Admin';
@@ -771,19 +1191,32 @@
 
     function setActiveTab(tabKey) {
         if (!els.tabButtons || !els.tabButtons.length) return;
+        const allowedTabs = state.permissions?.isAdmin
+            ? ['pins', 'users', 'metrics', 'features']
+            : ['pins'];
+        const nextTab = allowedTabs.includes(tabKey) ? tabKey : 'pins';
         els.tabButtons.forEach((btn) => {
-            const isActive = btn.dataset.tab === tabKey;
+            const isActive = btn.dataset.tab === nextTab;
             btn.classList.toggle('admin-tab--active', isActive);
             btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
         });
         if (els.pinContent) {
-            els.pinContent.classList.toggle('hidden', tabKey !== 'pins');
+            els.pinContent.classList.toggle('hidden', nextTab !== 'pins');
+        }
+        if (els.usersContent) {
+            els.usersContent.classList.toggle('hidden', nextTab !== 'users');
         }
         if (els.metricsContent) {
-            els.metricsContent.classList.toggle('hidden', tabKey !== 'metrics');
+            els.metricsContent.classList.toggle('hidden', nextTab !== 'metrics');
         }
-        if (tabKey === 'metrics' && !state.metricsLoaded) {
+        if (els.featuresContent) {
+            els.featuresContent.classList.toggle('hidden', nextTab !== 'features');
+        }
+        if (nextTab === 'metrics' && !state.metricsLoaded && state.permissions?.isAdmin) {
             refreshAnalytics();
+        }
+        if (nextTab === 'users' && !state.usersLoaded && state.permissions?.isAdmin) {
+            loadResidents();
         }
     }
 
@@ -1789,6 +2222,11 @@
                 }
             });
         }
+        if (els.usersRefreshBtn) {
+            els.usersRefreshBtn.addEventListener('click', () => {
+                loadResidents({ force: true });
+            });
+        }
         if (els.metricsRefreshBtn) {
             els.metricsRefreshBtn.addEventListener('click', () => {
                 refreshAnalytics();
@@ -1814,6 +2252,9 @@
         }
         if (els.dashboardReloadBtn) {
             els.dashboardReloadBtn.addEventListener('click', loadDashboard);
+        }
+        if (els.featureSaveBtn) {
+            els.featureSaveBtn.addEventListener('click', saveFeatureFlags);
         }
     }
 
@@ -1846,13 +2287,18 @@
             showMessage('error', error.message || 'Gagal memuat sesi admin.');
             return;
         }
-        await loadMaintenanceStatus();
+        if (state.permissions?.isAdmin) {
+            await loadMaintenanceStatus();
+            await loadFeatureFlags();
+        }
         initMiniMap();
         loadPins();
         setActiveTab('pins');
-        syncMetricsControlsVisibility();
-        applyMetricsFilterFromInputs();
-        loadDashboard();
+        if (state.permissions?.isAdmin) {
+            syncMetricsControlsVisibility();
+            applyMetricsFilterFromInputs();
+            loadDashboard();
+        }
     }
 
     document.addEventListener('DOMContentLoaded', init);
