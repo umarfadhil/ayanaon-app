@@ -423,6 +423,21 @@ function upsertStructuredData(payload) {
     tag.textContent = JSON.stringify(payload);
 }
 
+function normalizeSeoUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    let normalized = value.trim().replace(/\/$/, '');
+    if (!normalized) {
+        return '';
+    }
+    if (!/^https?:\/\//i.test(normalized)) {
+        normalized = normalized.replace(/^\/+/, '');
+        normalized = `https://${normalized}`;
+    }
+    return normalized;
+}
+
 function normalizeSeoSettings(raw = {}) {
     const stringValue = (value) => (typeof value === 'string' ? value.trim() : '');
     const fallbackTitle = document.title || DEFAULT_SEO_SETTINGS.title;
@@ -450,7 +465,7 @@ function applySeoSettings(raw = {}) {
         return;
     }
     const settings = normalizeSeoSettings(raw);
-    const baseUrl = settings.siteUrl ? settings.siteUrl.replace(/\/$/, '') : window.location.origin;
+    const baseUrl = normalizeSeoUrl(settings.siteUrl) || window.location.origin;
     const canonicalUrl = baseUrl ? `${baseUrl}${window.location.pathname}` : window.location.href;
     const title = settings.title || DEFAULT_SEO_SETTINGS.title;
     const description = settings.description || DEFAULT_SEO_SETTINGS.description;

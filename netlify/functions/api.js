@@ -460,7 +460,12 @@ function sanitizeSeoUrl(value) {
     if (!trimmed) {
         return '';
     }
-    return trimmed.replace(/\/$/, '');
+    let normalized = trimmed.replace(/\/$/, '');
+    if (!/^https?:\/\//i.test(normalized)) {
+        normalized = normalized.replace(/^\/+/, '');
+        normalized = `https://${normalized}`;
+    }
+    return normalized;
 }
 
 function normalizeSeoSettings(raw = {}) {

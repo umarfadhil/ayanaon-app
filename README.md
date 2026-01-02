@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.2
+- **Sitemap & Robots Routing:** Added Netlify publish-folder redirects so `/sitemap.xml` and `/robots.txt` resolve reliably.
+- **SEO URL Normalization:** Site URL values now auto-prefix `https://` when missing, keeping sitemap and canonical links valid.
+- **SEO Preview Sync:** Admin SEO preview reflects the normalized base URL for consistent output.
+
 ### What's New in v2.4.1
 - **Home Navigation Reset:** Home button now clears filters and recenters to your location (or Jakarta if location is off).
 - **Image Loading Improvement:** Pin popup images load reliably on first open, including from list interactions.

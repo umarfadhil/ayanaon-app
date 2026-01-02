@@ -502,10 +502,25 @@
         return input ? input.value.trim() : '';
     }
 
+    function normalizeSeoUrl(value) {
+        if (!value) {
+            return '';
+        }
+        let normalized = value.trim().replace(/\/$/, '');
+        if (!normalized) {
+            return '';
+        }
+        if (!/^https?:\/\//i.test(normalized)) {
+            normalized = normalized.replace(/^\/+/, '');
+            normalized = `https://${normalized}`;
+        }
+        return normalized;
+    }
+
     function getSeoPreviewBaseUrl() {
         const inputValue = getSeoInputValue(els.seoSiteUrlInput);
         const base = inputValue || window.location.origin;
-        return base.replace(/\/$/, '');
+        return normalizeSeoUrl(base);
     }
 
     function updateSeoPreview() {
