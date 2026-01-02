@@ -26,6 +26,7 @@
             <button class="admin-tab" data-tab="users" role="tab" aria-selected="false" data-admin-only="true">Manage Users</button>
             <button class="admin-tab" data-tab="metrics" role="tab" aria-selected="false" data-admin-only="true">Business Metrics</button>
             <button class="admin-tab" data-tab="features" role="tab" aria-selected="false" data-admin-only="true">Features</button>
+            <button class="admin-tab" data-tab="seo" role="tab" aria-selected="false" data-admin-only="true">Manage SEO</button>
         </div>
 
         <section id="admin-pin-content" class="admin-tab-content">
@@ -412,6 +413,111 @@
                             <span class="feature-hint">Changes are visible on the main page within a few minutes.</span>
                         </div>
                     </div>
+                </div>
+            </section>
+        </div>
+
+        <div id="admin-seo-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-seo">
+                <div class="panel-header">
+                    <div>
+                        <h2>SEO Management</h2>
+                        <p class="panel-sub">Update search and sharing metadata for the main page.</p>
+                    </div>
+                </div>
+                <div id="admin-seo-message" class="admin-message" role="status" aria-live="polite"></div>
+                <div class="seo-grid">
+                    <div class="summary-card seo-card">
+                        <div class="seo-section-title">Search Basics</div>
+                        <div class="seo-field">
+                            <label for="seo-title">Site Title</label>
+                            <input type="text" id="seo-title" maxlength="70" placeholder="AyaNaon? by Petalytix">
+                            <span class="seo-hint">Recommended 50-60 characters.</span>
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-description">Meta Description</label>
+                            <textarea id="seo-description" rows="3" maxlength="180" placeholder="Describe the map experience."></textarea>
+                            <span class="seo-hint">Recommended 140-160 characters.</span>
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-keywords">Keywords (comma separated)</label>
+                            <input type="text" id="seo-keywords" placeholder="community map, promos, events">
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-site-url">Site URL</label>
+                            <input type="url" id="seo-site-url" placeholder="https://your-domain.com">
+                            <span class="seo-hint">Used for canonical and sitemap URLs.</span>
+                        </div>
+                        <div class="seo-toggle-row">
+                            <div>
+                                <div class="feature-title">Allow Indexing</div>
+                                <div class="feature-meta">Let search engines show this site.</div>
+                            </div>
+                            <label class="maintenance-switch" aria-label="Allow indexing">
+                                <input type="checkbox" id="seo-robots-index">
+                                <span class="maintenance-slider"></span>
+                            </label>
+                        </div>
+                        <div class="seo-toggle-row">
+                            <div>
+                                <div class="feature-title">Allow Follow</div>
+                                <div class="feature-meta">Allow crawlers to follow links.</div>
+                            </div>
+                            <label class="maintenance-switch" aria-label="Allow follow">
+                                <input type="checkbox" id="seo-robots-follow">
+                                <span class="maintenance-slider"></span>
+                            </label>
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-google-verification">Google Site Verification</label>
+                            <input type="text" id="seo-google-verification" placeholder="Paste the verification token">
+                        </div>
+                    </div>
+                    <div class="summary-card seo-card">
+                        <div class="seo-section-title">Social Sharing</div>
+                        <div class="seo-field">
+                            <label for="seo-og-title">Open Graph Title</label>
+                            <input type="text" id="seo-og-title" maxlength="70" placeholder="Optional override">
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-og-description">Open Graph Description</label>
+                            <textarea id="seo-og-description" rows="3" maxlength="180" placeholder="Optional override"></textarea>
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-og-image">Open Graph Image URL</label>
+                            <input type="url" id="seo-og-image" placeholder="https://.../share-image.jpg">
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-twitter-title">Twitter Title</label>
+                            <input type="text" id="seo-twitter-title" maxlength="70" placeholder="Optional override">
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-twitter-description">Twitter Description</label>
+                            <textarea id="seo-twitter-description" rows="3" maxlength="180" placeholder="Optional override"></textarea>
+                        </div>
+                        <div class="seo-field">
+                            <label for="seo-twitter-image">Twitter Image URL</label>
+                            <input type="url" id="seo-twitter-image" placeholder="https://.../twitter-image.jpg">
+                        </div>
+                    </div>
+                    <div class="summary-card seo-preview-card">
+                        <div class="seo-section-title">Search Preview</div>
+                        <div class="seo-preview">
+                            <div id="seo-preview-title" class="seo-preview-title">AyaNaon? by Petalytix</div>
+                            <div id="seo-preview-url" class="seo-preview-url">https://your-domain.com</div>
+                            <div id="seo-preview-description" class="seo-preview-description">
+                                Community-driven map to share local events, promos, and reports near you.
+                            </div>
+                        </div>
+                        <div class="seo-preview-meta">
+                            <div>Robots: <span id="seo-preview-robots">index, follow</span></div>
+                            <div>Sitemap: <span id="seo-sitemap-url">/sitemap.xml</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="seo-actions">
+                    <button type="button" id="seo-save-btn" class="chip-btn">Save SEO</button>
+                    <span class="feature-hint">Changes apply to the main page within a few minutes.</span>
                 </div>
             </section>
         </div>

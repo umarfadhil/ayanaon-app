@@ -338,6 +338,181 @@ function requestMapThemeReload() {
     }, 80);
 }
 
+const DEFAULT_SEO_SETTINGS = {
+    title: 'AyaNaon? by Petalytix',
+    description: 'Community-driven map to share local events, promos, and reports near you.',
+    keywords: '',
+    siteUrl: '',
+    ogTitle: '',
+    ogDescription: '',
+    ogImage: '',
+    twitterTitle: '',
+    twitterDescription: '',
+    twitterImage: '',
+    robotsIndex: true,
+    robotsFollow: true,
+    googleSiteVerification: ''
+};
+
+function getMetaContent(name, attrName = 'name') {
+    if (!document || !document.head) {
+        return '';
+    }
+    const selector = `meta[${attrName}="${name}"]`;
+    const tag = document.head.querySelector(selector);
+    return tag ? tag.getAttribute('content') || '' : '';
+}
+
+function upsertMetaTag(name, content, attrName = 'name') {
+    if (!document || !document.head) {
+        return;
+    }
+    const selector = `meta[${attrName}="${name}"]`;
+    let tag = document.head.querySelector(selector);
+    if (!content) {
+        if (tag) {
+            tag.remove();
+        }
+        return;
+    }
+    if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute(attrName, name);
+        document.head.appendChild(tag);
+    }
+    tag.setAttribute('content', content);
+}
+
+function upsertLinkTag(rel, href) {
+    if (!document || !document.head) {
+        return;
+    }
+    let tag = document.head.querySelector(`link[rel="${rel}"]`);
+    if (!href) {
+        if (tag) {
+            tag.remove();
+        }
+        return;
+    }
+    if (!tag) {
+        tag = document.createElement('link');
+        tag.setAttribute('rel', rel);
+        document.head.appendChild(tag);
+    }
+    tag.setAttribute('href', href);
+}
+
+function upsertStructuredData(payload) {
+    if (!document || !document.head) {
+        return;
+    }
+    const id = 'seo-structured-data';
+    let tag = document.getElementById(id);
+    if (!payload) {
+        if (tag) {
+            tag.remove();
+        }
+        return;
+    }
+    if (!tag) {
+        tag = document.createElement('script');
+        tag.type = 'application/ld+json';
+        tag.id = id;
+        document.head.appendChild(tag);
+    }
+    tag.textContent = JSON.stringify(payload);
+}
+
+function normalizeSeoSettings(raw = {}) {
+    const stringValue = (value) => (typeof value === 'string' ? value.trim() : '');
+    const fallbackTitle = document.title || DEFAULT_SEO_SETTINGS.title;
+    const fallbackDescription = getMetaContent('description') || DEFAULT_SEO_SETTINGS.description;
+    const normalized = {
+        title: stringValue(raw.title) || fallbackTitle,
+        description: stringValue(raw.description) || fallbackDescription,
+        keywords: stringValue(raw.keywords) || getMetaContent('keywords'),
+        siteUrl: stringValue(raw.siteUrl),
+        ogTitle: stringValue(raw.ogTitle) || getMetaContent('og:title', 'property'),
+        ogDescription: stringValue(raw.ogDescription) || getMetaContent('og:description', 'property'),
+        ogImage: stringValue(raw.ogImage) || getMetaContent('og:image', 'property'),
+        twitterTitle: stringValue(raw.twitterTitle) || getMetaContent('twitter:title'),
+        twitterDescription: stringValue(raw.twitterDescription) || getMetaContent('twitter:description'),
+        twitterImage: stringValue(raw.twitterImage) || getMetaContent('twitter:image'),
+        robotsIndex: typeof raw.robotsIndex === 'boolean' ? raw.robotsIndex : DEFAULT_SEO_SETTINGS.robotsIndex,
+        robotsFollow: typeof raw.robotsFollow === 'boolean' ? raw.robotsFollow : DEFAULT_SEO_SETTINGS.robotsFollow,
+        googleSiteVerification: stringValue(raw.googleSiteVerification)
+    };
+    return normalized;
+}
+
+function applySeoSettings(raw = {}) {
+    if (!document || !document.head) {
+        return;
+    }
+    const settings = normalizeSeoSettings(raw);
+    const baseUrl = settings.siteUrl ? settings.siteUrl.replace(/\/$/, '') : window.location.origin;
+    const canonicalUrl = baseUrl ? `${baseUrl}${window.location.pathname}` : window.location.href;
+    const title = settings.title || DEFAULT_SEO_SETTINGS.title;
+    const description = settings.description || DEFAULT_SEO_SETTINGS.description;
+    const ogTitle = settings.ogTitle || title;
+    const ogDescription = settings.ogDescription || description;
+    const ogImage = settings.ogImage || '';
+    const twitterImage = settings.twitterImage || ogImage;
+    const twitterTitle = settings.twitterTitle || ogTitle;
+    const twitterDescription = settings.twitterDescription || ogDescription;
+    const robots = `${settings.robotsIndex ? 'index' : 'noindex'},${settings.robotsFollow ? 'follow' : 'nofollow'}`;
+
+    document.title = title;
+    upsertMetaTag('description', description);
+    upsertMetaTag('keywords', settings.keywords);
+    upsertMetaTag('robots', robots);
+    upsertMetaTag('application-name', title);
+    upsertMetaTag('apple-mobile-web-app-title', title);
+
+    upsertLinkTag('canonical', canonicalUrl);
+
+    upsertMetaTag('og:site_name', title, 'property');
+    upsertMetaTag('og:title', ogTitle, 'property');
+    upsertMetaTag('og:description', ogDescription, 'property');
+    upsertMetaTag('og:type', 'website', 'property');
+    upsertMetaTag('og:url', canonicalUrl, 'property');
+    upsertMetaTag('og:image', ogImage, 'property');
+    upsertMetaTag('og:locale', 'id_ID', 'property');
+
+    const twitterCard = twitterImage ? 'summary_large_image' : 'summary';
+    upsertMetaTag('twitter:card', twitterCard);
+    upsertMetaTag('twitter:title', twitterTitle);
+    upsertMetaTag('twitter:description', twitterDescription);
+    upsertMetaTag('twitter:image', twitterImage);
+
+    upsertMetaTag('google-site-verification', settings.googleSiteVerification);
+
+    const structuredData = {
+        '@context': 'https://schema.org',
+        '@type': ['WebSite', 'WebApplication'],
+        name: title,
+        url: baseUrl || window.location.origin,
+        description,
+        applicationCategory: 'BusinessApplication',
+        operatingSystem: 'Web',
+        inLanguage: 'id'
+    };
+    upsertStructuredData(structuredData);
+}
+
+async function loadSeoSettings() {
+    try {
+        const response = await fetch('/api/seo', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload?.message || 'SEO settings unavailable');
+        }
+        applySeoSettings(payload);
+    } catch (error) {
+        console.warn('Failed to load SEO settings', error);
+    }
+}
+
 function initializeThemeControls() {
     themeToggleLightButton = document.getElementById('theme-toggle-light');
     themeToggleDarkButton = document.getElementById('theme-toggle-dark');
@@ -4033,6 +4208,9 @@ function focusOnPinMarker(marker) {
     if (marker.infoWindow && typeof marker.infoWindow.show === 'function') {
         marker.infoWindow.show();
     }
+    if (typeof marker.ensureDetails === 'function') {
+        marker.ensureDetails();
+    }
 }
 
 function updatePinListPanel(context = {}) {
@@ -5913,6 +6091,7 @@ async function handlePinImagesChange(event) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    loadSeoSettings();
     const modal = document.getElementById('welcome-modal');
     const closeModalBtn = document.getElementById('close-modal-btn');
     const infoBtn = document.getElementById('info-btn');
@@ -6024,6 +6203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         : null;
     if (bottomNavHomeButton) {
         bottomNavHomeButton.addEventListener('click', () => {
+            resetFilters({ forceCityZoom: true });
             setActiveNavMode(PIN_LIST_VIEW_MODE.HOME);
         });
     }
@@ -6609,7 +6789,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncSelectedDateInputs() {
         const range = getSelectedDateRangeForPicker();
         if (pinListDatePicker) {
-            pinListDatePicker.setDate(range, true);
+            pinListDatePicker.setDate(range, false);
         } else if (pinListDateRangeInputElement) {
             pinListDateRangeInputElement.value = formatManualDateInputValue();
         }
@@ -6884,7 +7064,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function resetFilters() {
+    function resetFilters({ forceCityZoom = false } = {}) {
         selectAllCategories.checked = true;
         categoryCheckboxes.forEach(checkbox => {
             checkbox.checked = true;
@@ -6897,9 +7077,13 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSelectedDateRange('', '', { skipFilter: true });
         filterMarkers();
         if (map && typeof map.setZoom === 'function' && typeof map.panTo === 'function') {
-            const targetPosition = userMarker ? toLatLngLiteral(userMarker.position) : DEFAULT_MAP_CENTER;
+            const hasUserLocation = isValidLatLng(userLocation);
+            const targetPosition = hasUserLocation ? userLocation : DEFAULT_MAP_CENTER;
             map.panTo(targetPosition);
-            const desiredZoom = userMarker ? Math.min(map.getZoom() || 12, 13) : 12;
+            const userZoom = 13;
+            const desiredZoom = forceCityZoom
+                ? (hasUserLocation ? userZoom : 12)
+                : (hasUserLocation ? Math.min(map.getZoom() || 12, userZoom) : 12);
             map.setZoom(desiredZoom);
         }
     }
@@ -7447,6 +7631,7 @@ async function initMap() {
                 buildPinInfoWindow(marker);
             }
         };
+        marker.ensureDetails = () => ensurePinDetails(marker);
     
         marker.addListener('gmp-click', async () => {
             await ensurePinDetails(marker);

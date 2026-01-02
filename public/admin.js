@@ -43,6 +43,22 @@
         features: {
             gerobakOnline: true
         },
+        seo: {
+            title: '',
+            description: '',
+            keywords: '',
+            siteUrl: '',
+            ogTitle: '',
+            ogDescription: '',
+            ogImage: '',
+            twitterTitle: '',
+            twitterDescription: '',
+            twitterImage: '',
+            robotsIndex: true,
+            robotsFollow: true,
+            googleSiteVerification: ''
+        },
+        seoLoaded: false,
         residents: [],
         permissions: {
             isAdmin: false,
@@ -139,6 +155,27 @@
         els.featureGerobakToggle = document.getElementById('feature-gerobak-toggle');
         els.featureSaveBtn = document.getElementById('feature-save-btn');
         els.featureMessage = document.getElementById('admin-feature-message');
+        els.seoContent = document.getElementById('admin-seo-pane');
+        els.seoMessage = document.getElementById('admin-seo-message');
+        els.seoTitleInput = document.getElementById('seo-title');
+        els.seoDescriptionInput = document.getElementById('seo-description');
+        els.seoKeywordsInput = document.getElementById('seo-keywords');
+        els.seoSiteUrlInput = document.getElementById('seo-site-url');
+        els.seoOgTitleInput = document.getElementById('seo-og-title');
+        els.seoOgDescriptionInput = document.getElementById('seo-og-description');
+        els.seoOgImageInput = document.getElementById('seo-og-image');
+        els.seoTwitterTitleInput = document.getElementById('seo-twitter-title');
+        els.seoTwitterDescriptionInput = document.getElementById('seo-twitter-description');
+        els.seoTwitterImageInput = document.getElementById('seo-twitter-image');
+        els.seoRobotsIndexToggle = document.getElementById('seo-robots-index');
+        els.seoRobotsFollowToggle = document.getElementById('seo-robots-follow');
+        els.seoGoogleVerificationInput = document.getElementById('seo-google-verification');
+        els.seoSaveBtn = document.getElementById('seo-save-btn');
+        els.seoPreviewTitle = document.getElementById('seo-preview-title');
+        els.seoPreviewUrl = document.getElementById('seo-preview-url');
+        els.seoPreviewDescription = document.getElementById('seo-preview-description');
+        els.seoPreviewRobots = document.getElementById('seo-preview-robots');
+        els.seoSitemapUrl = document.getElementById('seo-sitemap-url');
         els.usersContent = document.getElementById('admin-users-pane');
         els.usersRefreshBtn = document.getElementById('users-refresh-btn');
         els.usersMessage = document.getElementById('admin-users-message');
@@ -231,6 +268,9 @@
             }
             if (els.featuresContent) {
                 els.featuresContent.classList.add('hidden');
+            }
+            if (els.seoContent) {
+                els.seoContent.classList.add('hidden');
             }
             if (els.usersContent) {
                 els.usersContent.classList.add('hidden');
@@ -407,6 +447,198 @@
             showFeatureMessage('error', error.message || 'Tidak dapat menyimpan fitur.');
         } finally {
             setFeatureSaving(false);
+        }
+    }
+
+    const DEFAULT_SEO_PREVIEW = {
+        title: 'AyaNaon? by Petalytix',
+        description: 'Community-driven map to share local events, promos, and reports near you.'
+    };
+
+    function normalizeSeoSettings(raw = {}) {
+        const stringValue = (value) => (typeof value === 'string' ? value.trim() : '');
+        return {
+            title: stringValue(raw.title),
+            description: stringValue(raw.description),
+            keywords: stringValue(raw.keywords),
+            siteUrl: stringValue(raw.siteUrl),
+            ogTitle: stringValue(raw.ogTitle),
+            ogDescription: stringValue(raw.ogDescription),
+            ogImage: stringValue(raw.ogImage),
+            twitterTitle: stringValue(raw.twitterTitle),
+            twitterDescription: stringValue(raw.twitterDescription),
+            twitterImage: stringValue(raw.twitterImage),
+            robotsIndex: typeof raw.robotsIndex === 'boolean' ? raw.robotsIndex : true,
+            robotsFollow: typeof raw.robotsFollow === 'boolean' ? raw.robotsFollow : true,
+            googleSiteVerification: stringValue(raw.googleSiteVerification)
+        };
+    }
+
+    function showSeoMessage(type, text) {
+        if (!els.seoMessage) {
+            return;
+        }
+        els.seoMessage.textContent = text || '';
+        els.seoMessage.classList.remove('is-success', 'is-error', 'is-visible');
+        if (!text) {
+            return;
+        }
+        els.seoMessage.classList.add('is-visible');
+        if (type === 'success') {
+            els.seoMessage.classList.add('is-success');
+        } else if (type === 'error') {
+            els.seoMessage.classList.add('is-error');
+        }
+    }
+
+    function setSeoSaving(isSaving) {
+        if (els.seoSaveBtn) {
+            els.seoSaveBtn.disabled = isSaving;
+            els.seoSaveBtn.textContent = isSaving ? 'Saving...' : 'Save SEO';
+        }
+    }
+
+    function getSeoInputValue(input) {
+        return input ? input.value.trim() : '';
+    }
+
+    function getSeoPreviewBaseUrl() {
+        const inputValue = getSeoInputValue(els.seoSiteUrlInput);
+        const base = inputValue || window.location.origin;
+        return base.replace(/\/$/, '');
+    }
+
+    function updateSeoPreview() {
+        const title = getSeoInputValue(els.seoTitleInput) || DEFAULT_SEO_PREVIEW.title;
+        const description = getSeoInputValue(els.seoDescriptionInput) || DEFAULT_SEO_PREVIEW.description;
+        const baseUrl = getSeoPreviewBaseUrl();
+        const robotsIndex = Boolean(els.seoRobotsIndexToggle?.checked);
+        const robotsFollow = Boolean(els.seoRobotsFollowToggle?.checked);
+        const robotsLabel = `${robotsIndex ? 'index' : 'noindex'}, ${robotsFollow ? 'follow' : 'nofollow'}`;
+
+        if (els.seoPreviewTitle) {
+            els.seoPreviewTitle.textContent = title;
+        }
+        if (els.seoPreviewDescription) {
+            els.seoPreviewDescription.textContent = description;
+        }
+        if (els.seoPreviewUrl) {
+            els.seoPreviewUrl.textContent = baseUrl || '/';
+        }
+        if (els.seoPreviewRobots) {
+            els.seoPreviewRobots.textContent = robotsLabel;
+        }
+        if (els.seoSitemapUrl) {
+            els.seoSitemapUrl.textContent = baseUrl ? `${baseUrl}/sitemap.xml` : '/sitemap.xml';
+        }
+    }
+
+    function renderSeoSettings(raw = state.seo) {
+        const normalized = normalizeSeoSettings(raw);
+        state.seo = normalized;
+        if (els.seoTitleInput) {
+            els.seoTitleInput.value = normalized.title;
+        }
+        if (els.seoDescriptionInput) {
+            els.seoDescriptionInput.value = normalized.description;
+        }
+        if (els.seoKeywordsInput) {
+            els.seoKeywordsInput.value = normalized.keywords;
+        }
+        if (els.seoSiteUrlInput) {
+            els.seoSiteUrlInput.value = normalized.siteUrl;
+        }
+        if (els.seoOgTitleInput) {
+            els.seoOgTitleInput.value = normalized.ogTitle;
+        }
+        if (els.seoOgDescriptionInput) {
+            els.seoOgDescriptionInput.value = normalized.ogDescription;
+        }
+        if (els.seoOgImageInput) {
+            els.seoOgImageInput.value = normalized.ogImage;
+        }
+        if (els.seoTwitterTitleInput) {
+            els.seoTwitterTitleInput.value = normalized.twitterTitle;
+        }
+        if (els.seoTwitterDescriptionInput) {
+            els.seoTwitterDescriptionInput.value = normalized.twitterDescription;
+        }
+        if (els.seoTwitterImageInput) {
+            els.seoTwitterImageInput.value = normalized.twitterImage;
+        }
+        if (els.seoRobotsIndexToggle) {
+            els.seoRobotsIndexToggle.checked = normalized.robotsIndex;
+        }
+        if (els.seoRobotsFollowToggle) {
+            els.seoRobotsFollowToggle.checked = normalized.robotsFollow;
+        }
+        if (els.seoGoogleVerificationInput) {
+            els.seoGoogleVerificationInput.value = normalized.googleSiteVerification;
+        }
+        updateSeoPreview();
+    }
+
+    async function loadSeoSettings() {
+        try {
+            const response = await fetch('/api/seo', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload?.message || 'Tidak dapat memuat SEO.');
+            }
+            renderSeoSettings(payload);
+            state.seoLoaded = true;
+        } catch (error) {
+            console.warn('Gagal memuat SEO', error);
+            showSeoMessage('error', error.message || 'Tidak dapat memuat SEO.');
+        }
+    }
+
+    function buildSeoPayloadFromInputs() {
+        return {
+            title: getSeoInputValue(els.seoTitleInput),
+            description: getSeoInputValue(els.seoDescriptionInput),
+            keywords: getSeoInputValue(els.seoKeywordsInput),
+            siteUrl: getSeoInputValue(els.seoSiteUrlInput),
+            ogTitle: getSeoInputValue(els.seoOgTitleInput),
+            ogDescription: getSeoInputValue(els.seoOgDescriptionInput),
+            ogImage: getSeoInputValue(els.seoOgImageInput),
+            twitterTitle: getSeoInputValue(els.seoTwitterTitleInput),
+            twitterDescription: getSeoInputValue(els.seoTwitterDescriptionInput),
+            twitterImage: getSeoInputValue(els.seoTwitterImageInput),
+            robotsIndex: Boolean(els.seoRobotsIndexToggle?.checked),
+            robotsFollow: Boolean(els.seoRobotsFollowToggle?.checked),
+            googleSiteVerification: getSeoInputValue(els.seoGoogleVerificationInput)
+        };
+    }
+
+    async function saveSeoSettings() {
+        const payload = buildSeoPayloadFromInputs();
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        setSeoSaving(true);
+        showSeoMessage(null, '');
+        try {
+            const response = await fetch('/api/seo', {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Tidak dapat menyimpan SEO.');
+            }
+            renderSeoSettings(data);
+            showSeoMessage('success', 'Pengaturan SEO berhasil disimpan.');
+        } catch (error) {
+            console.error('Gagal menyimpan SEO', error);
+            showSeoMessage('error', error.message || 'Tidak dapat menyimpan SEO.');
+        } finally {
+            setSeoSaving(false);
         }
     }
 
@@ -1192,7 +1424,7 @@
     function setActiveTab(tabKey) {
         if (!els.tabButtons || !els.tabButtons.length) return;
         const allowedTabs = state.permissions?.isAdmin
-            ? ['pins', 'users', 'metrics', 'features']
+            ? ['pins', 'users', 'metrics', 'features', 'seo']
             : ['pins'];
         const nextTab = allowedTabs.includes(tabKey) ? tabKey : 'pins';
         els.tabButtons.forEach((btn) => {
@@ -1212,11 +1444,17 @@
         if (els.featuresContent) {
             els.featuresContent.classList.toggle('hidden', nextTab !== 'features');
         }
+        if (els.seoContent) {
+            els.seoContent.classList.toggle('hidden', nextTab !== 'seo');
+        }
         if (nextTab === 'metrics' && !state.metricsLoaded && state.permissions?.isAdmin) {
             refreshAnalytics();
         }
         if (nextTab === 'users' && !state.usersLoaded && state.permissions?.isAdmin) {
             loadResidents();
+        }
+        if (nextTab === 'seo' && !state.seoLoaded && state.permissions?.isAdmin) {
+            loadSeoSettings();
         }
     }
 
@@ -2256,12 +2494,38 @@
         if (els.featureSaveBtn) {
             els.featureSaveBtn.addEventListener('click', saveFeatureFlags);
         }
+        if (els.seoSaveBtn) {
+            els.seoSaveBtn.addEventListener('click', saveSeoSettings);
+        }
+        const seoInputs = [
+            els.seoTitleInput,
+            els.seoDescriptionInput,
+            els.seoKeywordsInput,
+            els.seoSiteUrlInput,
+            els.seoOgTitleInput,
+            els.seoOgDescriptionInput,
+            els.seoOgImageInput,
+            els.seoTwitterTitleInput,
+            els.seoTwitterDescriptionInput,
+            els.seoTwitterImageInput,
+            els.seoGoogleVerificationInput
+        ].filter(Boolean);
+        seoInputs.forEach((input) => {
+            input.addEventListener('input', updateSeoPreview);
+        });
+        if (els.seoRobotsIndexToggle) {
+            els.seoRobotsIndexToggle.addEventListener('change', updateSeoPreview);
+        }
+        if (els.seoRobotsFollowToggle) {
+            els.seoRobotsFollowToggle.addEventListener('change', updateSeoPreview);
+        }
     }
 
     async function init() {
         cacheElements();
         setFormDisabled(true);
         bindEvents();
+        updateSeoPreview();
         if (els.metricsYear) {
             els.metricsYear.value = state.metricsFilter.year;
         }

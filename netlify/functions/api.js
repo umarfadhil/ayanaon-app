@@ -422,6 +422,65 @@ const DEFAULT_FEATURE_FLAGS = {
     gerobakOnline: true
 };
 
+const DEFAULT_SEO_SETTINGS = {
+    title: 'AyaNaon? by Petalytix',
+    description: 'Community-driven map to share local events, promos, and reports near you.',
+    keywords: 'AyaNaon, community map, local events, promos, reports, Indonesia',
+    siteUrl: '',
+    ogTitle: '',
+    ogDescription: '',
+    ogImage: '',
+    twitterTitle: '',
+    twitterDescription: '',
+    twitterImage: '',
+    robotsIndex: true,
+    robotsFollow: true,
+    googleSiteVerification: ''
+};
+
+function sanitizeSeoText(value, maxLength) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (!Number.isFinite(maxLength) || maxLength <= 0) {
+        return trimmed;
+    }
+    return trimmed.slice(0, maxLength);
+}
+
+function sanitizeSeoUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+    return trimmed.replace(/\/$/, '');
+}
+
+function normalizeSeoSettings(raw = {}) {
+    return {
+        title: sanitizeSeoText(raw.title, 70) || DEFAULT_SEO_SETTINGS.title,
+        description: sanitizeSeoText(raw.description, 180) || DEFAULT_SEO_SETTINGS.description,
+        keywords: sanitizeSeoText(raw.keywords, 400),
+        siteUrl: sanitizeSeoUrl(raw.siteUrl),
+        ogTitle: sanitizeSeoText(raw.ogTitle, 70),
+        ogDescription: sanitizeSeoText(raw.ogDescription, 180),
+        ogImage: sanitizeSeoText(raw.ogImage, 500),
+        twitterTitle: sanitizeSeoText(raw.twitterTitle, 70),
+        twitterDescription: sanitizeSeoText(raw.twitterDescription, 180),
+        twitterImage: sanitizeSeoText(raw.twitterImage, 500),
+        robotsIndex: typeof raw.robotsIndex === 'boolean' ? raw.robotsIndex : DEFAULT_SEO_SETTINGS.robotsIndex,
+        robotsFollow: typeof raw.robotsFollow === 'boolean' ? raw.robotsFollow : DEFAULT_SEO_SETTINGS.robotsFollow,
+        googleSiteVerification: sanitizeSeoText(raw.googleSiteVerification, 200)
+    };
+}
+
 function normalizeFeatureFlags(flags = {}) {
     const raw = flags?.gerobakOnline;
     const disabled = raw === false || raw === 'false' || raw === 0 || raw === '0';
@@ -478,6 +537,70 @@ async function writeMaintenanceStatus(enabled, message) {
     };
     await settings.updateOne({ key: 'maintenance' }, { $set: payload }, { upsert: true });
     return { enabled: payload.enabled, message: payload.message };
+}
+
+async function readSeoSettings() {
+    try {
+        const settings = await getSettingsCollection();
+        const doc = await settings.findOne({ key: 'seo' });
+        return normalizeSeoSettings(doc || {});
+    } catch (error) {
+        console.error('Failed to read SEO settings', error);
+        return { ...DEFAULT_SEO_SETTINGS };
+    }
+}
+
+async function writeSeoSettings(payload = {}) {
+    const settings = await getSettingsCollection();
+    const normalized = normalizeSeoSettings(payload);
+    const stored = {
+        key: 'seo',
+        ...normalized,
+        updatedAt: new Date()
+    };
+    await settings.updateOne({ key: 'seo' }, { $set: stored }, { upsert: true });
+    return normalized;
+}
+
+function resolveSeoBaseUrl(seo, req) {
+    const configured = sanitizeSeoUrl(seo?.siteUrl);
+    if (configured) {
+        return configured;
+    }
+    const protoHeader = req.headers['x-forwarded-proto'] || 'https';
+    const proto = protoHeader.split(',')[0].trim() || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+    if (!host) {
+        return '';
+    }
+    return `${proto}://${host}`;
+}
+
+function buildSitemapXml(baseUrl) {
+    const safeBase = sanitizeSeoUrl(baseUrl);
+    const loc = safeBase ? `${safeBase}/` : '';
+    const lastmod = new Date().toISOString().split('T')[0];
+    return `<?xml version="1.0" encoding="UTF-8"?>\n` +
+        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+        (loc
+            ? `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n`
+            : '') +
+        `</urlset>\n`;
+}
+
+function buildRobotsTxt(seo, baseUrl) {
+    const allowIndex = seo?.robotsIndex !== false;
+    const lines = [
+        'User-agent: *',
+        allowIndex ? 'Allow: /' : 'Disallow: /'
+    ];
+    if (allowIndex) {
+        const safeBase = sanitizeSeoUrl(baseUrl);
+        if (safeBase) {
+            lines.push(`Sitemap: ${safeBase}/sitemap.xml`);
+        }
+    }
+    return `${lines.join('\n')}\n`;
 }
 
 async function authenticateRequest(req, res) {
@@ -1608,6 +1731,42 @@ router.put('/features', async (req, res) => {
         console.error('Failed to update feature flags', error);
         res.status(500).json({ message: 'Tidak dapat memperbarui fitur.' });
     }
+});
+
+router.get('/seo', async (req, res) => {
+    const seo = await readSeoSettings();
+    res.json(seo);
+});
+
+router.put('/seo', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengubah SEO.' });
+    }
+    try {
+        const seo = await writeSeoSettings(req.body || {});
+        res.json(seo);
+    } catch (error) {
+        console.error('Failed to update SEO settings', error);
+        res.status(500).json({ message: 'Tidak dapat memperbarui SEO.' });
+    }
+});
+
+router.get('/seo/sitemap', async (req, res) => {
+    const seo = await readSeoSettings();
+    const baseUrl = resolveSeoBaseUrl(seo, req);
+    const xml = buildSitemapXml(baseUrl);
+    res.set('Content-Type', 'application/xml');
+    res.send(xml);
+});
+
+router.get('/seo/robots', async (req, res) => {
+    const seo = await readSeoSettings();
+    const baseUrl = resolveSeoBaseUrl(seo, req);
+    const text = buildRobotsTxt(seo, baseUrl);
+    res.set('Content-Type', 'text/plain');
+    res.send(text);
 });
 
 router.get('/admin/residents', async (req, res) => {

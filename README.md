@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.1
+- **Home Navigation Reset:** Home button now clears filters and recenters to your location (or Jakarta if location is off).
+- **Image Loading Improvement:** Pin popup images load reliably on first open, including from list interactions.
+- **Manage Web-app SEO:** Admin dashboard adds a Manage SEO tab with editable meta settings plus sitemap/robots support.
+
 ### What's New in v2.4.0
 - **Navigation Improvements:** Bottom navigation adds Home, Search, List, and Saved modes with clearer panel behavior.
 - **Save Pins Feature:** Save pins from the list or map popups and see them in a dedicated Saved view, synced to Warga profiles.
