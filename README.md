@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.3
+- **Static Sitemap & Robots:** Added `public/sitemap.xml` and `public/robots.txt` for reliable crawl discovery.
+- **SEO Defaults Synced:** Homepage meta tags and SEO defaults now align with the configured marketing copy.
+- **Sitemap Routing Simplified:** Removed dynamic sitemap redirects to avoid Netlify 404s.
+
 ### What's New in v2.4.2
 - **Sitemap & Robots Routing:** Added Netlify publish-folder redirects so `/sitemap.xml` and `/robots.txt` resolve reliably.
 - **SEO URL Normalization:** Site URL values now auto-prefix `https://` when missing, keeping sitemap and canonical links valid.

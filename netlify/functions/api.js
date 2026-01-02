@@ -423,10 +423,10 @@ const DEFAULT_FEATURE_FLAGS = {
 };
 
 const DEFAULT_SEO_SETTINGS = {
-    title: 'AyaNaon? by Petalytix',
-    description: 'Community-driven map to share local events, promos, and reports near you.',
-    keywords: 'AyaNaon, community map, local events, promos, reports, Indonesia',
-    siteUrl: '',
+    title: 'AyaNaon | Cari Kegiatan Seru Di Sekitarmu!',
+    description: 'Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!',
+    keywords: 'event, lari, konser, seminar, makanan, minuman, restoran legendaris, SPBU, SPKLU, aplikasi rekomendasi tempat, rekomendasi tempat makan, rekomendasi kuliner Indonesia, aplikasi kuliner Indonesia, tempat makan terdekat, rekomendasi cafe terdekat, rekomendasi restoran terdekat, tempat nongkrong terdekat, rekomendasi tempat nongkrong, aplikasi pencari tempat makan, kuliner legendaris Indonesia, makan',
+    siteUrl: 'https://www.ayanaon.app',
     ogTitle: '',
     ogDescription: '',
     ogImage: '',
@@ -435,7 +435,7 @@ const DEFAULT_SEO_SETTINGS = {
     twitterImage: '',
     robotsIndex: true,
     robotsFollow: true,
-    googleSiteVerification: ''
+    googleSiteVerification: 'NeZu1mzU6sFw3Zh8cbYsHJhjeCCY0gNEzyhwJ52WA1I'
 };
 
 function sanitizeSeoText(value, maxLength) {

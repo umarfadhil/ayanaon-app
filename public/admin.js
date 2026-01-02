@@ -451,8 +451,8 @@
     }
 
     const DEFAULT_SEO_PREVIEW = {
-        title: 'AyaNaon? by Petalytix',
-        description: 'Community-driven map to share local events, promos, and reports near you.'
+        title: 'AyaNaon | Cari Kegiatan Seru Di Sekitarmu!',
+        description: 'Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!'
     };
 
     function normalizeSeoSettings(raw = {}) {

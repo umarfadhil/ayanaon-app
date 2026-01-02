@@ -3,16 +3,6 @@
   publish = "public"
 
 [[redirects]]
-  from = "/sitemap.xml"
-  to = "/.netlify/functions/api/seo/sitemap"
-  status = 200
-
-[[redirects]]
-  from = "/robots.txt"
-  to = "/.netlify/functions/api/seo/robots"
-  status = 200
-
-[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
