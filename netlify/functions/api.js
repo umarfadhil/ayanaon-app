@@ -438,6 +438,12 @@ const DEFAULT_SEO_SETTINGS = {
     googleSiteVerification: 'NeZu1mzU6sFw3Zh8cbYsHJhjeCCY0gNEzyhwJ52WA1I'
 };
 
+const SEO_SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000;
+const SITEMAP_CACHE_TTL_MS = 15 * 60 * 1000;
+let seoSettingsCache = null;
+let seoSettingsCacheExpiresAt = 0;
+let sitemapCache = { baseUrl: '', xml: '', expiresAt: 0 };
+
 function sanitizeSeoText(value, maxLength) {
     if (typeof value !== 'string') {
         return '';
@@ -484,6 +490,86 @@ function normalizeSeoSettings(raw = {}) {
         robotsFollow: typeof raw.robotsFollow === 'boolean' ? raw.robotsFollow : DEFAULT_SEO_SETTINGS.robotsFollow,
         googleSiteVerification: sanitizeSeoText(raw.googleSiteVerification, 200)
     };
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function truncateText(value, maxLength) {
+    const text = String(value || '').trim();
+    if (!text || !Number.isFinite(maxLength) || maxLength <= 0) {
+        return text;
+    }
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return text.slice(0, maxLength).trim();
+}
+
+function formatSitemapDate(value) {
+    if (!value) {
+        return new Date().toISOString().split('T')[0];
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return new Date().toISOString().split('T')[0];
+    }
+    return date.toISOString().split('T')[0];
+}
+
+function formatDisplayDate(value) {
+    if (!value) {
+        return '';
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+    return date.toLocaleDateString('id-ID', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+}
+
+function formatPinWhenLabel(lifetime = {}) {
+    if (!lifetime || typeof lifetime !== 'object') {
+        return '';
+    }
+    if (lifetime.type === 'today') {
+        return 'Hari ini';
+    }
+    if (lifetime.type === 'date') {
+        const start = lifetime.start || lifetime.value;
+        const end = lifetime.end || lifetime.value || lifetime.start;
+        const startLabel = formatDisplayDate(start);
+        const endLabel = formatDisplayDate(end);
+        if (startLabel && endLabel && startLabel !== endLabel) {
+            return `${startLabel} - ${endLabel}`;
+        }
+        return startLabel || endLabel || '';
+    }
+    return '';
+}
+
+function normalizeExternalUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (!/^https?:\/\//i.test(trimmed)) {
+        return '';
+    }
+    return trimmed;
 }
 
 function normalizeFeatureFlags(flags = {}) {
@@ -546,9 +632,16 @@ async function writeMaintenanceStatus(enabled, message) {
 
 async function readSeoSettings() {
     try {
+        const now = Date.now();
+        if (seoSettingsCache && now < seoSettingsCacheExpiresAt) {
+            return seoSettingsCache;
+        }
         const settings = await getSettingsCollection();
         const doc = await settings.findOne({ key: 'seo' });
-        return normalizeSeoSettings(doc || {});
+        const normalized = normalizeSeoSettings(doc || {});
+        seoSettingsCache = normalized;
+        seoSettingsCacheExpiresAt = now + SEO_SETTINGS_CACHE_TTL_MS;
+        return normalized;
     } catch (error) {
         console.error('Failed to read SEO settings', error);
         return { ...DEFAULT_SEO_SETTINGS };
@@ -564,6 +657,8 @@ async function writeSeoSettings(payload = {}) {
         updatedAt: new Date()
     };
     await settings.updateOne({ key: 'seo' }, { $set: stored }, { upsert: true });
+    seoSettingsCache = normalized;
+    seoSettingsCacheExpiresAt = Date.now() + SEO_SETTINGS_CACHE_TTL_MS;
     return normalized;
 }
 
@@ -581,15 +676,36 @@ function resolveSeoBaseUrl(seo, req) {
     return `${proto}://${host}`;
 }
 
-function buildSitemapXml(baseUrl) {
+function buildSitemapXml(baseUrl, entries = []) {
     const safeBase = sanitizeSeoUrl(baseUrl);
-    const loc = safeBase ? `${safeBase}/` : '';
-    const lastmod = new Date().toISOString().split('T')[0];
+    const urls = [];
+    if (safeBase) {
+        urls.push({
+            loc: `${safeBase}/`,
+            lastmod: formatSitemapDate(new Date()),
+            changefreq: 'daily',
+            priority: '1.0'
+        });
+    }
+    const seen = new Set(urls.map((entry) => entry.loc));
+    entries.forEach((entry) => {
+        if (!entry || !entry.loc || seen.has(entry.loc)) {
+            return;
+        }
+        seen.add(entry.loc);
+        urls.push(entry);
+    });
+    const body = urls
+        .map((entry) => {
+            const lastmod = entry.lastmod ? `<lastmod>${entry.lastmod}</lastmod>` : '';
+            const changefreq = entry.changefreq ? `<changefreq>${entry.changefreq}</changefreq>` : '';
+            const priority = entry.priority ? `<priority>${entry.priority}</priority>` : '';
+            return `  <url>\n    <loc>${entry.loc}</loc>\n    ${lastmod}\n    ${changefreq}\n    ${priority}\n  </url>`;
+        })
+        .join('\n');
     return `<?xml version="1.0" encoding="UTF-8"?>\n` +
         `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
-        (loc
-            ? `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n`
-            : '') +
+        `${body}\n` +
         `</urlset>\n`;
 }
 
@@ -606,6 +722,97 @@ function buildRobotsTxt(seo, baseUrl) {
         }
     }
     return `${lines.join('\n')}\n`;
+}
+
+async function fetchActivePinsForSitemap() {
+    const db = await connectToDatabase();
+    return db.collection('pins')
+        .find({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] })
+        .project({ _id: 1, createdAt: 1, updatedAt: 1 })
+        .toArray();
+}
+
+function buildPinPageHtml(pin, seo, baseUrl) {
+    const title = String(pin?.title || 'Informasi Pin').trim();
+    const description = String(pin?.description || '').trim();
+    const metaDescription = truncateText(description || seo?.description || '', 160);
+    const pageTitle = title ? `${title} | ${seo?.title || ''}`.trim() : (seo?.title || '');
+    const canonicalUrl = baseUrl ? `${baseUrl}/pin/${pin._id}` : '';
+    const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
+    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
+    const twitterImage = seo?.twitterImage || ogImage;
+    const whenLabel = formatPinWhenLabel(pin?.lifetime);
+    const city = pin?.city ? String(pin.city).trim() : '';
+    const coords = Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng)
+        ? `${pin.lat}, ${pin.lng}`
+        : '';
+    const externalLink = normalizeExternalUrl(pin?.link);
+    const createdAt = pin?.createdAt ? new Date(pin.createdAt) : null;
+    const updatedAt = pin?.updatedAt ? new Date(pin.updatedAt) : null;
+
+    const structuredData = {
+        '@context': 'https://schema.org',
+        '@type': 'CreativeWork',
+        name: title,
+        description: description || seo?.description || '',
+        url: canonicalUrl || undefined,
+        datePublished: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined,
+        dateModified: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt.toISOString() : undefined,
+        about: pin?.category || undefined
+    };
+    if (Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng)) {
+        structuredData.location = {
+            '@type': 'Place',
+            name: city || title,
+            geo: {
+                '@type': 'GeoCoordinates',
+                latitude: pin.lat,
+                longitude: pin.lng
+            }
+        };
+    }
+
+    const descriptionHtml = description
+        ? escapeHtml(description).replace(/\n/g, '<br>')
+        : escapeHtml(seo?.description || '');
+
+    const metaKeywords = seo?.keywords ? escapeHtml(seo.keywords) : '';
+
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(pageTitle || title)}</title>
+  <meta name="description" content="${escapeHtml(metaDescription)}">
+  ${metaKeywords ? `<meta name="keywords" content="${metaKeywords}">` : ''}
+  <meta name="robots" content="${robots}">
+  ${seo?.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(seo.googleSiteVerification)}">` : ''}
+  ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ''}
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="${escapeHtml(pageTitle || title)}">
+  <meta property="og:description" content="${escapeHtml(metaDescription)}">
+  ${canonicalUrl ? `<meta property="og:url" content="${canonicalUrl}">` : ''}
+  ${ogImage ? `<meta property="og:image" content="${ogImage}">` : ''}
+  <meta name="twitter:card" content="${twitterImage ? 'summary_large_image' : 'summary'}">
+  <meta name="twitter:title" content="${escapeHtml(pageTitle || title)}">
+  <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
+  ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
+</head>
+<body>
+  <main>
+    <h1>${escapeHtml(title)}</h1>
+    <p>${descriptionHtml}</p>
+    ${pin?.category ? `<p><strong>Kategori:</strong> ${escapeHtml(pin.category)}</p>` : ''}
+    ${whenLabel ? `<p><strong>Waktu:</strong> ${escapeHtml(whenLabel)}</p>` : ''}
+    ${city ? `<p><strong>Kota:</strong> ${escapeHtml(city)}</p>` : ''}
+    ${coords ? `<p><strong>Koordinat:</strong> ${escapeHtml(coords)}</p>` : ''}
+    ${externalLink ? `<p><a href="${externalLink}" rel="noopener" target="_blank">Lihat tautan terkait</a></p>` : ''}
+    ${baseUrl ? `<p><a href="${baseUrl}/">Lihat di peta AyaNaon</a></p>` : ''}
+  </main>
+</body>
+</html>`;
 }
 
 async function authenticateRequest(req, res) {
@@ -1759,11 +1966,38 @@ router.put('/seo', async (req, res) => {
 });
 
 router.get('/seo/sitemap', async (req, res) => {
-    const seo = await readSeoSettings();
-    const baseUrl = resolveSeoBaseUrl(seo, req);
-    const xml = buildSitemapXml(baseUrl);
-    res.set('Content-Type', 'application/xml');
-    res.send(xml);
+    try {
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        const now = Date.now();
+        if (sitemapCache.xml && now < sitemapCache.expiresAt && sitemapCache.baseUrl === baseUrl) {
+            res.set('Content-Type', 'application/xml');
+            res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+            res.send(sitemapCache.xml);
+            return;
+        }
+        const pins = await fetchActivePinsForSitemap();
+        const entries = baseUrl
+            ? pins.map((pin) => ({
+                loc: `${baseUrl}/pin/${pin._id}`,
+                lastmod: formatSitemapDate(pin.updatedAt || pin.createdAt),
+                changefreq: 'monthly',
+                priority: '0.7'
+            }))
+            : [];
+        const xml = buildSitemapXml(baseUrl, entries);
+        sitemapCache = {
+            baseUrl,
+            xml,
+            expiresAt: now + SITEMAP_CACHE_TTL_MS
+        };
+        res.set('Content-Type', 'application/xml');
+        res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+        res.send(xml);
+    } catch (error) {
+        console.error('Failed to build sitemap', error);
+        res.status(500).send('');
+    }
 });
 
 router.get('/seo/robots', async (req, res) => {
@@ -1771,7 +2005,36 @@ router.get('/seo/robots', async (req, res) => {
     const baseUrl = resolveSeoBaseUrl(seo, req);
     const text = buildRobotsTxt(seo, baseUrl);
     res.set('Content-Type', 'text/plain');
+    res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
     res.send(text);
+});
+
+router.get('/pin/:id', async (req, res) => {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        res.status(404).send('Not found');
+        return;
+    }
+    try {
+        const db = await connectToDatabase();
+        const pin = await db.collection('pins').findOne({
+            _id: new ObjectId(id),
+            $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }]
+        });
+        if (!pin) {
+            res.status(404).send('Not found');
+            return;
+        }
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        const html = buildPinPageHtml(pin, seo, baseUrl);
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+        res.send(html);
+    } catch (error) {
+        console.error('Failed to render pin page', error);
+        res.status(500).send('Error');
+    }
 });
 
 router.get('/admin/residents', async (req, res) => {

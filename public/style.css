@@ -992,6 +992,20 @@ body.maintenance-active #action-menu-toggle {
     color: var(--app-accent-strong);
 }
 
+.pin-list-item__detail-link {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--app-accent);
+    text-decoration: underline;
+    align-self: flex-start;
+}
+
+.pin-list-item__detail-link:hover,
+.pin-list-item__detail-link:focus-visible {
+    color: var(--app-accent-strong);
+    outline: none;
+}
+
 @media (max-width: 768px) {
     :root {
         --pin-list-panel-width: min(380px, calc(100vw - 48px));
@@ -1945,7 +1959,8 @@ body.maintenance-active #action-menu-toggle {
     margin-right: auto;
 }
 
-.save-pin-btn {
+.save-pin-btn,
+.info-window-detail-link {
     border: 1px solid var(--app-chip-border);
     background: var(--app-chip-bg);
     color: var(--app-text);
@@ -1954,11 +1969,16 @@ body.maintenance-active #action-menu-toggle {
     font-size: 0.85em;
     font-weight: 700;
     cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
     transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .save-pin-btn:hover,
-.save-pin-btn:focus-visible {
+.save-pin-btn:focus-visible,
+.info-window-detail-link:hover,
+.info-window-detail-link:focus-visible {
     background: rgba(96, 165, 250, 0.2);
     border-color: rgba(96, 165, 250, 0.4);
     outline: none;

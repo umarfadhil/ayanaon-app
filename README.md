@@ -96,6 +96,10 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.4
+- **Internal Linking Boost:** Added "View detail" links in the pin list and map popups that point to `/pin/<id>` pages.
+- **PWA Cache Bump:** Service worker cache version updated to deliver the latest assets.
+
 ### What's New in v2.4.3
 - **Static Sitemap & Robots:** Added `public/sitemap.xml` and `public/robots.txt` for reliable crawl discovery.
 - **SEO Defaults Synced:** Homepage meta tags and SEO defaults now align with the configured marketing copy.

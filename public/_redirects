@@ -1,0 +1,3 @@
+/pin/* /api/pin/:splat 200
+/sitemap.xml /api/seo/sitemap 200
+/robots.txt /api/seo/robots 200
