@@ -1965,7 +1965,7 @@ router.put('/seo', async (req, res) => {
     }
 });
 
-router.get('/seo/sitemap', async (req, res) => {
+const handleSitemapRequest = async (req, res) => {
     try {
         const seo = await readSeoSettings();
         const baseUrl = resolveSeoBaseUrl(seo, req);
@@ -1998,18 +1998,18 @@ router.get('/seo/sitemap', async (req, res) => {
         console.error('Failed to build sitemap', error);
         res.status(500).send('');
     }
-});
+};
 
-router.get('/seo/robots', async (req, res) => {
+const handleRobotsRequest = async (req, res) => {
     const seo = await readSeoSettings();
     const baseUrl = resolveSeoBaseUrl(seo, req);
     const text = buildRobotsTxt(seo, baseUrl);
     res.set('Content-Type', 'text/plain');
     res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
     res.send(text);
-});
+};
 
-router.get('/pin/:id', async (req, res) => {
+const handlePinPageRequest = async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
         res.status(404).send('Not found');
@@ -2035,7 +2035,13 @@ router.get('/pin/:id', async (req, res) => {
         console.error('Failed to render pin page', error);
         res.status(500).send('Error');
     }
-});
+};
+
+router.get('/seo/sitemap', handleSitemapRequest);
+
+router.get('/seo/robots', handleRobotsRequest);
+
+router.get('/pin/:id', handlePinPageRequest);
 
 router.get('/admin/residents', async (req, res) => {
     const resident = await authenticateResidentRequest(req, res);
@@ -2699,6 +2705,10 @@ router.post('/pins/:id/downvote', async (req, res) => {
     const result = await db.collection('pins').updateOne({ _id: new ObjectId(id) }, { $inc: { downvotes: 1 }, $push: { downvoterIps: ip } });
     res.json(result);
 });
+
+app.get('/sitemap.xml', handleSitemapRequest);
+app.get('/robots.txt', handleRobotsRequest);
+app.get('/pin/:id', handlePinPageRequest);
 
 app.use('/api', router);
 
