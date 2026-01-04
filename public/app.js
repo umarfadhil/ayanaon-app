@@ -3814,14 +3814,6 @@ function normalizePinId(value) {
     return String(value);
 }
 
-function getPinDetailPath(pinId) {
-    const normalized = normalizePinId(pinId);
-    if (!normalized) {
-        return '';
-    }
-    return `/pin/${encodeURIComponent(normalized)}`;
-}
-
 function normalizeExternalLink(value) {
     if (typeof value !== 'string') {
         return '';
@@ -4466,29 +4458,10 @@ function updatePinListPanel(context = {}) {
             });
         }
 
-        let detailLink = null;
-        const detailPath = getPinDetailPath(pinId);
-        if (detailPath) {
-            detailLink = document.createElement('a');
-            detailLink.className = 'pin-list-item__detail-link';
-            detailLink.href = detailPath;
-            detailLink.textContent = 'View detail';
-            detailLink.setAttribute('aria-label', `View detail for ${pin.title || 'pin'}`);
-            detailLink.addEventListener('click', (event) => {
-                event.stopPropagation();
-            });
-            detailLink.addEventListener('keydown', (event) => {
-                event.stopPropagation();
-            });
-        }
-
         descriptionBlock.appendChild(descriptionTitle);
         descriptionBlock.appendChild(description);
         if (moreButton) {
             descriptionBlock.appendChild(moreButton);
-        }
-        if (detailLink) {
-            descriptionBlock.appendChild(detailLink);
         }
 
         item.appendChild(header);
@@ -7358,11 +7331,6 @@ async function initMap() {
         const saveButton = pinId
             ? `<button type="button" class="save-pin-btn${isSavedPin ? ' is-saved' : ''}" data-pin-id="${pinId}" aria-pressed="${isSavedPin ? 'true' : 'false'}">${isSavedPin ? 'Saved' : 'Save'}</button>`
             : '';
-        const detailPath = getPinDetailPath(pinId);
-        const detailLink = detailPath
-            ? `<a class="info-window-detail-link" href="${detailPath}">View detail</a>`
-            : '';
-
         const when = getPinWhenLabel(pin) || 'N/A';
 
         const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
@@ -7411,7 +7379,6 @@ async function initMap() {
                 <div class="info-window-actions">
                     ${editButton}
                     ${saveButton}
-                    ${detailLink}
                 </div>
                 <div class="info-window-vote-actions">
                     <div class="info-window-vote">
