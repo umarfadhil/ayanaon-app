@@ -747,8 +747,278 @@ async function fetchActivePinsForSitemap() {
     const db = await connectToDatabase();
     return db.collection('pins')
         .find({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] })
-        .project({ _id: 1, createdAt: 1, updatedAt: 1 })
+        .project({ _id: 1, createdAt: 1, updatedAt: 1, category: 1, city: 1 })
         .toArray();
+}
+
+function normalizeLandingText(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim();
+}
+
+function slugifyText(value) {
+    const normalized = normalizeLandingText(value).toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+    const ascii = normalized
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s-]/g, '');
+    return ascii
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+function buildLandingEntriesFromPins(pins = [], baseUrl = '') {
+    if (!baseUrl) {
+        return [];
+    }
+    const categories = new Map();
+    const regionsByCategory = new Map();
+    pins.forEach((pin) => {
+        const category = normalizeLandingText(pin?.category);
+        const categorySlug = slugifyText(category);
+        if (!categorySlug) {
+            return;
+        }
+        if (!categories.has(categorySlug)) {
+            categories.set(categorySlug, category);
+        }
+        const city = normalizeLandingText(pin?.city);
+        const regionSlug = slugifyText(city);
+        if (!regionSlug) {
+            return;
+        }
+        if (!regionsByCategory.has(categorySlug)) {
+            regionsByCategory.set(categorySlug, new Map());
+        }
+        const regionMap = regionsByCategory.get(categorySlug);
+        if (!regionMap.has(regionSlug)) {
+            regionMap.set(regionSlug, city);
+        }
+    });
+    const lastmod = formatSitemapDate(new Date());
+    const entries = [];
+    entries.push({
+        loc: `${baseUrl}/kategori`,
+        lastmod,
+        changefreq: 'weekly',
+        priority: '0.6'
+    });
+    categories.forEach((_label, slug) => {
+        entries.push({
+            loc: `${baseUrl}/kategori/${slug}`,
+            lastmod,
+            changefreq: 'weekly',
+            priority: '0.6'
+        });
+    });
+    regionsByCategory.forEach((regionMap, categorySlug) => {
+        regionMap.forEach((_label, regionSlug) => {
+            entries.push({
+                loc: `${baseUrl}/kategori/${categorySlug}/${regionSlug}`,
+                lastmod,
+                changefreq: 'weekly',
+                priority: '0.5'
+            });
+        });
+    });
+    return entries;
+}
+
+async function fetchCategoryIndexData() {
+    const db = await connectToDatabase();
+    const activeQuery = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
+    const categoriesRaw = await db.collection('pins')
+        .aggregate([
+            { $match: activeQuery },
+            { $group: { _id: '$category', count: { $sum: 1 } } }
+        ])
+        .toArray();
+    const categories = categoriesRaw
+        .map((doc) => {
+            const label = normalizeLandingText(doc?._id);
+            const slug = slugifyText(label);
+            if (!slug) {
+                return null;
+            }
+            return {
+                label,
+                slug,
+                count: Number(doc?.count) || 0
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label));
+
+    const regionsRaw = await db.collection('pins')
+        .aggregate([
+            { $match: activeQuery },
+            { $group: { _id: { category: '$category', city: '$city' }, count: { $sum: 1 } } }
+        ])
+        .toArray();
+    const regionsByCategory = new Map();
+    regionsRaw.forEach((doc) => {
+        const categoryLabel = normalizeLandingText(doc?._id?.category);
+        const cityLabel = normalizeLandingText(doc?._id?.city);
+        const categorySlug = slugifyText(categoryLabel);
+        const regionSlug = slugifyText(cityLabel);
+        if (!categorySlug || !regionSlug) {
+            return;
+        }
+        if (!regionsByCategory.has(categorySlug)) {
+            regionsByCategory.set(categorySlug, new Map());
+        }
+        const regionMap = regionsByCategory.get(categorySlug);
+        const existing = regionMap.get(regionSlug);
+        if (existing) {
+            existing.count += Number(doc?.count) || 0;
+        } else {
+            regionMap.set(regionSlug, {
+                label: cityLabel,
+                slug: regionSlug,
+                count: Number(doc?.count) || 0
+            });
+        }
+    });
+    const regionLists = new Map();
+    regionsByCategory.forEach((regionMap, categorySlug) => {
+        const list = Array.from(regionMap.values()).sort(
+            (a, b) => (b.count - a.count) || a.label.localeCompare(b.label)
+        );
+        regionLists.set(categorySlug, list);
+    });
+    const totalPins = categories.reduce((sum, item) => sum + (item.count || 0), 0);
+    return {
+        categories,
+        regionsByCategory: regionLists,
+        totalPins
+    };
+}
+
+async function fetchCategoryLandingData(categorySlug, regionSlug) {
+    const safeCategorySlug = slugifyText(categorySlug);
+    const safeRegionSlug = slugifyText(regionSlug);
+    if (!safeCategorySlug) {
+        return null;
+    }
+    const db = await connectToDatabase();
+    const activeQuery = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
+    const categories = await db.collection('pins').distinct('category', activeQuery);
+    let categoryLabel = '';
+    for (const entry of categories) {
+        const normalized = normalizeLandingText(entry);
+        if (!normalized) {
+            continue;
+        }
+        if (slugifyText(normalized) === safeCategorySlug) {
+            categoryLabel = normalized;
+            break;
+        }
+    }
+    if (!categoryLabel) {
+        return null;
+    }
+    const query = { ...activeQuery, category: categoryLabel };
+    let regionLabel = '';
+    if (safeRegionSlug) {
+        const cities = await db.collection('pins').distinct('city', query);
+        for (const entry of cities) {
+            const normalized = normalizeLandingText(entry);
+            if (!normalized) {
+                continue;
+            }
+            if (slugifyText(normalized) === safeRegionSlug) {
+                regionLabel = normalized;
+                break;
+            }
+        }
+        if (!regionLabel) {
+            return null;
+        }
+        query.city = regionLabel;
+    }
+    const totalCount = await db.collection('pins').countDocuments(query);
+    const pins = await db.collection('pins')
+        .find(query)
+        .project({
+            _id: 1,
+            title: 1,
+            description: 1,
+            category: 1,
+            city: 1,
+            lifetime: 1,
+            createdAt: 1,
+            updatedAt: 1
+        })
+        .sort({ _id: -1 })
+        .limit(200)
+        .toArray();
+    return {
+        categoryLabel,
+        regionLabel,
+        categorySlug: safeCategorySlug,
+        regionSlug: safeRegionSlug,
+        pins,
+        totalCount
+    };
+}
+
+function getPinImageSource(image) {
+    if (!image) {
+        return '';
+    }
+    if (typeof image === 'string') {
+        return image;
+    }
+    const directSourceKeys = [
+        'dataUrl',
+        'dataURL',
+        'url',
+        'src',
+        'secureUrl',
+        'secureURL',
+        'secure_url',
+        'imageUrl',
+        'imageURL',
+        'path',
+        'filePath',
+        'fileURL',
+        'fileUrl',
+        'signedUrl',
+        'signedURL',
+        'signed_url',
+        'cdnUrl',
+        'cdnURL',
+        'assetUrl',
+        'assetURL',
+        'location',
+        'href'
+    ];
+    for (const key of directSourceKeys) {
+        const value = image[key];
+        if (typeof value === 'string' && value) {
+            return value;
+        }
+    }
+    if (typeof image.data === 'string' && image.data) {
+        if (image.data.startsWith('data:')) {
+            return image.data;
+        }
+        const mimeType = image.contentType || image.mimeType || 'image/jpeg';
+        return `data:${mimeType};base64,${image.data}`;
+    }
+    if (image.data && typeof image.data === 'object' && image.data !== image) {
+        const nested = getPinImageSource(image.data);
+        if (nested) {
+            return nested;
+        }
+    }
+    return '';
 }
 
 function buildPinPageHtml(pin, seo, baseUrl) {
@@ -757,17 +1027,37 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const metaDescription = truncateText(description || seo?.description || '', 160);
     const pageTitle = title ? `${title} | ${seo?.title || ''}`.trim() : (seo?.title || '');
     const canonicalUrl = baseUrl ? `${baseUrl}/pin/${pin._id}` : '';
+    const categoryIndexUrl = baseUrl ? `${baseUrl}/kategori` : '/kategori';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
     const whenLabel = formatPinWhenLabel(pin?.lifetime);
     const city = pin?.city ? String(pin.city).trim() : '';
-    const coords = Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng)
-        ? `${pin.lat}, ${pin.lng}`
-        : '';
+    const hasCoords = Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng);
+    const lat = hasCoords ? Number(pin.lat) : null;
+    const lng = hasCoords ? Number(pin.lng) : null;
+    const coords = hasCoords ? `${lat}, ${lng}` : '';
     const externalLink = normalizeExternalUrl(pin?.link);
     const createdAt = pin?.createdAt ? new Date(pin.createdAt) : null;
     const updatedAt = pin?.updatedAt ? new Date(pin.updatedAt) : null;
+    const mapLink = hasCoords
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`
+        : '';
+    const mapEmbedUrl = hasCoords
+        ? `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}&z=15&output=embed`
+        : '';
+    const images = Array.isArray(pin?.images) ? pin.images : [];
+    const galleryImages = images
+        .map((image, index) => {
+            const src = getPinImageSource(image);
+            if (!src) {
+                return null;
+            }
+            const alt = title ? `${title} foto ${index + 1}` : `Foto pin ${index + 1}`;
+            return { src, alt };
+        })
+        .filter(Boolean)
+        .slice(0, 6);
 
     const structuredData = {
         '@context': 'https://schema.org',
@@ -796,6 +1086,150 @@ function buildPinPageHtml(pin, seo, baseUrl) {
         : escapeHtml(seo?.description || '');
 
     const metaKeywords = seo?.keywords ? escapeHtml(seo.keywords) : '';
+    const categoryLabel = pin?.category ? escapeHtml(pin.category) : '';
+    const whenLabelHtml = whenLabel ? escapeHtml(whenLabel) : '';
+    const cityHtml = city ? escapeHtml(city) : '';
+    const coordsHtml = coords ? escapeHtml(coords) : '';
+    const linkLabel = (externalLink && typeof pin?.link === 'string')
+        ? pin.link.trim()
+        : '';
+    let linkButtonLabel = '';
+    if (externalLink) {
+        linkButtonLabel = 'Buka tautan';
+        try {
+            const parsedUrl = new URL(externalLink);
+            const hostname = parsedUrl.hostname.replace(/^www\./, '');
+            if (hostname) {
+                linkButtonLabel = `Buka ${hostname}`;
+            }
+        } catch (error) {
+            // Keep the default label when URL parsing fails.
+        }
+    }
+    const galleryHtml = galleryImages.length
+        ? `<section class="pin-detail-gallery">
+            ${galleryImages.map(({ src, alt }) => {
+                const safeSrc = escapeHtml(src);
+                const safeAlt = escapeHtml(alt || 'Foto pin');
+                return `<figure class="pin-detail-gallery__item">
+                    <button type="button" class="pin-detail-gallery__button" data-full="${safeSrc}" data-alt="${safeAlt}" aria-label="Lihat foto lebih besar">
+                        <img src="${safeSrc}" alt="${safeAlt}" loading="lazy">
+                    </button>
+                </figure>`;
+            }).join('')}
+        </section>`
+        : '';
+    const metaItems = [
+        { label: 'Kategori', value: categoryLabel },
+        { label: 'Waktu', value: whenLabelHtml },
+        { label: 'Kota', value: cityHtml },
+        { label: 'Koordinat', value: coordsHtml }
+    ].filter((item) => item.value);
+    const metaHtml = metaItems.length
+        ? `<div class="pin-detail-meta">
+            ${metaItems.map((item) => (
+                `<div class="pin-detail-meta__item">
+                    <div class="pin-detail-meta__label">${item.label}</div>
+                    <div class="pin-detail-meta__value">${item.value}</div>
+                </div>`
+            )).join('')}
+        </div>`
+        : '';
+    const mapHtml = mapEmbedUrl
+        ? `<div class="pin-detail-map">
+            <div class="pin-detail-map__label">Lokasi</div>
+            <div class="pin-detail-map__frame">
+                <iframe
+                    src="${escapeHtml(mapEmbedUrl)}"
+                    title="${escapeHtml(`Peta lokasi ${title}`)}"
+                    loading="lazy"
+                    referrerpolicy="no-referrer-when-downgrade"
+                    allowfullscreen
+                ></iframe>
+            </div>
+        </div>`
+        : '';
+    const actionItems = [
+        mapLink ? { href: mapLink, label: 'Buka di Google Maps', external: true } : null,
+        externalLink ? { href: externalLink, label: linkButtonLabel || linkLabel || 'Buka tautan', external: true } : null,
+        baseUrl ? { href: `${baseUrl}/`, label: 'Lihat di peta AyaNaon', external: false } : null
+    ].filter(Boolean);
+    const actionsHtml = actionItems.length
+        ? `<div class="pin-detail-actions">
+            ${actionItems.map((item) => {
+                const safeHref = escapeHtml(item.href);
+                const safeLabel = escapeHtml(item.label);
+                const rel = item.external ? ' rel="noopener"' : '';
+                const target = item.external ? ' target="_blank"' : '';
+                return `<a class="pin-detail-action" href="${safeHref}"${target}${rel}>${safeLabel}</a>`;
+            }).join('')}
+        </div>`
+        : '';
+    const lightboxHtml = galleryImages.length
+        ? `<div class="pin-detail-lightbox" role="dialog" aria-modal="true" aria-hidden="true">
+            <div class="pin-detail-lightbox__content">
+                <button type="button" class="pin-detail-lightbox__close">Tutup</button>
+                <img class="pin-detail-lightbox__image" alt="">
+            </div>
+        </div>`
+        : '';
+    const lightboxScript = galleryImages.length
+        ? `<script>
+            (function () {
+              const lightbox = document.querySelector('.pin-detail-lightbox');
+              if (!lightbox) {
+                return;
+              }
+              const imageEl = lightbox.querySelector('.pin-detail-lightbox__image');
+              const closeButton = lightbox.querySelector('.pin-detail-lightbox__close');
+              const openButtons = document.querySelectorAll('.pin-detail-gallery__button');
+              const openLightbox = (src, alt) => {
+                if (!imageEl) {
+                  return;
+                }
+                imageEl.src = src;
+                imageEl.alt = alt || 'Foto pin';
+                lightbox.classList.add('is-visible');
+                lightbox.setAttribute('aria-hidden', 'false');
+                document.body.classList.add('pin-detail-lightbox-open');
+                if (closeButton) {
+                  closeButton.focus({ preventScroll: true });
+                }
+              };
+              const closeLightbox = () => {
+                lightbox.classList.remove('is-visible');
+                lightbox.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('pin-detail-lightbox-open');
+                if (imageEl) {
+                  imageEl.src = '';
+                  imageEl.alt = '';
+                }
+              };
+              openButtons.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                  const src = btn.getAttribute('data-full') || '';
+                  const alt = btn.getAttribute('data-alt') || '';
+                  if (src) {
+                    openLightbox(src, alt);
+                  }
+                });
+              });
+              if (closeButton) {
+                closeButton.addEventListener('click', closeLightbox);
+              }
+              lightbox.addEventListener('click', (event) => {
+                if (event.target === lightbox) {
+                  closeLightbox();
+                }
+              });
+              document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && lightbox.classList.contains('is-visible')) {
+                  closeLightbox();
+                }
+              });
+            })();
+        </script>`
+        : '';
 
     return `<!DOCTYPE html>
 <html lang="id">
@@ -817,19 +1251,1012 @@ function buildPinPageHtml(pin, seo, baseUrl) {
   <meta name="twitter:title" content="${escapeHtml(pageTitle || title)}">
   <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
   ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body.pin-detail-page {
+      overflow-y: auto;
+    }
+    body.pin-detail-page.pin-detail-lightbox-open {
+      overflow: hidden;
+    }
+    .pin-detail-bg {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 50%),
+        radial-gradient(circle at 15% 20%, rgba(14, 165, 233, 0.18), transparent 45%),
+        linear-gradient(160deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.92));
+      z-index: 0;
+    }
+    .pin-detail-shell {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      padding: clamp(20px, 5vw, 56px);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .pin-detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .pin-detail-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--app-text-strong);
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      font-size: 18px;
+    }
+    .pin-detail-brand img {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid var(--app-panel-border);
+      background: rgba(15, 23, 42, 0.6);
+      padding: 6px;
+    }
+    .pin-detail-header-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .pin-detail-header-actions a {
+      text-decoration: none;
+    }
+    .pin-detail-ghost {
+      color: var(--app-text);
+      border: 1px solid var(--app-panel-border);
+      background: var(--app-panel-bg);
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-weight: 700;
+      font-size: 13px;
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+    .pin-detail-ghost:hover,
+    .pin-detail-ghost:focus-visible {
+      transform: translateY(-1px);
+      background: rgba(59, 130, 246, 0.12);
+      border-color: rgba(59, 130, 246, 0.4);
+      outline: none;
+    }
+    .pin-detail-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+      gap: 24px;
+    }
+    .pin-detail-card {
+      background: var(--app-panel-bg);
+      border: 1px solid var(--app-panel-border);
+      border-radius: var(--app-panel-radius);
+      padding: clamp(20px, 4vw, 28px);
+      box-shadow: var(--app-panel-shadow);
+      backdrop-filter: var(--app-panel-blur);
+    }
+    .pin-detail-eyebrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .pin-detail-chip {
+      background: var(--app-chip-bg);
+      border: 1px solid var(--app-chip-border);
+      color: var(--app-text-soft);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pin-detail-title {
+      margin: 0 0 12px;
+      font-size: clamp(24px, 3vw, 40px);
+      color: var(--app-text-strong);
+    }
+    .pin-detail-description {
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--app-text);
+    }
+    .pin-detail-gallery {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+    }
+    .pin-detail-gallery__item {
+      margin: 0;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-card-bg);
+      box-shadow: var(--app-card-shadow);
+    }
+    .pin-detail-gallery__button {
+      border: none;
+      padding: 0;
+      background: transparent;
+      width: 100%;
+      display: block;
+      cursor: zoom-in;
+    }
+    .pin-detail-gallery__button:focus-visible {
+      outline: 2px solid var(--app-accent);
+      outline-offset: 2px;
+    }
+    .pin-detail-gallery__button img {
+      width: 100%;
+      height: 140px;
+      object-fit: cover;
+      display: block;
+    }
+    .pin-detail-meta {
+      display: grid;
+      gap: 12px;
+    }
+    .pin-detail-meta__item {
+      background: var(--app-card-bg);
+      border: 1px solid var(--app-card-border);
+      border-radius: 14px;
+      padding: 12px 14px;
+    }
+    .pin-detail-meta__label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--app-text-muted);
+      margin-bottom: 6px;
+    }
+    .pin-detail-meta__value {
+      font-size: 14px;
+      color: var(--app-text-strong);
+      word-break: break-word;
+    }
+    .pin-detail-map {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .pin-detail-map__label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--app-text-muted);
+    }
+    .pin-detail-map__frame {
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-card-bg);
+      box-shadow: var(--app-card-shadow);
+      height: 180px;
+    }
+    .pin-detail-map__frame iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
+    .pin-detail-actions {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pin-detail-action {
+      text-decoration: none;
+      background: var(--app-button-bg);
+      color: var(--app-button-text);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-weight: 700;
+      text-align: center;
+      border: 1px solid transparent;
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+    .pin-detail-action:hover,
+    .pin-detail-action:focus-visible {
+      background: var(--app-button-hover);
+      border-color: rgba(59, 130, 246, 0.3);
+      transform: translateY(-1px);
+      outline: none;
+    }
+    .pin-detail-lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 20;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .pin-detail-lightbox.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .pin-detail-lightbox__content {
+      background: var(--app-panel-bg);
+      border: 1px solid var(--app-panel-border);
+      border-radius: 18px;
+      padding: 16px;
+      max-width: min(900px, 92vw);
+      max-height: 82vh;
+      width: 100%;
+      box-shadow: var(--app-panel-shadow);
+      backdrop-filter: var(--app-panel-blur);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pin-detail-lightbox__close {
+      align-self: flex-end;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      background: var(--app-button-bg);
+      color: var(--app-button-text);
+      padding: 8px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .pin-detail-lightbox__close:hover,
+    .pin-detail-lightbox__close:focus-visible {
+      background: var(--app-button-hover);
+      outline: none;
+    }
+    .pin-detail-lightbox__image {
+      width: 100%;
+      height: auto;
+      max-height: 68vh;
+      object-fit: contain;
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .pin-detail-footer {
+      margin-top: auto;
+      text-align: center;
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
+    @media (max-width: 900px) {
+      .pin-detail-main {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
   <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
 </head>
-<body>
-  <main>
-    <h1>${escapeHtml(title)}</h1>
-    <p>${descriptionHtml}</p>
-    ${pin?.category ? `<p><strong>Kategori:</strong> ${escapeHtml(pin.category)}</p>` : ''}
-    ${whenLabel ? `<p><strong>Waktu:</strong> ${escapeHtml(whenLabel)}</p>` : ''}
-    ${city ? `<p><strong>Kota:</strong> ${escapeHtml(city)}</p>` : ''}
-    ${coords ? `<p><strong>Koordinat:</strong> ${escapeHtml(coords)}</p>` : ''}
-    ${externalLink ? `<p><a href="${externalLink}" rel="noopener" target="_blank">Lihat tautan terkait</a></p>` : ''}
-    ${baseUrl ? `<p><a href="${baseUrl}/">Lihat di peta AyaNaon</a></p>` : ''}
-  </main>
+<body class="pin-detail-page">
+  <div class="pin-detail-bg"></div>
+  <div class="pin-detail-shell">
+    <header class="pin-detail-header">
+      <a class="pin-detail-brand" href="${baseUrl ? `${baseUrl}/` : '/'}">
+        <img src="/icon-192.png" alt="AyaNaon">
+        <span>AyaNaon</span>
+      </a>
+      <div class="pin-detail-header-actions">
+        <a class="pin-detail-ghost" href="${categoryIndexUrl}">Lihat kategori</a>
+        ${baseUrl ? `<a class="pin-detail-ghost" href="${baseUrl}/">Lihat di peta</a>` : ''}
+      </div>
+    </header>
+    <main class="pin-detail-main">
+      <section class="pin-detail-card">
+        <div class="pin-detail-eyebrow">
+          ${categoryLabel ? `<span class="pin-detail-chip">${categoryLabel}</span>` : ''}
+          ${whenLabelHtml ? `<span class="pin-detail-chip">${whenLabelHtml}</span>` : ''}
+        </div>
+        <h1 class="pin-detail-title">${escapeHtml(title)}</h1>
+        <div class="pin-detail-description">${descriptionHtml}</div>
+        ${galleryHtml}
+      </section>
+      <aside class="pin-detail-card">
+        ${metaHtml}
+        ${mapHtml}
+        ${actionsHtml}
+      </aside>
+    </main>
+    <footer class="pin-detail-footer">AyaNaon pin detail page</footer>
+  </div>
+  ${lightboxHtml}
+  ${lightboxScript}
+</body>
+</html>`;
+}
+
+function buildCategoryIndexHtml({
+    seo,
+    baseUrl,
+    categories,
+    regionsByCategory,
+    totalPins
+}) {
+    const heading = 'Kategori dan Wilayah';
+    const totalCount = Number(totalPins) || 0;
+    const pageTitle = truncateText(
+        [heading, seo?.title || ''].filter(Boolean).join(' | '),
+        70
+    );
+    const introText = totalCount
+        ? `Jelajahi ${totalCount} pin berdasarkan kategori dan wilayah di AyaNaon. Pilih kategori untuk melihat daftar pin terkait.`
+        : 'Jelajahi kategori dan wilayah di AyaNaon. Pilih kategori untuk melihat daftar pin terkait.';
+    const metaDescription = truncateText(introText, 160);
+    const canonicalUrl = baseUrl ? `${baseUrl}/kategori` : '';
+    const backHref = baseUrl ? `${baseUrl}/` : '/';
+    const backLabel = 'Kembali ke peta';
+    const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
+    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
+    const twitterImage = seo?.twitterImage || ogImage;
+    const categoriesList = Array.isArray(categories) ? categories : [];
+    const maxRegions = 6;
+    const listHtml = categoriesList.map((category) => {
+        const categoryLabel = typeof category?.label === 'string' && category.label.trim()
+            ? category.label.trim()
+            : 'Kategori';
+        const categorySlug = slugifyText(category?.slug || categoryLabel);
+        if (!categorySlug) {
+            return '';
+        }
+        const categoryCount = Number(category?.count) || 0;
+        const countLabel = `${categoryCount} pin`;
+        let regionList = [];
+        if (regionsByCategory instanceof Map) {
+            regionList = regionsByCategory.get(categorySlug) || [];
+        } else if (regionsByCategory && Array.isArray(regionsByCategory[categorySlug])) {
+            regionList = regionsByCategory[categorySlug];
+        }
+        const allRegions = Array.isArray(regionList) ? regionList : [];
+        const displayRegions = allRegions.slice(0, maxRegions);
+        const regionHtml = allRegions.map((region) => {
+            const regionLabel = typeof region?.label === 'string' && region.label.trim()
+                ? region.label.trim()
+                : 'Wilayah';
+            const regionSlug = slugifyText(region?.slug || regionLabel);
+            if (!regionSlug) {
+                return '';
+            }
+            const regionCount = Number(region?.count) || 0;
+            const regionCountLabel = regionCount ? `${regionCount} pin` : '';
+            return `<a class="category-card-region" href="/kategori/${categorySlug}/${regionSlug}">
+                <span class="category-card-region-name">${escapeHtml(regionLabel)}</span>
+                ${regionCountLabel ? `<span class="category-card-region-count">${regionCountLabel}</span>` : ''}
+            </a>`;
+        }).filter(Boolean).join('');
+        const moreCount = allRegions.length - displayRegions.length;
+        const regionListClass = moreCount > 0
+            ? 'category-card-region-list is-collapsed'
+            : 'category-card-region-list is-full';
+        const toggleHtml = moreCount > 0
+            ? `<button type="button" class="category-card-toggle" data-more-count="${moreCount}" aria-expanded="false">+${moreCount} wilayah lain</button>`
+            : '';
+        const regionSection = regionHtml
+            ? `<div class="category-card-regions">
+                <div class="category-card-subtitle">Wilayah tersedia</div>
+                <div class="${regionListClass}">${regionHtml}</div>
+                ${toggleHtml}
+            </div>`
+            : '<div class="category-card-empty">Belum ada wilayah untuk kategori ini.</div>';
+        return `<article class="category-card">
+            <div class="category-card-top">
+                <a class="category-card-link" href="/kategori/${categorySlug}">${escapeHtml(categoryLabel)}</a>
+                <span class="category-card-count">${escapeHtml(countLabel)}</span>
+            </div>
+            ${regionSection}
+        </article>`;
+    }).filter(Boolean).join('');
+    const structuredData = {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        name: heading,
+        itemListElement: categoriesList.map((category, index) => {
+            const categoryLabel = typeof category?.label === 'string' && category.label.trim()
+                ? category.label.trim()
+                : 'Kategori';
+            const categorySlug = slugifyText(category?.slug || categoryLabel);
+            if (!categorySlug) {
+                return null;
+            }
+            return {
+                '@type': 'ListItem',
+                position: index + 1,
+                url: baseUrl ? `${baseUrl}/kategori/${categorySlug}` : `/kategori/${categorySlug}`,
+                name: categoryLabel
+            };
+        }).filter(Boolean)
+    };
+
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(pageTitle)}</title>
+  <meta name="description" content="${escapeHtml(metaDescription)}">
+  <meta name="robots" content="${robots}">
+  ${seo?.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(seo.googleSiteVerification)}">` : ''}
+  ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ''}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="${escapeHtml(pageTitle)}">
+  <meta property="og:description" content="${escapeHtml(metaDescription)}">
+  ${canonicalUrl ? `<meta property="og:url" content="${canonicalUrl}">` : ''}
+  ${ogImage ? `<meta property="og:image" content="${ogImage}">` : ''}
+  <meta name="twitter:card" content="${twitterImage ? 'summary_large_image' : 'summary'}">
+  <meta name="twitter:title" content="${escapeHtml(pageTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
+  ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body.pin-landing-page {
+      overflow-y: auto;
+    }
+    .pin-landing-bg {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 50%),
+        radial-gradient(circle at 15% 20%, rgba(14, 165, 233, 0.18), transparent 45%),
+        linear-gradient(160deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.92));
+      z-index: 0;
+    }
+    .pin-landing-shell {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      padding: clamp(20px, 5vw, 56px);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .pin-landing-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .pin-landing-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--app-text-strong);
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      font-size: 18px;
+    }
+    .pin-landing-brand img {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid var(--app-panel-border);
+      background: rgba(15, 23, 42, 0.6);
+      padding: 6px;
+    }
+    .pin-landing-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-card-bg);
+      color: var(--app-text);
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .pin-landing-back:hover {
+      border-color: var(--app-accent);
+      color: var(--app-text-strong);
+    }
+    .pin-landing-hero {
+      background: var(--app-panel-bg);
+      border: 1px solid var(--app-panel-border);
+      border-radius: var(--app-panel-radius);
+      padding: clamp(20px, 4vw, 28px);
+      box-shadow: var(--app-panel-shadow);
+      backdrop-filter: var(--app-panel-blur);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pin-landing-chip {
+      align-self: flex-start;
+      background: var(--app-chip-bg);
+      border: 1px solid var(--app-chip-border);
+      color: var(--app-text-soft);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pin-landing-title {
+      margin: 0;
+      font-size: clamp(26px, 3.2vw, 42px);
+      color: var(--app-text-strong);
+    }
+    .pin-landing-intro {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--app-text);
+    }
+    .pin-landing-count {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--app-text-soft);
+      background: var(--app-card-bg);
+      border: 1px solid var(--app-card-border);
+      border-radius: 12px;
+      padding: 8px 12px;
+      width: fit-content;
+    }
+    .pin-landing-list-card {
+      background: var(--app-panel-bg);
+      border: 1px solid var(--app-panel-border);
+      border-radius: var(--app-panel-radius);
+      padding: clamp(18px, 3vw, 24px);
+      box-shadow: var(--app-panel-shadow);
+      backdrop-filter: var(--app-panel-blur);
+    }
+    .pin-landing-section-head {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .pin-landing-section-title {
+      margin: 0;
+      font-size: 18px;
+      color: var(--app-text-strong);
+    }
+    .pin-landing-section-subtitle {
+      margin: 0;
+      font-size: 13px;
+      color: var(--app-text-soft);
+    }
+    .category-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 16px;
+    }
+    .category-card {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: var(--app-card-bg);
+      border: 1px solid var(--app-card-border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--app-card-shadow);
+      min-height: 180px;
+    }
+    .category-card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .category-card-link {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--app-text-strong);
+      text-decoration: none;
+    }
+    .category-card-link:hover {
+      color: var(--app-accent);
+    }
+    .category-card-count {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--app-text-soft);
+      border: 1px solid var(--app-card-border);
+      background: rgba(15, 23, 42, 0.5);
+      padding: 6px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .category-card-regions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .category-card-subtitle {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--app-text-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .category-card-region-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-height: 96px;
+      overflow: hidden;
+    }
+    .category-card-region-list.is-full {
+      max-height: none;
+      overflow: visible;
+    }
+    .category-card.is-expanded .category-card-region-list {
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .category-card-region {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--app-panel-border);
+      background: rgba(15, 23, 42, 0.35);
+      color: var(--app-text);
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .category-card-region:hover {
+      border-color: var(--app-accent);
+      color: var(--app-text-strong);
+    }
+    .category-card-region-count {
+      font-size: 11px;
+      color: var(--app-text-soft);
+    }
+    .category-card-toggle {
+      align-self: flex-start;
+      font-size: 12px;
+      color: var(--app-text-soft);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
+    .category-card-toggle:hover {
+      color: var(--app-text-strong);
+    }
+    .category-card-empty {
+      font-size: 13px;
+      color: var(--app-text-soft);
+    }
+    .category-empty {
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px dashed var(--app-card-border);
+      color: var(--app-text-soft);
+      font-size: 14px;
+    }
+  </style>
+  <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
+</head>
+<body class="pin-landing-page">
+  <div class="pin-landing-bg"></div>
+  <div class="pin-landing-shell">
+    <header class="pin-landing-header">
+      <a class="pin-landing-brand" href="${baseUrl ? `${baseUrl}/` : '/'}">
+        <img src="/icon-192.png" alt="AyaNaon">
+        <span>AyaNaon</span>
+      </a>
+      <a class="pin-landing-back" href="${backHref}">${backLabel}</a>
+    </header>
+    <section class="pin-landing-hero">
+      <span class="pin-landing-chip">Kategori</span>
+      <h1 class="pin-landing-title">${escapeHtml(heading)}</h1>
+      <p class="pin-landing-intro">${escapeHtml(introText)}</p>
+      <span class="pin-landing-count">${totalCount} pin tersedia</span>
+    </section>
+      <section class="pin-landing-list-card">
+        <div class="pin-landing-section-head">
+          <h2 class="pin-landing-section-title">Pilih kategori</h2>
+          <p class="pin-landing-section-subtitle">Gunakan kategori dan wilayah untuk menemukan pin.</p>
+        </div>
+        <div class="category-grid">
+        ${listHtml || '<div class="category-empty">Belum ada kategori untuk ditampilkan.</div>'}
+        </div>
+      </section>
+    </div>
+    <script>
+      (function () {
+        var buttons = document.querySelectorAll('.category-card-toggle');
+        for (var i = 0; i < buttons.length; i += 1) {
+          buttons[i].addEventListener('click', function (event) {
+            var button = event.currentTarget;
+            var card = button.closest('.category-card');
+            if (!card) {
+              return;
+            }
+            var expanded = card.classList.toggle('is-expanded');
+            button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            var moreCount = button.getAttribute('data-more-count') || '0';
+            button.textContent = expanded
+              ? 'Sembunyikan wilayah'
+              : ('+' + moreCount + ' wilayah lain');
+          });
+        }
+      })();
+    </script>
+  </body>
+  </html>`;
+}
+
+function buildCategoryLandingHtml({
+    seo,
+    baseUrl,
+    categoryLabel,
+    regionLabel,
+    categorySlug,
+    regionSlug,
+    pins,
+    totalCount
+}) {
+    const heading = regionLabel
+        ? `${categoryLabel} di ${regionLabel}`
+        : categoryLabel;
+    const pageTitle = truncateText(
+        [heading, seo?.title || ''].filter(Boolean).join(' | '),
+        70
+    );
+    const introText = `Temukan ${totalCount} pin ${heading} di AyaNaon. Klik salah satu pin untuk melihat detail.`;
+    const metaDescription = truncateText(introText, 160);
+    const canonicalPath = regionSlug
+        ? `/kategori/${categorySlug}/${regionSlug}`
+        : `/kategori/${categorySlug}`;
+    const canonicalUrl = baseUrl ? `${baseUrl}${canonicalPath}` : '';
+    const backHref = regionSlug
+        ? `/kategori/${categorySlug}`
+        : '/kategori';
+    const backLabel = regionSlug
+        ? 'Kembali ke kategori'
+        : 'Kembali ke semua kategori';
+    const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
+    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
+    const twitterImage = seo?.twitterImage || ogImage;
+    const displayCount = Array.isArray(pins) ? pins.length : 0;
+    const listHtml = (pins || []).map((pin) => {
+        const pinTitle = typeof pin?.title === 'string' && pin.title.trim()
+            ? pin.title.trim()
+            : 'Pin tanpa judul';
+        const pinUrl = `/pin/${pin._id}`;
+        const pinCity = normalizeLandingText(pin?.city);
+        const pinWhen = formatPinWhenLabel(pin?.lifetime);
+        const metaParts = [pinCity, pinWhen].filter(Boolean);
+        const metaLabel = metaParts.join(' - ');
+        const description = typeof pin?.description === 'string' ? pin.description.trim() : '';
+        const descriptionText = truncateText(description, 140);
+        return `<li class="pin-landing-item">
+            <a class="pin-landing-link" href="${pinUrl}">${escapeHtml(pinTitle)}</a>
+            ${metaLabel ? `<div class="pin-landing-meta">${escapeHtml(metaLabel)}</div>` : ''}
+            ${descriptionText ? `<p class="pin-landing-desc">${escapeHtml(descriptionText)}</p>` : ''}
+        </li>`;
+    }).join('');
+    const structuredData = {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        name: heading,
+        itemListElement: (pins || []).map((pin, index) => ({
+            '@type': 'ListItem',
+            position: index + 1,
+            url: baseUrl ? `${baseUrl}/pin/${pin._id}` : `/pin/${pin._id}`,
+            name: typeof pin?.title === 'string' && pin.title.trim() ? pin.title.trim() : 'Pin tanpa judul'
+        }))
+    };
+
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(pageTitle)}</title>
+  <meta name="description" content="${escapeHtml(metaDescription)}">
+  <meta name="robots" content="${robots}">
+  ${seo?.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(seo.googleSiteVerification)}">` : ''}
+  ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ''}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="${escapeHtml(pageTitle)}">
+  <meta property="og:description" content="${escapeHtml(metaDescription)}">
+  ${canonicalUrl ? `<meta property="og:url" content="${canonicalUrl}">` : ''}
+  ${ogImage ? `<meta property="og:image" content="${ogImage}">` : ''}
+  <meta name="twitter:card" content="${twitterImage ? 'summary_large_image' : 'summary'}">
+  <meta name="twitter:title" content="${escapeHtml(pageTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
+  ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body.pin-landing-page {
+      overflow-y: auto;
+    }
+    .pin-landing-bg {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 50%),
+        radial-gradient(circle at 15% 20%, rgba(14, 165, 233, 0.18), transparent 45%),
+        linear-gradient(160deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.92));
+      z-index: 0;
+    }
+    .pin-landing-shell {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      padding: clamp(20px, 5vw, 56px);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .pin-landing-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .pin-landing-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--app-text-strong);
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      font-size: 18px;
+    }
+      .pin-landing-brand img {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        border: 1px solid var(--app-panel-border);
+        background: rgba(15, 23, 42, 0.6);
+        padding: 6px;
+      }
+      .pin-landing-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--app-card-border);
+        background: var(--app-card-bg);
+        color: var(--app-text);
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .pin-landing-back:hover {
+        border-color: var(--app-accent);
+        color: var(--app-text-strong);
+      }
+      .pin-landing-hero {
+        background: var(--app-panel-bg);
+        border: 1px solid var(--app-panel-border);
+        border-radius: var(--app-panel-radius);
+        padding: clamp(20px, 4vw, 28px);
+      box-shadow: var(--app-panel-shadow);
+      backdrop-filter: var(--app-panel-blur);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pin-landing-chip {
+      align-self: flex-start;
+      background: var(--app-chip-bg);
+      border: 1px solid var(--app-chip-border);
+      color: var(--app-text-soft);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pin-landing-title {
+      margin: 0;
+      font-size: clamp(26px, 3.2vw, 42px);
+      color: var(--app-text-strong);
+    }
+    .pin-landing-intro {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--app-text);
+    }
+    .pin-landing-count {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--app-text-soft);
+      background: var(--app-card-bg);
+      border: 1px solid var(--app-card-border);
+      border-radius: 12px;
+      padding: 8px 12px;
+      width: fit-content;
+    }
+    .pin-landing-list-card {
+      background: var(--app-panel-bg);
+      border: 1px solid var(--app-panel-border);
+      border-radius: var(--app-panel-radius);
+      padding: clamp(18px, 3vw, 24px);
+      box-shadow: var(--app-panel-shadow);
+      backdrop-filter: var(--app-panel-blur);
+    }
+    .pin-landing-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 14px;
+    }
+    .pin-landing-item {
+      background: var(--app-card-bg);
+      border: 1px solid var(--app-card-border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--app-card-shadow);
+    }
+    .pin-landing-link {
+      text-decoration: none;
+      font-weight: 800;
+      color: var(--app-text-strong);
+      font-size: 16px;
+    }
+    .pin-landing-link:hover,
+    .pin-landing-link:focus-visible {
+      color: var(--app-accent);
+      outline: none;
+    }
+    .pin-landing-meta {
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
+    .pin-landing-desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--app-text);
+      line-height: 1.5;
+    }
+    .pin-landing-footer {
+      margin-top: auto;
+      text-align: center;
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
+  </style>
+  <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
+</head>
+<body class="pin-landing-page">
+  <div class="pin-landing-bg"></div>
+  <div class="pin-landing-shell">
+  <header class="pin-landing-header">
+    <a class="pin-landing-brand" href="${baseUrl ? `${baseUrl}/` : '/'}">
+      <img src="/icon-192.png" alt="AyaNaon">
+      <span>AyaNaon</span>
+    </a>
+    <a class="pin-landing-back" href="${backHref}">${backLabel}</a>
+  </header>
+    <section class="pin-landing-hero">
+      <span class="pin-landing-chip">Kategori</span>
+      <h1 class="pin-landing-title">${escapeHtml(heading)}</h1>
+      <p class="pin-landing-intro">${escapeHtml(introText)}</p>
+      <span class="pin-landing-count">${totalCount} pin tersedia</span>
+    </section>
+    <section class="pin-landing-list-card">
+      <ul class="pin-landing-list">
+        ${listHtml || '<li class="pin-landing-item">Belum ada pin untuk kategori ini.</li>'}
+      </ul>
+      ${totalCount > displayCount ? `<p class="pin-landing-intro">Menampilkan ${displayCount} dari ${totalCount} pin. Lihat peta AyaNaon untuk jelajah lebih lengkap.</p>` : ''}
+    </section>
+    <footer class="pin-landing-footer">AyaNaon category page</footer>
+  </div>
 </body>
 </html>`;
 }
@@ -1673,26 +3100,25 @@ async function resolveCityFromCoords(lat, lng) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         return null;
     }
-    if (!GOOGLE_MAPS_API_KEY) {
-        return null;
-    }
     try {
-        const response = await axios.get(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
-        );
-        const results = response.data?.results || [];
-        if (!results.length) {
+        const geo = await reverseGeocodeCity(lat, lng);
+        if (!geo) {
             return null;
         }
-        for (const component of results[0].address_components || []) {
-            if (component.types && component.types.includes('administrative_area_level_2')) {
-                return component.long_name;
-            }
+        const city = normalizeLandingText(geo.city);
+        if (city) {
+            return city;
         }
+        const label = normalizeLandingText(geo.label);
+        if (!label || label.toLowerCase() === 'unknown') {
+            return null;
+        }
+        const primary = label.split(',')[0].trim();
+        return primary || label;
     } catch (error) {
         console.error('Failed to resolve city from coordinates', error);
+        return null;
     }
-    return null;
 }
 
 function getPinImageIdentifier(image) {
@@ -1996,7 +3422,7 @@ const handleSitemapRequest = async (req, res) => {
             return;
         }
         const pins = await fetchActivePinsForSitemap();
-        const entries = baseUrl
+        const pinEntries = baseUrl
             ? pins.map((pin) => ({
                 loc: `${baseUrl}/pin/${pin._id}`,
                 lastmod: formatSitemapDate(pin.updatedAt || pin.createdAt),
@@ -2004,6 +3430,8 @@ const handleSitemapRequest = async (req, res) => {
                 priority: '0.7'
             }))
             : [];
+        const landingEntries = buildLandingEntriesFromPins(pins, baseUrl);
+        const entries = pinEntries.concat(landingEntries);
         const xml = buildSitemapXml(baseUrl, entries);
         sitemapCache = {
             baseUrl,
@@ -2052,6 +3480,54 @@ const handlePinPageRequest = async (req, res) => {
         res.send(html);
     } catch (error) {
         console.error('Failed to render pin page', error);
+        res.status(500).send('Error');
+    }
+};
+
+const handleCategoryIndexRequest = async (req, res) => {
+    try {
+        const data = await fetchCategoryIndexData();
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        const html = buildCategoryIndexHtml({
+            seo,
+            baseUrl,
+            ...data
+        });
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+        res.send(html);
+    } catch (error) {
+        console.error('Failed to render category index page', error);
+        res.status(500).send('Error');
+    }
+};
+
+const handleCategoryLandingRequest = async (req, res) => {
+    const categorySlug = slugifyText(req.params?.category || '');
+    const regionSlug = slugifyText(req.params?.region || '');
+    if (!categorySlug) {
+        res.status(404).send('Not found');
+        return;
+    }
+    try {
+        const data = await fetchCategoryLandingData(categorySlug, regionSlug);
+        if (!data) {
+            res.status(404).send('Not found');
+            return;
+        }
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        const html = buildCategoryLandingHtml({
+            seo,
+            baseUrl,
+            ...data
+        });
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+        res.send(html);
+    } catch (error) {
+        console.error('Failed to render category landing page', error);
         res.status(500).send('Error');
     }
 };
@@ -2164,6 +3640,96 @@ router.delete('/admin/residents/:id', async (req, res) => {
     } catch (error) {
         console.error('Failed to delete resident', error);
         res.status(500).json({ message: 'Tidak dapat menghapus warga.' });
+    }
+});
+
+router.post('/admin/pins/backfill-city', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat melakukan backfill lokasi.' });
+    }
+    const payload = req.body || {};
+    const limitQuery = parseInt(req.query.limit, 10);
+    const limitBody = parseInt(payload.limit, 10);
+    const rawLimit = Number.isFinite(limitQuery)
+        ? limitQuery
+        : (Number.isFinite(limitBody) ? limitBody : 25);
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
+    const dryRun = isTruthy(req.query.dryRun) || isTruthy(payload.dryRun);
+    try {
+        const db = await connectToDatabase();
+        const missingCityQuery = {
+            $or: [
+                { city: { $exists: false } },
+                { city: null },
+                { city: '' }
+            ],
+            lat: { $exists: true },
+            lng: { $exists: true }
+        };
+        const remainingBefore = await db.collection('pins').countDocuments(missingCityQuery);
+        if (dryRun) {
+            return res.json({
+                dryRun: true,
+                limit,
+                remaining: remainingBefore
+            });
+        }
+        const pins = await db.collection('pins')
+            .find(missingCityQuery)
+            .limit(limit)
+            .toArray();
+        const summary = {
+            processed: 0,
+            updated: 0,
+            skipped: 0,
+            errors: 0
+        };
+        const sampleUpdatedIds = [];
+        for (const pin of pins) {
+            summary.processed += 1;
+            const lat = Number(pin?.lat);
+            const lng = Number(pin?.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                summary.skipped += 1;
+                continue;
+            }
+            try {
+                const resolvedCity = await resolveCityFromCoords(lat, lng);
+                if (!resolvedCity) {
+                    summary.skipped += 1;
+                    continue;
+                }
+                const updateResult = await db.collection('pins').updateOne(
+                    { _id: pin._id },
+                    { $set: { city: resolvedCity } }
+                );
+                if (updateResult.modifiedCount) {
+                    summary.updated += 1;
+                    if (sampleUpdatedIds.length < 20) {
+                        sampleUpdatedIds.push(pin._id.toString());
+                    }
+                } else {
+                    summary.skipped += 1;
+                }
+            } catch (error) {
+                summary.errors += 1;
+                console.error('Failed to backfill city for pin', pin?._id, error);
+            }
+        }
+        const remainingAfter = await db.collection('pins').countDocuments(missingCityQuery);
+        res.json({
+            dryRun: false,
+            limit,
+            remainingBefore,
+            remainingAfter,
+            ...summary,
+            sampleUpdatedIds
+        });
+    } catch (error) {
+        console.error('Failed to backfill pin cities', error);
+        res.status(500).json({ message: 'Tidak dapat melakukan backfill kota.' });
     }
 });
 
@@ -2572,20 +4138,10 @@ router.post('/pins', async (req, res) => {
     }
     pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
 
-    // Get city from lat/lng
-    try {
-        const response = await axios.get(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${pin.lat},${pin.lng}&key=${GOOGLE_MAPS_API_KEY}`);
-        const results = response.data.results;
-        if (results.length > 0) {
-            for (const component of results[0].address_components) {
-                if (component.types.includes('administrative_area_level_2')) {
-                    pin.city = component.long_name;
-                    break;
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error getting city from geocoding API:', error);
+    // Get city from lat/lng (with OSM fallback)
+    const resolvedCity = await resolveCityFromCoords(Number(pin.lat), Number(pin.lng));
+    if (resolvedCity) {
+        pin.city = resolvedCity;
     }
 
     const result = await db.collection('pins').insertOne(pin);
@@ -2728,6 +4284,10 @@ router.post('/pins/:id/downvote', async (req, res) => {
 app.get('/sitemap.xml', handleSitemapRequest);
 app.get('/robots.txt', handleRobotsRequest);
 app.get('/pin/:id', handlePinPageRequest);
+app.get('/kategori', handleCategoryIndexRequest);
+app.get('/kategori/', handleCategoryIndexRequest);
+app.get('/kategori/:category', handleCategoryLandingRequest);
+app.get('/kategori/:category/:region', handleCategoryLandingRequest);
 
 app.use('/api', router);
 

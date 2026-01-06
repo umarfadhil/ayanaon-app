@@ -1,3 +1,6 @@
 /pin/* /.netlify/functions/api/pin/:splat 200
+/kategori /.netlify/functions/api/kategori 200
+/kategori/ /.netlify/functions/api/kategori 200
+/kategori/* /.netlify/functions/api/kategori/:splat 200
 /sitemap.xml /.netlify/functions/api/seo/sitemap 200
 /robots.txt /.netlify/functions/api/seo/robots 200
