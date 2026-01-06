@@ -342,7 +342,7 @@ const DEFAULT_SEO_SETTINGS = {
     title: 'AyaNaon | Cari Kegiatan Seru Di Sekitarmu!',
     description: 'Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!',
     keywords: 'event, lari, konser, seminar, makanan, minuman, restoran legendaris, SPBU, SPKLU, aplikasi rekomendasi tempat, rekomendasi tempat makan, rekomendasi kuliner Indonesia, aplikasi kuliner Indonesia, tempat makan terdekat, rekomendasi cafe terdekat, rekomendasi restoran terdekat, tempat nongkrong terdekat, rekomendasi tempat nongkrong, aplikasi pencari tempat makan, kuliner legendaris Indonesia, makan',
-    siteUrl: 'https://www.ayanaon.app',
+    siteUrl: 'https://ayanaon.app',
     ogTitle: '',
     ogDescription: '',
     ogImage: '',
@@ -438,6 +438,35 @@ function normalizeSeoUrl(value) {
     return normalized;
 }
 
+function resolveSeoBaseUrl(configuredBase, requestBase) {
+    if (!configuredBase) {
+        return requestBase || '';
+    }
+    if (!requestBase) {
+        return configuredBase;
+    }
+    try {
+        const configuredUrl = new URL(configuredBase);
+        const requestUrl = new URL(requestBase);
+        const configuredHost = configuredUrl.host.toLowerCase();
+        const requestHost = requestUrl.host.toLowerCase();
+        const normalizedConfiguredHost = configuredHost.replace(/^www\./, '');
+        const normalizedRequestHost = requestHost.replace(/^www\./, '');
+        if (normalizedConfiguredHost === normalizedRequestHost) {
+            const configuredIsHttps = configuredUrl.protocol === 'https:';
+            const requestIsHttps = requestUrl.protocol === 'https:';
+            const configuredHasWww = configuredHost.startsWith('www.');
+            const requestHasWww = requestHost.startsWith('www.');
+            if ((requestIsHttps && !configuredIsHttps) || (configuredHasWww && !requestHasWww)) {
+                return requestBase;
+            }
+        }
+    } catch (error) {
+        return configuredBase;
+    }
+    return configuredBase;
+}
+
 function normalizeSeoSettings(raw = {}) {
     const stringValue = (value) => (typeof value === 'string' ? value.trim() : '');
     const fallbackTitle = document.title || DEFAULT_SEO_SETTINGS.title;
@@ -465,7 +494,8 @@ function applySeoSettings(raw = {}) {
         return;
     }
     const settings = normalizeSeoSettings(raw);
-    const baseUrl = normalizeSeoUrl(settings.siteUrl) || window.location.origin;
+    const configuredBase = normalizeSeoUrl(settings.siteUrl);
+    const baseUrl = resolveSeoBaseUrl(configuredBase, window.location.origin);
     const canonicalUrl = baseUrl ? `${baseUrl}${window.location.pathname}` : window.location.href;
     const title = settings.title || DEFAULT_SEO_SETTINGS.title;
     const description = settings.description || DEFAULT_SEO_SETTINGS.description;
@@ -3814,6 +3844,14 @@ function normalizePinId(value) {
     return String(value);
 }
 
+function getPinDetailUrl(pinId) {
+    const normalized = normalizePinId(pinId);
+    if (!normalized) {
+        return '';
+    }
+    return `/pin/${encodeURIComponent(normalized)}`;
+}
+
 function normalizeExternalLink(value) {
     if (typeof value !== 'string') {
         return '';
@@ -4330,6 +4368,7 @@ function updatePinListPanel(context = {}) {
         const hasDateInfo = startParts.isValid || endParts.isValid;
 
         const pinId = normalizePinId(pin._id || pin.id);
+        const detailUrl = getPinDetailUrl(pinId);
         const item = document.createElement('div');
         item.className = 'pin-list-item';
         item.setAttribute('role', 'listitem');
@@ -4340,9 +4379,21 @@ function updatePinListPanel(context = {}) {
         const header = document.createElement('div');
         header.className = 'pin-list-item__header';
 
-        const title = document.createElement('div');
+        const title = document.createElement(detailUrl ? 'a' : 'div');
         title.className = 'pin-list-item__title';
         title.textContent = pin.title || 'Pin tanpa judul';
+        if (detailUrl) {
+            title.href = detailUrl;
+            title.setAttribute('aria-label', `Buka detail ${pin.title || 'pin'}`);
+            title.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+            title.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.stopPropagation();
+                }
+            });
+        }
         header.appendChild(title);
 
         if (pinId) {
@@ -4462,6 +4513,16 @@ function updatePinListPanel(context = {}) {
         descriptionBlock.appendChild(description);
         if (moreButton) {
             descriptionBlock.appendChild(moreButton);
+        }
+        if (detailUrl) {
+            const detailLink = document.createElement('a');
+            detailLink.className = 'pin-list-item__detail';
+            detailLink.href = detailUrl;
+            detailLink.textContent = 'Lihat detail pin';
+            detailLink.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+            descriptionBlock.appendChild(detailLink);
         }
 
         item.appendChild(header);
@@ -7328,6 +7389,10 @@ async function initMap() {
 
         const pinId = normalizePinId(pin._id || pin.id);
         const isSavedPin = Boolean(pinId && isPinSaved(pinId));
+        const detailUrl = getPinDetailUrl(pinId);
+        const detailLink = detailUrl
+            ? `<div class="info-window-detail"><a href="${detailUrl}">Lihat detail pin</a></div>`
+            : '';
         const saveButton = pinId
             ? `<button type="button" class="save-pin-btn${isSavedPin ? ' is-saved' : ''}" data-pin-id="${pinId}" aria-pressed="${isSavedPin ? 'true' : 'false'}">${isSavedPin ? 'Saved' : 'Save'}</button>`
             : '';
@@ -7376,6 +7441,7 @@ async function initMap() {
                 ${imageGallery}
                 <div class="info-window-when">${when}</div>
                 ${linkElement}
+                ${detailLink}
                 <div class="info-window-actions">
                     ${editButton}
                     ${saveButton}

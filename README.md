@@ -96,6 +96,10 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.5
+- **Pin Detail Links Strengthened:** Pin list titles and map popups now include direct anchor links to `/pin/<id>` pages for better crawl discovery.
+- **Canonical Host Alignment:** SEO base URLs prefer the request host when it avoids `www`/HTTP redirects, reducing "Page with redirect" indexing issues.
+
 ### What's New in v2.4.4
 - **Internal Linking Boost:** Added "View detail" links in the pin list and map popups that point to `/pin/<id>` pages.
 - **PWA Cache Bump:** Service worker cache version updated to deliver the latest assets.

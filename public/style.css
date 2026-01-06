@@ -864,6 +864,7 @@ body.maintenance-active #action-menu-toggle {
     font-weight: 800;
     font-size: 17px;
     color: var(--app-text-strong);
+    text-decoration: none;
 }
 
 .pin-list-item__distance {
@@ -990,6 +991,20 @@ body.maintenance-active #action-menu-toggle {
 
 .pin-list-item__more-btn:hover {
     color: var(--app-accent-strong);
+}
+
+.pin-list-item__detail {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--app-accent);
+    text-decoration: underline;
+    align-self: flex-start;
+}
+
+.pin-list-item__detail:hover,
+.pin-list-item__detail:focus-visible {
+    color: var(--app-accent-strong);
+    outline: none;
 }
 
 @media (max-width: 768px) {
@@ -1931,6 +1946,16 @@ body.maintenance-active #action-menu-toggle {
 .info-window-link a {
     color: inherit;
     text-decoration: none;
+}
+
+.info-window-detail {
+    font-size: 1.1em;
+    margin-bottom: 12px;
+}
+
+.info-window-detail a {
+    color: var(--app-accent);
+    text-decoration: underline;
 }
 
 .info-window-actions {

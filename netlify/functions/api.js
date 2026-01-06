@@ -426,7 +426,7 @@ const DEFAULT_SEO_SETTINGS = {
     title: 'AyaNaon | Cari Kegiatan Seru Di Sekitarmu!',
     description: 'Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!',
     keywords: 'event, lari, konser, seminar, makanan, minuman, restoran legendaris, SPBU, SPKLU, aplikasi rekomendasi tempat, rekomendasi tempat makan, rekomendasi kuliner Indonesia, aplikasi kuliner Indonesia, tempat makan terdekat, rekomendasi cafe terdekat, rekomendasi restoran terdekat, tempat nongkrong terdekat, rekomendasi tempat nongkrong, aplikasi pencari tempat makan, kuliner legendaris Indonesia, makan',
-    siteUrl: 'https://www.ayanaon.app',
+    siteUrl: 'https://ayanaon.app',
     ogTitle: '',
     ogDescription: '',
     ogImage: '',
@@ -664,16 +664,35 @@ async function writeSeoSettings(payload = {}) {
 
 function resolveSeoBaseUrl(seo, req) {
     const configured = sanitizeSeoUrl(seo?.siteUrl);
-    if (configured) {
-        return configured;
-    }
     const protoHeader = req.headers['x-forwarded-proto'] || 'https';
     const proto = protoHeader.split(',')[0].trim() || 'https';
     const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-    if (!host) {
-        return '';
+    const requestBase = host ? `${proto}://${host}` : '';
+    if (!configured) {
+        return requestBase;
     }
-    return `${proto}://${host}`;
+    if (!host) {
+        return configured;
+    }
+    try {
+        const configuredUrl = new URL(configured);
+        const configuredHost = configuredUrl.host.toLowerCase();
+        const requestHost = host.toLowerCase();
+        const normalizedConfiguredHost = configuredHost.replace(/^www\./, '');
+        const normalizedRequestHost = requestHost.replace(/^www\./, '');
+        if (normalizedConfiguredHost === normalizedRequestHost) {
+            const configuredIsHttps = configuredUrl.protocol === 'https:';
+            const requestIsHttps = proto === 'https';
+            const configuredHasWww = configuredHost.startsWith('www.');
+            const requestHasWww = requestHost.startsWith('www.');
+            if ((requestIsHttps && !configuredIsHttps) || (configuredHasWww && !requestHasWww)) {
+                return requestBase;
+            }
+        }
+    } catch (error) {
+        return configured;
+    }
+    return configured;
 }
 
 function buildSitemapXml(baseUrl, entries = []) {
