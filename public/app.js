@@ -31,6 +31,9 @@ let navigationCancelBtn;
 let calendarModal;
 let calendarOptionsContainer;
 let calendarCancelBtn;
+let shareModal;
+let shareOptionsContainer;
+let shareCancelBtn;
 let clusterManager;
 let userLocation = null;
 let fuelToggle;
@@ -1648,13 +1651,13 @@ function configureLiveSellerLinks(isLoggedIn) {
         if (liveSellerAuthLinks) {
             liveSellerAuthLinks.classList.remove('hidden');
         }
-        liveSellerAuthPrimaryLink.textContent = 'Masuk';
+        liveSellerAuthPrimaryLink.textContent = 'Login';
         liveSellerAuthPrimaryLink.setAttribute('href', 'login.html');
         liveSellerAuthPrimaryLink.removeAttribute('role');
     }
 
     if (liveSellerAuthSecondaryLink) {
-        liveSellerAuthSecondaryLink.textContent = 'Daftar';
+        liveSellerAuthSecondaryLink.textContent = 'Register';
         liveSellerAuthSecondaryLink.setAttribute('href', 'register.html');
     }
 }
@@ -3844,6 +3847,19 @@ function normalizePinId(value) {
     return String(value);
 }
 
+function getPinFocusIdFromUrl() {
+    if (typeof window === 'undefined' || !window.location) {
+        return '';
+    }
+    const search = window.location.search || '';
+    if (!search) {
+        return '';
+    }
+    const params = new URLSearchParams(search);
+    const raw = params.get('pin') || params.get('pinId') || '';
+    return normalizePinId(raw);
+}
+
 function getPinDetailUrl(pinId) {
     const normalized = normalizePinId(pinId);
     if (!normalized) {
@@ -4409,6 +4425,16 @@ function updatePinListPanel(context = {}) {
                 toggleSavedPinById(pinId);
             });
             actions.appendChild(saveButton);
+            const shareButton = document.createElement('button');
+            shareButton.type = 'button';
+            shareButton.className = 'pin-list-item__share';
+            shareButton.textContent = 'Share';
+            shareButton.setAttribute('aria-label', `Share ${pin.title || 'pin'}`);
+            shareButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                showShareOptions(pin);
+            });
+            actions.appendChild(shareButton);
             if (isSavedView) {
                 const calendarButton = document.createElement('button');
                 calendarButton.type = 'button';
@@ -5336,6 +5362,228 @@ function hideCalendarModal() {
         return;
     }
     calendarModal.classList.remove('navigation-modal--open');
+}
+
+function initializeShareModal() {
+    if (shareModal) {
+        return;
+    }
+
+    shareModal = document.createElement('div');
+    shareModal.id = 'share-modal';
+    shareModal.className = 'navigation-modal share-modal';
+    shareModal.innerHTML = `
+        <div class="navigation-modal__sheet">
+            <div class="navigation-modal__handle"></div>
+            <h3 class="navigation-modal__title">Bagikan Pin</h3>
+            <div class="navigation-modal__options"></div>
+            <button type="button" class="navigation-modal__cancel">Batal</button>
+        </div>
+    `;
+
+    document.body.appendChild(shareModal);
+
+    shareOptionsContainer = shareModal.querySelector('.navigation-modal__options');
+    shareCancelBtn = shareModal.querySelector('.navigation-modal__cancel');
+
+    shareModal.addEventListener('click', (event) => {
+        if (event.target === shareModal) {
+            hideShareModal();
+        }
+    });
+
+    if (shareCancelBtn) {
+        shareCancelBtn.addEventListener('click', () => {
+            hideShareModal();
+        });
+    }
+}
+
+function hideShareModal() {
+    if (!shareModal) {
+        return;
+    }
+    shareModal.classList.remove('navigation-modal--open');
+}
+
+function buildSharePayload(pin) {
+    const pinId = normalizePinId(pin?._id || pin?.id);
+    const detailUrl = pinId ? getPinDetailUrl(pinId) : '';
+    let url = '';
+    if (detailUrl) {
+        try {
+            url = new URL(detailUrl, window.location.origin).toString();
+        } catch (error) {
+            url = detailUrl;
+        }
+    } else {
+        url = window.location.href || '';
+    }
+    const rawTitle = typeof pin?.title === 'string' ? pin.title.trim() : '';
+    const title = rawTitle || 'Pin Ayanaon';
+    const message = url ? `${title}\n${url}` : title;
+    return { url, title, message };
+}
+
+function buildShareOptions(pin) {
+    const payload = buildSharePayload(pin);
+    const encodedUrl = encodeURIComponent(payload.url || '');
+    const encodedTitle = encodeURIComponent(payload.title || '');
+    const encodedMessage = encodeURIComponent(payload.message || payload.url || payload.title || '');
+
+    return {
+        payload,
+        options: [
+            {
+                key: 'copy',
+                label: 'Copy link',
+                hint: 'Salin tautan pin',
+                action: 'copy'
+            },
+            {
+                key: 'whatsapp',
+                label: 'WhatsApp',
+                hint: 'Kirim lewat WhatsApp',
+                url: `https://wa.me/?text=${encodedMessage}`
+            },
+            {
+                key: 'facebook',
+                label: 'Facebook',
+                hint: 'Bagikan ke Facebook',
+                url: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`
+            },
+            {
+                key: 'x',
+                label: 'X',
+                hint: 'Bagikan ke X',
+                url: `https://twitter.com/intent/tweet?text=${encodedTitle}&url=${encodedUrl}`
+            },
+            {
+                key: 'threads',
+                label: 'Threads',
+                hint: 'Bagikan ke Threads',
+                url: `https://www.threads.net/intent/post?text=${encodedMessage}`
+            }
+        ]
+    };
+}
+
+async function tryNativeShare(pin) {
+    if (!navigator.share || typeof navigator.share !== 'function') {
+        return false;
+    }
+    const payload = buildSharePayload(pin);
+    const shareData = {
+        title: payload.title || '',
+        text: payload.message || '',
+        url: payload.url || ''
+    };
+    Object.keys(shareData).forEach((key) => {
+        if (!shareData[key]) {
+            delete shareData[key];
+        }
+    });
+    if (!Object.keys(shareData).length) {
+        return false;
+    }
+    if (navigator.canShare) {
+        try {
+            if (!navigator.canShare(shareData)) {
+                return false;
+            }
+        } catch (error) {
+            // Ignore canShare errors and attempt share.
+        }
+    }
+    try {
+        await navigator.share(shareData);
+        return true;
+    } catch (error) {
+        if (error && error.name === 'AbortError') {
+            return true;
+        }
+        return false;
+    }
+}
+
+async function copyShareText(text) {
+    if (!text) {
+        return false;
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (error) {
+            // Fall back to legacy copy for older browsers.
+        }
+    }
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return copied;
+    } catch (error) {
+        return false;
+    }
+}
+
+async function openShareOption(option, payload) {
+    if (!option) {
+        return;
+    }
+    hideShareModal();
+
+    if (option.action === 'copy') {
+        const textToCopy = payload?.url || payload?.message || '';
+        const success = await copyShareText(textToCopy);
+        alert(success ? 'Link disalin.' : 'Tidak dapat menyalin link.');
+        return;
+    }
+
+    if (option.url) {
+        window.open(option.url, '_blank', 'noopener');
+    }
+}
+
+async function showShareOptions(pin) {
+    const shared = await tryNativeShare(pin);
+    if (shared) {
+        return;
+    }
+    hideNavigationModal();
+    hideCalendarModal();
+    initializeShareModal();
+    if (!shareOptionsContainer) {
+        return;
+    }
+
+    shareOptionsContainer.innerHTML = '';
+    const { options, payload } = buildShareOptions(pin);
+    options.forEach((option) => {
+        const optionButton = document.createElement('button');
+        optionButton.type = 'button';
+        optionButton.className = 'navigation-modal__option';
+        optionButton.innerHTML = `
+            <div class="navigation-modal__option-text">
+                <span class="navigation-modal__option-title">${option.label}</span>
+                ${option.hint ? `<span class="navigation-modal__option-hint">${option.hint}</span>` : ''}
+            </div>
+            <span class="navigation-modal__option-arrow">\u203a</span>
+        `;
+        optionButton.addEventListener('click', () => {
+            openShareOption(option, payload);
+        });
+        shareOptionsContainer.appendChild(optionButton);
+    });
+
+    shareModal.classList.add('navigation-modal--open');
 }
 
 function openExternalCalendarUrl(url) {
@@ -7343,6 +7591,8 @@ async function initMap() {
     syncResidentShareMarkersFromCache();
     refreshResidentShareMarkers({ force: true });
     startResidentShareRefreshLoop();
+    const pinFocusIdFromUrl = getPinFocusIdFromUrl();
+    let hasFocusedPinFromUrl = false;
 
     async function fetchPinDetailsById(pinId) {
         if (!pinId) {
@@ -7396,6 +7646,9 @@ async function initMap() {
         const saveButton = pinId
             ? `<button type="button" class="save-pin-btn${isSavedPin ? ' is-saved' : ''}" data-pin-id="${pinId}" aria-pressed="${isSavedPin ? 'true' : 'false'}">${isSavedPin ? 'Saved' : 'Save'}</button>`
             : '';
+        const shareButton = pinId
+            ? `<button type="button" class="share-pin-btn" data-pin-id="${pinId}" aria-haspopup="dialog">Share</button>`
+            : '';
         const when = getPinWhenLabel(pin) || 'N/A';
 
         const descriptionWithBreaks = pin.description.replace(/\n/g, '<br>');
@@ -7445,6 +7698,7 @@ async function initMap() {
                 <div class="info-window-actions">
                     ${editButton}
                     ${saveButton}
+                    ${shareButton}
                 </div>
                 <div class="info-window-vote-actions">
                     <div class="info-window-vote">
@@ -7453,7 +7707,7 @@ async function initMap() {
                         <button id="downvote-btn-${pin._id}">&#128078;</button>
                         <span id="downvotes-${pin._id}">${pin.downvotes}</span>
                     </div>
-                    <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Arahkan</button>
+                    <button class="navigate-btn" data-lat="${pin.lat}" data-lng="${pin.lng}" data-title="${safeTitleForData}">Go Here!</button>
                 </div>
             </div>
         `;
@@ -7510,6 +7764,14 @@ async function initMap() {
             saveButtonElement.addEventListener('click', (event) => {
                 event.stopPropagation();
                 toggleSavedPinById(pinId);
+            });
+        }
+
+        const shareButtonElement = infowindow.container.querySelector('.share-pin-btn');
+        if (shareButtonElement) {
+            shareButtonElement.addEventListener('click', (event) => {
+                event.stopPropagation();
+                showShareOptions(pin);
             });
         }
 
@@ -7734,6 +7996,42 @@ async function initMap() {
         return marker;
     }
 
+    async function focusPinFromUrl() {
+        if (hasFocusedPinFromUrl || !pinFocusIdFromUrl) {
+            return;
+        }
+        const targetId = normalizePinId(pinFocusIdFromUrl);
+        if (!targetId) {
+            hasFocusedPinFromUrl = true;
+            return;
+        }
+        let marker = pinMarkersById.get(targetId);
+        if (!marker) {
+            marker = markers.find((entry) => {
+                const entryId = normalizePinId(entry?.pin?._id || entry?.pin?.id);
+                return entryId === targetId;
+            });
+        }
+        if (!marker) {
+            try {
+                const pin = await fetchPinDetailsById(targetId);
+                if (pin) {
+                    marker = addPinToMap(pin);
+                    applyFilters();
+                }
+            } catch (error) {
+                console.warn('Gagal memuat pin dari URL', error);
+            }
+        }
+        if (!marker) {
+            hasFocusedPinFromUrl = true;
+            return;
+        }
+        hasFocusedPinFromUrl = true;
+        setPinListCollapsed(true);
+        focusOnPinMarker(marker);
+    }
+
     function fetchPins() {
         if (isFetchingPins) {
             pendingPinsRefresh = true;
@@ -7769,6 +8067,7 @@ async function initMap() {
             markers = Array.from(pinMarkersById.values());
             applyFilters();
             syncSavedPinsWithMarkers();
+            focusPinFromUrl().catch(() => undefined);
             startAdminEditLocationIfPending();
             lastKnownPinsCount = seenIds.size;
             DEBUG_LOGGER.log('Pins synchronized', { count: lastKnownPinsCount });

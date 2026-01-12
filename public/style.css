@@ -829,7 +829,8 @@ body.maintenance-active #action-menu-toggle {
     margin-left: auto;
 }
 
-.pin-list-item__save {
+.pin-list-item__save,
+.pin-list-item__share {
     border: 1px solid var(--app-chip-border);
     background: var(--app-chip-bg);
     color: var(--app-text);
@@ -842,7 +843,9 @@ body.maintenance-active #action-menu-toggle {
 }
 
 .pin-list-item__save:hover,
-.pin-list-item__save:focus-visible {
+.pin-list-item__save:focus-visible,
+.pin-list-item__share:hover,
+.pin-list-item__share:focus-visible {
     background: rgba(96, 165, 250, 0.2);
     border-color: rgba(96, 165, 250, 0.4);
     outline: none;
@@ -2004,7 +2007,8 @@ body.maintenance-active #action-menu-toggle {
     margin-right: auto;
 }
 
-.save-pin-btn {
+.save-pin-btn,
+.share-pin-btn {
     border: 1px solid var(--app-chip-border);
     background: var(--app-chip-bg);
     color: var(--app-text);
@@ -2020,7 +2024,9 @@ body.maintenance-active #action-menu-toggle {
 }
 
 .save-pin-btn:hover,
-.save-pin-btn:focus-visible {
+.save-pin-btn:focus-visible,
+.share-pin-btn:hover,
+.share-pin-btn:focus-visible {
     background: rgba(96, 165, 250, 0.2);
     border-color: rgba(96, 165, 250, 0.4);
     outline: none;

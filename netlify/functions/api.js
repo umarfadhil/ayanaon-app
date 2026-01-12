@@ -558,6 +558,49 @@ function formatPinWhenLabel(lifetime = {}) {
     return '';
 }
 
+function formatDateToYMD(value) {
+    if (!value) {
+        return '';
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getPinFilterDateRange(lifetime = {}) {
+    if (!lifetime || typeof lifetime !== 'object') {
+        return { start: '', end: '' };
+    }
+    if (lifetime.type === 'today') {
+        const today = formatDateToYMD(new Date());
+        return { start: today, end: today };
+    }
+    if (lifetime.type === 'date') {
+        const startValue = lifetime.start || lifetime.value || lifetime.end || '';
+        const endValue = lifetime.end || lifetime.value || lifetime.start || '';
+        return {
+            start: formatDateToYMD(startValue),
+            end: formatDateToYMD(endValue)
+        };
+    }
+    return { start: '', end: '' };
+}
+
+function buildPinSearchText(pin = {}) {
+    const parts = [
+        typeof pin?.title === 'string' ? pin.title.trim() : '',
+        typeof pin?.description === 'string' ? pin.description.trim() : '',
+        typeof pin?.category === 'string' ? pin.category.trim() : '',
+        typeof pin?.city === 'string' ? pin.city.trim() : ''
+    ].filter(Boolean);
+    return parts.join(' ').toLowerCase();
+}
+
 function normalizeExternalUrl(value) {
     if (typeof value !== 'string') {
         return '';
@@ -893,10 +936,52 @@ async function fetchCategoryIndexData() {
         regionLists.set(categorySlug, list);
     });
     const totalPins = categories.reduce((sum, item) => sum + (item.count || 0), 0);
+    const regionTotals = new Map();
+    regionLists.forEach((list) => {
+        list.forEach((region) => {
+            if (!region || !region.label) {
+                return;
+            }
+            const slug = slugifyText(region.slug || region.label);
+            if (!slug) {
+                return;
+            }
+            if (!regionTotals.has(slug)) {
+                regionTotals.set(slug, {
+                    label: region.label,
+                    slug,
+                    count: Number(region.count) || 0
+                });
+            } else {
+                const existing = regionTotals.get(slug);
+                existing.count += Number(region.count) || 0;
+            }
+        });
+    });
+    const regions = Array.from(regionTotals.values()).sort(
+        (a, b) => (b.count - a.count) || a.label.localeCompare(b.label)
+    );
+    const pins = await db.collection('pins')
+        .find(activeQuery)
+        .project({
+            _id: 1,
+            title: 1,
+            description: 1,
+            category: 1,
+            city: 1,
+            lifetime: 1,
+            createdAt: 1,
+            updatedAt: 1
+        })
+        .sort({ _id: -1 })
+        .limit(200)
+        .toArray();
     return {
         categories,
         regionsByCategory: regionLists,
-        totalPins
+        totalPins,
+        pins,
+        regions
     };
 }
 
@@ -923,7 +1008,29 @@ async function fetchCategoryLandingData(categorySlug, regionSlug) {
     if (!categoryLabel) {
         return null;
     }
-    const query = { ...activeQuery, category: categoryLabel };
+    const categoryQuery = { ...activeQuery, category: categoryLabel };
+    const regionDocs = await db.collection('pins')
+        .aggregate([
+            { $match: categoryQuery },
+            { $group: { _id: '$city', count: { $sum: 1 } } }
+        ])
+        .toArray();
+    const regions = regionDocs
+        .map((doc) => {
+            const label = normalizeLandingText(doc?._id);
+            const slug = slugifyText(label);
+            if (!label || !slug) {
+                return null;
+            }
+            return {
+                label,
+                slug,
+                count: Number(doc?.count) || 0
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label));
+    const query = { ...categoryQuery };
     let regionLabel = '';
     if (safeRegionSlug) {
         const cities = await db.collection('pins').distinct('city', query);
@@ -964,7 +1071,8 @@ async function fetchCategoryLandingData(categorySlug, regionSlug) {
         categorySlug: safeCategorySlug,
         regionSlug: safeRegionSlug,
         pins,
-        totalCount
+        totalCount,
+        regions
     };
 }
 
@@ -1026,8 +1134,12 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const description = String(pin?.description || '').trim();
     const metaDescription = truncateText(description || seo?.description || '', 160);
     const pageTitle = title ? `${title} | ${seo?.title || ''}`.trim() : (seo?.title || '');
-    const canonicalUrl = baseUrl ? `${baseUrl}/pin/${pin._id}` : '';
+    const pinId = pin?._id ? String(pin._id) : '';
+    const canonicalUrl = baseUrl ? `${baseUrl}/pin/${pinId}` : '';
     const categoryIndexUrl = baseUrl ? `${baseUrl}/kategori` : '/kategori';
+    const mapFocusUrl = baseUrl
+        ? (pinId ? `${baseUrl}/?pin=${encodeURIComponent(pinId)}` : `${baseUrl}/`)
+        : '';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
@@ -1152,7 +1264,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const actionItems = [
         mapLink ? { href: mapLink, label: 'Buka di Google Maps', external: true } : null,
         externalLink ? { href: externalLink, label: linkButtonLabel || linkLabel || 'Buka tautan', external: true } : null,
-        baseUrl ? { href: `${baseUrl}/`, label: 'Lihat di peta AyaNaon', external: false } : null
+        mapFocusUrl ? { href: mapFocusUrl, label: 'Lihat di peta AyaNaon', external: false } : null
     ].filter(Boolean);
     const actionsHtml = actionItems.length
         ? `<div class="pin-detail-actions">
@@ -1545,7 +1657,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
       </a>
       <div class="pin-detail-header-actions">
         <a class="pin-detail-ghost" href="${categoryIndexUrl}">Lihat kategori</a>
-        ${baseUrl ? `<a class="pin-detail-ghost" href="${baseUrl}/">Lihat di peta</a>` : ''}
+        ${mapFocusUrl ? `<a class="pin-detail-ghost" href="${mapFocusUrl}">Lihat di peta</a>` : ''}
       </div>
     </header>
     <main class="pin-detail-main">
@@ -1572,12 +1684,55 @@ function buildPinPageHtml(pin, seo, baseUrl) {
 </html>`;
 }
 
+function buildPinLandingListItem(pin, options = {}) {
+    if (!pin || !pin._id) {
+        return '';
+    }
+    const includeCategory = Boolean(options.includeCategory);
+    const pinTitle = typeof pin?.title === 'string' && pin.title.trim()
+        ? pin.title.trim()
+        : 'Pin tanpa judul';
+    const pinUrl = `/pin/${pin._id}`;
+    const pinCity = normalizeLandingText(pin?.city);
+    const pinCategory = normalizeLandingText(pin?.category);
+    const pinWhen = formatPinWhenLabel(pin?.lifetime);
+    const metaParts = [];
+    if (includeCategory && pinCategory) {
+        metaParts.push(pinCategory);
+    }
+    if (pinCity) {
+        metaParts.push(pinCity);
+    }
+    if (pinWhen) {
+        metaParts.push(pinWhen);
+    }
+    const metaLabel = metaParts.join(' - ');
+    const description = typeof pin?.description === 'string' ? pin.description.trim() : '';
+    const descriptionText = truncateText(description, 140);
+    const searchText = buildPinSearchText(pin);
+    const regionSlug = slugifyText(pinCity);
+    const { start, end } = getPinFilterDateRange(pin?.lifetime);
+    const dataAttrs = [
+        `data-search="${escapeHtml(searchText)}"`,
+        regionSlug ? `data-region="${escapeHtml(regionSlug)}"` : '',
+        start ? `data-start="${escapeHtml(start)}"` : '',
+        end ? `data-end="${escapeHtml(end)}"` : ''
+    ].filter(Boolean).join(' ');
+    return `<li class="pin-landing-item" ${dataAttrs}>
+        <a class="pin-landing-link" href="${pinUrl}">${escapeHtml(pinTitle)}</a>
+        ${metaLabel ? `<div class="pin-landing-meta">${escapeHtml(metaLabel)}</div>` : ''}
+        ${descriptionText ? `<p class="pin-landing-desc">${escapeHtml(descriptionText)}</p>` : ''}
+    </li>`;
+}
+
 function buildCategoryIndexHtml({
     seo,
     baseUrl,
     categories,
     regionsByCategory,
-    totalPins
+    totalPins,
+    pins,
+    regions
 }) {
     const heading = 'Kategori dan Wilayah';
     const totalCount = Number(totalPins) || 0;
@@ -1652,6 +1807,26 @@ function buildCategoryIndexHtml({
             ${regionSection}
         </article>`;
     }).filter(Boolean).join('');
+    const pinList = Array.isArray(pins) ? pins : [];
+    const pinDisplayCount = pinList.length;
+    const pinListHtml = pinList
+        .map((pin) => buildPinLandingListItem(pin, { includeCategory: true }))
+        .filter(Boolean)
+        .join('');
+    const regionOptions = (Array.isArray(regions) ? regions : [])
+        .map((region) => {
+            const regionLabel = typeof region?.label === 'string' && region.label.trim()
+                ? region.label.trim()
+                : '';
+            const regionSlug = slugifyText(region?.slug || regionLabel);
+            if (!regionLabel || !regionSlug) {
+                return '';
+            }
+            const countLabel = Number(region?.count) ? ` (${region.count})` : '';
+            return `<option value="${escapeHtml(regionSlug)}">${escapeHtml(regionLabel)}${countLabel}</option>`;
+        })
+        .filter(Boolean)
+        .join('');
     const structuredData = {
         '@context': 'https://schema.org',
         '@type': 'ItemList',
@@ -1936,6 +2111,96 @@ function buildCategoryIndexHtml({
       color: var(--app-text-soft);
       font-size: 14px;
     }
+    .pin-landing-filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .pin-landing-filter {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .pin-landing-filter label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--app-text-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .pin-landing-filter input,
+    .pin-landing-filter select {
+      border-radius: 12px;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-card-bg);
+      color: var(--app-text);
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    .pin-landing-filter input::placeholder {
+      color: var(--app-text-muted);
+    }
+    .pin-landing-filter-range {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pin-landing-filter-range span {
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
+    .pin-landing-filter-summary {
+      font-size: 12px;
+      color: var(--app-text-muted);
+      margin-bottom: 14px;
+    }
+    .pin-landing-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 14px;
+    }
+    .pin-landing-item {
+      background: var(--app-card-bg);
+      border: 1px solid var(--app-card-border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--app-card-shadow);
+    }
+    .pin-landing-link {
+      text-decoration: none;
+      font-weight: 800;
+      color: var(--app-text-strong);
+      font-size: 16px;
+    }
+    .pin-landing-link:hover,
+    .pin-landing-link:focus-visible {
+      color: var(--app-accent);
+      outline: none;
+    }
+    .pin-landing-meta {
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
+    .pin-landing-desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--app-text);
+      line-height: 1.5;
+    }
+    .pin-landing-empty {
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px dashed var(--app-card-border);
+      color: var(--app-text-soft);
+      font-size: 14px;
+      text-align: center;
+    }
   </style>
   <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
 </head>
@@ -1964,6 +2229,39 @@ function buildCategoryIndexHtml({
         ${listHtml || '<div class="category-empty">Belum ada kategori untuk ditampilkan.</div>'}
         </div>
       </section>
+      <section class="pin-landing-list-card">
+        <div class="pin-landing-section-head">
+          <h2 class="pin-landing-section-title">Cari pin</h2>
+          <p class="pin-landing-section-subtitle">Gunakan pencarian, wilayah, dan rentang tanggal untuk menyaring pin.</p>
+        </div>
+        <div class="pin-landing-filters" data-pin-filter>
+          <div class="pin-landing-filter">
+            <label for="pin-filter-search">Search</label>
+            <input type="search" id="pin-filter-search" placeholder="Cari judul, kategori, atau kota" aria-label="Cari pin">
+          </div>
+          <div class="pin-landing-filter">
+            <label for="pin-filter-region">Region</label>
+            <select id="pin-filter-region" aria-label="Filter wilayah">
+              <option value="">Semua wilayah</option>
+              ${regionOptions}
+            </select>
+          </div>
+          <div class="pin-landing-filter">
+            <label for="pin-filter-start">Range tanggal</label>
+            <div class="pin-landing-filter-range">
+              <input type="date" id="pin-filter-start" aria-label="Tanggal mulai">
+              <span>-</span>
+              <input type="date" id="pin-filter-end" aria-label="Tanggal akhir">
+            </div>
+          </div>
+        </div>
+        <div class="pin-landing-filter-summary" id="pin-filter-summary"></div>
+        <ul class="pin-landing-list" id="pin-filter-list">
+          ${pinListHtml}
+        </ul>
+        <p class="pin-landing-empty" id="pin-filter-empty"${pinDisplayCount ? ' hidden' : ''}>Belum ada pin untuk ditampilkan.</p>
+        ${totalCount > pinDisplayCount ? `<p class="pin-landing-intro">Menampilkan ${pinDisplayCount} dari ${totalCount} pin.</p>` : ''}
+      </section>
     </div>
     <script>
       (function () {
@@ -1983,6 +2281,111 @@ function buildCategoryIndexHtml({
               : ('+' + moreCount + ' wilayah lain');
           });
         }
+
+        var filterContainer = document.querySelector('[data-pin-filter]');
+        if (!filterContainer) {
+          return;
+        }
+        var searchInput = document.getElementById('pin-filter-search');
+        var regionSelect = document.getElementById('pin-filter-region');
+        var startInput = document.getElementById('pin-filter-start');
+        var endInput = document.getElementById('pin-filter-end');
+        var list = document.getElementById('pin-filter-list');
+        var items = list ? list.querySelectorAll('.pin-landing-item') : [];
+        var emptyEl = document.getElementById('pin-filter-empty');
+        var summaryEl = document.getElementById('pin-filter-summary');
+
+        function normalize(value) {
+          return (value || '').toString().toLowerCase().trim();
+        }
+
+        function parseDate(value) {
+          if (!value) {
+            return null;
+          }
+          var parts = value.split('-');
+          if (parts.length !== 3) {
+            return null;
+          }
+          var year = parseInt(parts[0], 10);
+          var month = parseInt(parts[1], 10);
+          var day = parseInt(parts[2], 10);
+          if (!year || !month || !day) {
+            return null;
+          }
+          return new Date(year, month - 1, day);
+        }
+
+        function matchesDate(itemStart, itemEnd, filterStart, filterEnd) {
+          if (!filterStart && !filterEnd) {
+            return true;
+          }
+          var pinStart = parseDate(itemStart);
+          var pinEnd = parseDate(itemEnd || itemStart);
+          if (!pinStart && !pinEnd) {
+            return false;
+          }
+          if (filterStart && pinEnd && pinEnd < filterStart) {
+            return false;
+          }
+          if (filterEnd && pinStart && pinStart > filterEnd) {
+            return false;
+          }
+          return true;
+        }
+
+        function applyFilters() {
+          var query = normalize(searchInput && searchInput.value);
+          var region = regionSelect ? regionSelect.value : '';
+          var startDate = parseDate(startInput && startInput.value);
+          var endDate = parseDate(endInput && endInput.value);
+          if (startDate && !endDate) {
+            endDate = startDate;
+          }
+          if (endDate && !startDate) {
+            startDate = endDate;
+          }
+          var visibleCount = 0;
+          for (var i = 0; i < items.length; i += 1) {
+            var item = items[i];
+            var searchText = normalize(item.getAttribute('data-search'));
+            var matchesSearch = !query || searchText.indexOf(query) !== -1;
+            var itemRegion = item.getAttribute('data-region') || '';
+            var matchesRegion = !region || itemRegion === region;
+            var itemStart = item.getAttribute('data-start') || '';
+            var itemEnd = item.getAttribute('data-end') || itemStart;
+            var matchesRange = matchesDate(itemStart, itemEnd, startDate, endDate);
+            var isVisible = matchesSearch && matchesRegion && matchesRange;
+            item.style.display = isVisible ? '' : 'none';
+            if (isVisible) {
+              visibleCount += 1;
+            }
+          }
+          if (summaryEl) {
+            if (!items.length) {
+              summaryEl.textContent = 'Belum ada pin untuk ditampilkan.';
+            } else {
+              summaryEl.textContent = 'Menampilkan ' + visibleCount + ' dari ' + items.length + ' pin.';
+            }
+          }
+          if (emptyEl) {
+            emptyEl.hidden = visibleCount !== 0;
+          }
+        }
+
+        if (searchInput) {
+          searchInput.addEventListener('input', applyFilters);
+        }
+        if (regionSelect) {
+          regionSelect.addEventListener('change', applyFilters);
+        }
+        if (startInput) {
+          startInput.addEventListener('change', applyFilters);
+        }
+        if (endInput) {
+          endInput.addEventListener('change', applyFilters);
+        }
+        applyFilters();
       })();
     </script>
   </body>
@@ -1997,7 +2400,8 @@ function buildCategoryLandingHtml({
     categorySlug,
     regionSlug,
     pins,
-    totalCount
+    totalCount,
+    regions
 }) {
     const heading = regionLabel
         ? `${categoryLabel} di ${regionLabel}`
@@ -2021,24 +2425,26 @@ function buildCategoryLandingHtml({
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
-    const displayCount = Array.isArray(pins) ? pins.length : 0;
-    const listHtml = (pins || []).map((pin) => {
-        const pinTitle = typeof pin?.title === 'string' && pin.title.trim()
-            ? pin.title.trim()
-            : 'Pin tanpa judul';
-        const pinUrl = `/pin/${pin._id}`;
-        const pinCity = normalizeLandingText(pin?.city);
-        const pinWhen = formatPinWhenLabel(pin?.lifetime);
-        const metaParts = [pinCity, pinWhen].filter(Boolean);
-        const metaLabel = metaParts.join(' - ');
-        const description = typeof pin?.description === 'string' ? pin.description.trim() : '';
-        const descriptionText = truncateText(description, 140);
-        return `<li class="pin-landing-item">
-            <a class="pin-landing-link" href="${pinUrl}">${escapeHtml(pinTitle)}</a>
-            ${metaLabel ? `<div class="pin-landing-meta">${escapeHtml(metaLabel)}</div>` : ''}
-            ${descriptionText ? `<p class="pin-landing-desc">${escapeHtml(descriptionText)}</p>` : ''}
-        </li>`;
-    }).join('');
+    const pinList = Array.isArray(pins) ? pins : [];
+    const displayCount = pinList.length;
+    const listHtml = pinList
+        .map((pin) => buildPinLandingListItem(pin))
+        .filter(Boolean)
+        .join('');
+    const regionOptions = (Array.isArray(regions) ? regions : [])
+        .map((region) => {
+            const regionLabel = typeof region?.label === 'string' && region.label.trim()
+                ? region.label.trim()
+                : '';
+            const regionSlug = slugifyText(region?.slug || regionLabel);
+            if (!regionLabel || !regionSlug) {
+                return '';
+            }
+            const countLabel = Number(region?.count) ? ` (${region.count})` : '';
+            return `<option value="${escapeHtml(regionSlug)}">${escapeHtml(regionLabel)}${countLabel}</option>`;
+        })
+        .filter(Boolean)
+        .join('');
     const structuredData = {
         '@context': 'https://schema.org',
         '@type': 'ItemList',
@@ -2224,6 +2630,75 @@ function buildCategoryLandingHtml({
       color: var(--app-text);
       line-height: 1.5;
     }
+    .pin-landing-filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .pin-landing-filter {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .pin-landing-filter label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--app-text-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .pin-landing-filter input,
+    .pin-landing-filter select {
+      border-radius: 12px;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-card-bg);
+      color: var(--app-text);
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    .pin-landing-filter input::placeholder {
+      color: var(--app-text-muted);
+    }
+    .pin-landing-filter-range {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pin-landing-filter-range span {
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
+    .pin-landing-filter-summary {
+      font-size: 12px;
+      color: var(--app-text-muted);
+      margin-bottom: 14px;
+    }
+    .pin-landing-empty {
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px dashed var(--app-card-border);
+      color: var(--app-text-soft);
+      font-size: 14px;
+      text-align: center;
+      margin-top: 12px;
+    }
+    .pin-landing-section-head {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .pin-landing-section-title {
+      margin: 0;
+      font-size: 18px;
+      color: var(--app-text-strong);
+    }
+    .pin-landing-section-subtitle {
+      margin: 0;
+      font-size: 13px;
+      color: var(--app-text-soft);
+    }
     .pin-landing-footer {
       margin-top: auto;
       text-align: center;
@@ -2250,13 +2725,152 @@ function buildCategoryLandingHtml({
       <span class="pin-landing-count">${totalCount} pin tersedia</span>
     </section>
     <section class="pin-landing-list-card">
-      <ul class="pin-landing-list">
-        ${listHtml || '<li class="pin-landing-item">Belum ada pin untuk kategori ini.</li>'}
+      <div class="pin-landing-section-head">
+        <h2 class="pin-landing-section-title">Daftar pin</h2>
+        <p class="pin-landing-section-subtitle">Gunakan pencarian, wilayah, dan rentang tanggal untuk menyaring pin.</p>
+      </div>
+      <div class="pin-landing-filters" data-pin-filter data-default-region="${escapeHtml(regionSlug || '')}">
+        <div class="pin-landing-filter">
+          <label for="pin-filter-search">Search</label>
+          <input type="search" id="pin-filter-search" placeholder="Cari judul, deskripsi, atau kota" aria-label="Cari pin">
+        </div>
+        <div class="pin-landing-filter">
+          <label for="pin-filter-region">Region</label>
+          <select id="pin-filter-region" aria-label="Filter wilayah">
+            <option value="">Semua wilayah</option>
+            ${regionOptions}
+          </select>
+        </div>
+        <div class="pin-landing-filter">
+          <label for="pin-filter-start">Range tanggal</label>
+          <div class="pin-landing-filter-range">
+            <input type="date" id="pin-filter-start" aria-label="Tanggal mulai">
+            <span>-</span>
+            <input type="date" id="pin-filter-end" aria-label="Tanggal akhir">
+          </div>
+        </div>
+      </div>
+      <div class="pin-landing-filter-summary" id="pin-filter-summary"></div>
+      <ul class="pin-landing-list" id="pin-filter-list">
+        ${listHtml}
       </ul>
+      <p class="pin-landing-empty" id="pin-filter-empty"${displayCount ? ' hidden' : ''}>Belum ada pin untuk kategori ini.</p>
       ${totalCount > displayCount ? `<p class="pin-landing-intro">Menampilkan ${displayCount} dari ${totalCount} pin. Lihat peta AyaNaon untuk jelajah lebih lengkap.</p>` : ''}
     </section>
     <footer class="pin-landing-footer">AyaNaon category page</footer>
   </div>
+  <script>
+    (function () {
+      var filterContainer = document.querySelector('[data-pin-filter]');
+      if (!filterContainer) {
+        return;
+      }
+      var searchInput = document.getElementById('pin-filter-search');
+      var regionSelect = document.getElementById('pin-filter-region');
+      var startInput = document.getElementById('pin-filter-start');
+      var endInput = document.getElementById('pin-filter-end');
+      var list = document.getElementById('pin-filter-list');
+      var items = list ? list.querySelectorAll('.pin-landing-item') : [];
+      var emptyEl = document.getElementById('pin-filter-empty');
+      var summaryEl = document.getElementById('pin-filter-summary');
+
+      function normalize(value) {
+        return (value || '').toString().toLowerCase().trim();
+      }
+
+      function parseDate(value) {
+        if (!value) {
+          return null;
+        }
+        var parts = value.split('-');
+        if (parts.length !== 3) {
+          return null;
+        }
+        var year = parseInt(parts[0], 10);
+        var month = parseInt(parts[1], 10);
+        var day = parseInt(parts[2], 10);
+        if (!year || !month || !day) {
+          return null;
+        }
+        return new Date(year, month - 1, day);
+      }
+
+      function matchesDate(itemStart, itemEnd, filterStart, filterEnd) {
+        if (!filterStart && !filterEnd) {
+          return true;
+        }
+        var pinStart = parseDate(itemStart);
+        var pinEnd = parseDate(itemEnd || itemStart);
+        if (!pinStart && !pinEnd) {
+          return false;
+        }
+        if (filterStart && pinEnd && pinEnd < filterStart) {
+          return false;
+        }
+        if (filterEnd && pinStart && pinStart > filterEnd) {
+          return false;
+        }
+        return true;
+      }
+
+      function applyFilters() {
+        var query = normalize(searchInput && searchInput.value);
+        var region = regionSelect ? regionSelect.value : '';
+        var startDate = parseDate(startInput && startInput.value);
+        var endDate = parseDate(endInput && endInput.value);
+        if (startDate && !endDate) {
+          endDate = startDate;
+        }
+        if (endDate && !startDate) {
+          startDate = endDate;
+        }
+        var visibleCount = 0;
+        for (var i = 0; i < items.length; i += 1) {
+          var item = items[i];
+          var searchText = normalize(item.getAttribute('data-search'));
+          var matchesSearch = !query || searchText.indexOf(query) !== -1;
+          var itemRegion = item.getAttribute('data-region') || '';
+          var matchesRegion = !region || itemRegion === region;
+          var itemStart = item.getAttribute('data-start') || '';
+          var itemEnd = item.getAttribute('data-end') || itemStart;
+          var matchesRange = matchesDate(itemStart, itemEnd, startDate, endDate);
+          var isVisible = matchesSearch && matchesRegion && matchesRange;
+          item.style.display = isVisible ? '' : 'none';
+          if (isVisible) {
+            visibleCount += 1;
+          }
+        }
+        if (summaryEl) {
+          if (!items.length) {
+            summaryEl.textContent = 'Belum ada pin untuk ditampilkan.';
+          } else {
+            summaryEl.textContent = 'Menampilkan ' + visibleCount + ' dari ' + items.length + ' pin.';
+          }
+        }
+        if (emptyEl) {
+          emptyEl.hidden = visibleCount !== 0;
+        }
+      }
+
+      var defaultRegion = filterContainer.getAttribute('data-default-region') || '';
+      if (regionSelect && defaultRegion) {
+        regionSelect.value = defaultRegion;
+      }
+      if (searchInput) {
+        searchInput.addEventListener('input', applyFilters);
+      }
+      if (regionSelect) {
+        regionSelect.addEventListener('change', applyFilters);
+      }
+      if (startInput) {
+        startInput.addEventListener('change', applyFilters);
+      }
+      if (endInput) {
+        endInput.addEventListener('change', applyFilters);
+      }
+      applyFilters();
+    })();
+  </script>
 </body>
 </html>`;
 }

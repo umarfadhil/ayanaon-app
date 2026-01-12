@@ -96,6 +96,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.7
+- **Share Button Added:** Pin list and map popups now include a share action for quick link sharing.
+- **Improved Button Links:** Cross-page CTAs now point to the most relevant destinations for a smoother flow.
+- **Category Filters:** `/kategori` landing pages now include search, region, and date-range filters.
+
 ### What's New in v2.4.6
 - **Category + Region Landing Pages:** Added server-rendered `/kategori` index and category/region pages with pin lists for better crawl visibility.
 - **Sitemap Expansion:** Category and region landing URLs are now included in the sitemap.
