@@ -96,6 +96,9 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.8
+- **Logo Refresh:** Favicon, PWA icons, and social preview image now point to the v2 logo assets for search and sharing updates.
+
 ### What's New in v2.4.7
 - **Share Button Added:** Pin list and map popups now include a share action for quick link sharing.
 - **Improved Button Links:** Cross-page CTAs now point to the most relevant destinations for a smoother flow.

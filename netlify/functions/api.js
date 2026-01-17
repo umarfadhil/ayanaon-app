@@ -1141,7 +1141,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
         ? (pinId ? `${baseUrl}/?pin=${encodeURIComponent(pinId)}` : `${baseUrl}/`)
         : '';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
-    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
+    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
     const whenLabel = formatPinWhenLabel(pin?.lifetime);
     const city = pin?.city ? String(pin.city).trim() : '';
@@ -1652,7 +1652,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
   <div class="pin-detail-shell">
     <header class="pin-detail-header">
       <a class="pin-detail-brand" href="${baseUrl ? `${baseUrl}/` : '/'}">
-        <img src="/icon-192.png" alt="AyaNaon">
+        <img src="/icon-192-v2.png" alt="AyaNaon">
         <span>AyaNaon</span>
       </a>
       <div class="pin-detail-header-actions">
@@ -1748,7 +1748,7 @@ function buildCategoryIndexHtml({
     const backHref = baseUrl ? `${baseUrl}/` : '/';
     const backLabel = 'Kembali ke peta';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
-    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
+    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
     const categoriesList = Array.isArray(categories) ? categories : [];
     const maxRegions = 6;
@@ -2209,7 +2209,7 @@ function buildCategoryIndexHtml({
   <div class="pin-landing-shell">
     <header class="pin-landing-header">
       <a class="pin-landing-brand" href="${baseUrl ? `${baseUrl}/` : '/'}">
-        <img src="/icon-192.png" alt="AyaNaon">
+        <img src="/icon-192-v2.png" alt="AyaNaon">
         <span>AyaNaon</span>
       </a>
       <a class="pin-landing-back" href="${backHref}">${backLabel}</a>
@@ -2423,7 +2423,7 @@ function buildCategoryLandingHtml({
         ? 'Kembali ke kategori'
         : 'Kembali ke semua kategori';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
-    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512.png` : '');
+    const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
     const pinList = Array.isArray(pins) ? pins : [];
     const displayCount = pinList.length;
@@ -2713,7 +2713,7 @@ function buildCategoryLandingHtml({
   <div class="pin-landing-shell">
   <header class="pin-landing-header">
     <a class="pin-landing-brand" href="${baseUrl ? `${baseUrl}/` : '/'}">
-      <img src="/icon-192.png" alt="AyaNaon">
+      <img src="/icon-192-v2.png" alt="AyaNaon">
       <span>AyaNaon</span>
     </a>
     <a class="pin-landing-back" href="${backHref}">${backLabel}</a>
