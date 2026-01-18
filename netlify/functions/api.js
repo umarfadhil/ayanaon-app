@@ -1363,6 +1363,9 @@ function buildPinPageHtml(pin, seo, baseUrl) {
   <meta name="twitter:title" content="${escapeHtml(pageTitle || title)}">
   <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
   ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <link rel="icon" href="/favicon-v2.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-192-v2.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192-v2.png">
   <link rel="stylesheet" href="/style.css">
   <style>
     body.pin-detail-page {
@@ -1867,6 +1870,9 @@ function buildCategoryIndexHtml({
   <meta name="twitter:title" content="${escapeHtml(pageTitle)}">
   <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
   ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <link rel="icon" href="/favicon-v2.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-192-v2.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192-v2.png">
   <link rel="stylesheet" href="/style.css">
   <style>
     body.pin-landing-page {
@@ -2476,6 +2482,9 @@ function buildCategoryLandingHtml({
   <meta name="twitter:title" content="${escapeHtml(pageTitle)}">
   <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
   ${twitterImage ? `<meta name="twitter:image" content="${twitterImage}">` : ''}
+  <link rel="icon" href="/favicon-v2.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-192-v2.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192-v2.png">
   <link rel="stylesheet" href="/style.css">
   <style>
     body.pin-landing-page {
