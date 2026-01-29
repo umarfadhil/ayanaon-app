@@ -71,6 +71,13 @@
             visibilityRemote: null,
             isSaving: false
         },
+        categories: {
+            list: [],
+            draft: [],
+            dirty: false,
+            loaded: false,
+            isSaving: false
+        },
         mass: {
             results: [],
             selectedPlaceIds: new Set(),
@@ -204,6 +211,13 @@
         els.tabsOrderList = document.getElementById('tabs-order-list');
         els.tabsMessage = document.getElementById('tabs-message');
         els.tabsSaveBtn = document.getElementById('tabs-save-btn');
+        els.categoriesContent = document.getElementById('admin-categories-pane');
+        els.categoriesList = document.getElementById('categories-order-list');
+        els.categoriesMessage = document.getElementById('categories-message');
+        els.categoryNewInput = document.getElementById('category-new-input');
+        els.categoryAddBtn = document.getElementById('category-add-btn');
+        els.categoriesSaveBtn = document.getElementById('categories-save-btn');
+        els.categoriesResetBtn = document.getElementById('categories-reset-btn');
         els.massContent = document.getElementById('admin-mass-pane');
         els.massMessage = document.getElementById('mass-message');
         els.massSearchInput = document.getElementById('mass-search-input');
@@ -277,6 +291,23 @@
             els.tabsMessage.classList.add('is-success');
         } else if (type === 'error') {
             els.tabsMessage.classList.add('is-error');
+        }
+    }
+
+    function showCategoriesMessage(type, text) {
+        if (!els.categoriesMessage) {
+            return;
+        }
+        els.categoriesMessage.textContent = text || '';
+        els.categoriesMessage.classList.remove('is-success', 'is-error', 'is-visible');
+        if (!text) {
+            return;
+        }
+        els.categoriesMessage.classList.add('is-visible');
+        if (type === 'success') {
+            els.categoriesMessage.classList.add('is-success');
+        } else if (type === 'error') {
+            els.categoriesMessage.classList.add('is-error');
         }
     }
 
@@ -675,6 +706,479 @@
         });
     }
 
+    function normalizeCategoryName(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        return value.trim();
+    }
+
+    function normalizeCategoryKey(value) {
+        return normalizeText(value);
+    }
+
+    function normalizeCategoryRoles(raw = {}) {
+        if (!raw || typeof raw !== 'object') {
+            return { admin: true, pin_manager: true, resident: true };
+        }
+        return {
+            admin: raw.admin !== false,
+            pin_manager: raw.pin_manager !== false,
+            resident: raw.resident !== false
+        };
+    }
+
+    function hasAnyCategoryRole(roles = {}) {
+        return Boolean(roles.admin || roles.pin_manager || roles.resident);
+    }
+
+    function extractCategoryEmoji(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const match = value.match(/\p{Extended_Pictographic}/u);
+        return match && match[0] ? match[0] : '';
+    }
+
+    const CATEGORY_SYNC_CHANNEL = 'ayanaon-categories';
+    const CATEGORY_SYNC_STORAGE_KEY = 'ayanaon:categories:updated';
+    const categoryBroadcast = typeof BroadcastChannel !== 'undefined'
+        ? new BroadcastChannel(CATEGORY_SYNC_CHANNEL)
+        : null;
+
+    function broadcastCategoryUpdate() {
+        const payload = { type: 'categories-updated', ts: Date.now() };
+        try {
+            if (categoryBroadcast) {
+                categoryBroadcast.postMessage(payload);
+            }
+        } catch (error) {
+            // ignore
+        }
+        try {
+            window.localStorage?.setItem(CATEGORY_SYNC_STORAGE_KEY, String(payload.ts));
+        } catch (error) {
+            // ignore
+        }
+    }
+
+    function createCategoryId() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return `cat_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    function normalizeCategoryList(rawList = []) {
+        if (!Array.isArray(rawList)) {
+            return [];
+        }
+        return rawList
+            .map((entry) => {
+                if (!entry) {
+                    return null;
+                }
+                if (typeof entry === 'string') {
+                    const name = normalizeCategoryName(entry);
+                    if (!name) {
+                        return null;
+                    }
+                    return { id: createCategoryId(), name, roles: normalizeCategoryRoles() };
+                }
+                const name = normalizeCategoryName(entry.name || entry.label || '');
+                if (!name) {
+                    return null;
+                }
+                const id = normalizeCategoryName(entry.id || '');
+                return { id: id || createCategoryId(), name, roles: normalizeCategoryRoles(entry.roles || {}) };
+            })
+            .filter(Boolean);
+    }
+
+    function setCategoryDraft(list) {
+        state.categories.list = (list || []).map((item) => ({
+            id: item.id,
+            name: item.name,
+            roles: normalizeCategoryRoles(item.roles || {})
+        }));
+        state.categories.draft = (list || []).map((item) => ({
+            id: item.id,
+            name: item.name,
+            originalName: item.name,
+            lastValidName: item.name,
+            roles: normalizeCategoryRoles(item.roles || {})
+        }));
+        state.categories.dirty = false;
+        state.categories.loaded = true;
+        showCategoriesMessage(null, '');
+        updateCategoriesSaveState();
+        renderCategoryManager();
+    }
+
+    function getCategoryDraft() {
+        if (!Array.isArray(state.categories.draft)) {
+            state.categories.draft = [];
+        }
+        return state.categories.draft;
+    }
+
+    function updateCategoriesSaveState() {
+        const isDirty = Boolean(state.categories.dirty);
+        if (els.categoriesSaveBtn) {
+            els.categoriesSaveBtn.disabled = state.categories.isSaving || !isDirty;
+        }
+        if (els.categoriesResetBtn) {
+            els.categoriesResetBtn.disabled = state.categories.isSaving || !isDirty;
+        }
+    }
+
+    function setCategoriesSaving(isSaving) {
+        state.categories.isSaving = isSaving;
+        if (els.categoriesSaveBtn) {
+            els.categoriesSaveBtn.disabled = isSaving || !state.categories.dirty;
+            els.categoriesSaveBtn.textContent = isSaving ? 'Saving...' : 'Save Changes';
+        }
+        if (els.categoriesResetBtn) {
+            els.categoriesResetBtn.disabled = isSaving || !state.categories.dirty;
+        }
+    }
+
+    function markCategoriesDirty() {
+        if (!state.categories.dirty) {
+            state.categories.dirty = true;
+        }
+        updateCategoriesSaveState();
+    }
+
+    function resetCategoriesDraft() {
+        state.categories.draft = (state.categories.list || []).map((item) => ({
+            id: item.id,
+            name: item.name,
+            originalName: item.name,
+            lastValidName: item.name,
+            roles: normalizeCategoryRoles(item.roles || {})
+        }));
+        state.categories.dirty = false;
+        showCategoriesMessage(null, '');
+        updateCategoriesSaveState();
+        renderCategoryManager();
+    }
+
+    function buildCategoryCounts() {
+        const counts = new Map();
+        state.pins.forEach((pin) => {
+            const key = normalizeCategoryKey(pin?.category);
+            if (!key) {
+                return;
+            }
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        return counts;
+    }
+
+    function moveCategoryOrder(categoryId, direction) {
+        const list = getCategoryDraft();
+        const index = list.findIndex((item) => item.id === categoryId);
+        if (index === -1) {
+            return;
+        }
+        const nextIndex = index + direction;
+        if (nextIndex < 0 || nextIndex >= list.length) {
+            return;
+        }
+        const nextOrder = list.slice();
+        const temp = nextOrder[index];
+        nextOrder[index] = nextOrder[nextIndex];
+        nextOrder[nextIndex] = temp;
+        state.categories.draft = nextOrder;
+        markCategoriesDirty();
+        renderCategoryManager();
+    }
+
+    function removeCategoryById(categoryId) {
+        const list = getCategoryDraft();
+        const index = list.findIndex((item) => item.id === categoryId);
+        if (index === -1) {
+            return;
+        }
+        const name = list[index]?.name || 'kategori ini';
+        const counts = buildCategoryCounts();
+        const pinCount = counts.get(normalizeCategoryKey(name)) || 0;
+        if (pinCount > 0) {
+            const confirmed = window.confirm(`Kategori "${name}" dipakai oleh ${pinCount} pin. Hapus dari daftar saja?`);
+            if (!confirmed) {
+                return;
+            }
+        }
+        list.splice(index, 1);
+        state.categories.draft = list;
+        markCategoriesDirty();
+        renderCategoryManager();
+    }
+
+    function updateCategoryRole(categoryId, roleKey, allowed) {
+        const list = getCategoryDraft();
+        const target = list.find((item) => item.id === categoryId);
+        if (!target) {
+            return false;
+        }
+        const nextRoles = {
+            ...normalizeCategoryRoles(target.roles || {}),
+            [roleKey]: Boolean(allowed)
+        };
+        if (!hasAnyCategoryRole(nextRoles)) {
+            showCategoriesMessage('error', 'Setidaknya satu role harus aktif.');
+            return false;
+        }
+        target.roles = nextRoles;
+        markCategoriesDirty();
+        showCategoriesMessage(null, '');
+        return true;
+    }
+
+    function handleAddCategory() {
+        if (!els.categoryNewInput) {
+            return;
+        }
+        const name = normalizeCategoryName(els.categoryNewInput.value || '');
+        if (!name) {
+            showCategoriesMessage('error', 'Nama kategori wajib diisi.');
+            return;
+        }
+        const key = normalizeCategoryKey(name);
+        const list = getCategoryDraft();
+        const hasDuplicate = list.some((item) => normalizeCategoryKey(item.name) === key);
+        if (hasDuplicate) {
+            showCategoriesMessage('error', 'Kategori sudah ada.');
+            return;
+        }
+        list.push({
+            id: createCategoryId(),
+            name,
+            originalName: '',
+            lastValidName: name,
+            roles: normalizeCategoryRoles()
+        });
+        state.categories.draft = list;
+        markCategoriesDirty();
+        renderCategoryManager();
+        els.categoryNewInput.value = '';
+        els.categoryNewInput.focus();
+        showCategoriesMessage(null, '');
+    }
+
+    function prepareCategoriesForSave() {
+        const list = getCategoryDraft();
+        const cleaned = [];
+        const seen = new Set();
+        for (const item of list) {
+            const name = normalizeCategoryName(item?.name || '');
+            if (!name) {
+                return { ok: false, message: 'Nama kategori tidak boleh kosong.' };
+            }
+            const roles = normalizeCategoryRoles(item?.roles || {});
+            if (!hasAnyCategoryRole(roles)) {
+                return { ok: false, message: `Kategori "${name}" harus punya minimal satu role.` };
+            }
+            const key = normalizeCategoryKey(name);
+            if (seen.has(key)) {
+                return { ok: false, message: `Kategori "${name}" sudah ada.` };
+            }
+            seen.add(key);
+            cleaned.push({
+                id: item?.id || createCategoryId(),
+                name,
+                roles,
+                originalName: normalizeCategoryName(item?.originalName || '')
+            });
+        }
+        return { ok: true, categories: cleaned };
+    }
+
+    function renderCategoryManager() {
+        if (!els.categoriesList) {
+            return;
+        }
+        const list = getCategoryDraft();
+        els.categoriesList.innerHTML = '';
+        if (!list.length) {
+            const empty = document.createElement('div');
+            empty.className = 'pin-list-empty';
+            empty.textContent = 'Belum ada kategori.';
+            els.categoriesList.appendChild(empty);
+            return;
+        }
+        const counts = buildCategoryCounts();
+        list.forEach((category, index) => {
+            const item = document.createElement('li');
+            item.className = 'category-item';
+            const main = document.createElement('div');
+            main.className = 'category-main';
+            const inputRow = document.createElement('div');
+            inputRow.className = 'category-input-row';
+            const emojiBadge = document.createElement('div');
+            emojiBadge.className = 'category-emoji';
+            emojiBadge.textContent = extractCategoryEmoji(category.name) || '💡';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = category.name || '';
+            input.placeholder = 'Nama kategori';
+            input.setAttribute('aria-label', 'Nama kategori');
+            input.addEventListener('input', () => {
+                category.name = input.value;
+                emojiBadge.textContent = extractCategoryEmoji(category.name) || '💡';
+                markCategoriesDirty();
+            });
+            input.addEventListener('blur', () => {
+                const trimmed = normalizeCategoryName(category.name || '');
+                const fallbackName = category.lastValidName || category.originalName || '';
+                if (!trimmed) {
+                    category.name = fallbackName;
+                    input.value = fallbackName;
+                    emojiBadge.textContent = extractCategoryEmoji(category.name) || '💡';
+                    showCategoriesMessage('error', 'Nama kategori tidak boleh kosong.');
+                    return;
+                }
+                const key = normalizeCategoryKey(trimmed);
+                const duplicate = list.some((entry) =>
+                    entry.id !== category.id && normalizeCategoryKey(entry.name) === key
+                );
+                if (duplicate) {
+                    category.name = fallbackName || trimmed;
+                    input.value = category.name;
+                    emojiBadge.textContent = extractCategoryEmoji(category.name) || '💡';
+                    showCategoriesMessage('error', 'Kategori sudah ada.');
+                    return;
+                }
+                category.name = trimmed;
+                category.lastValidName = trimmed;
+                input.value = trimmed;
+                emojiBadge.textContent = extractCategoryEmoji(category.name) || '💡';
+            });
+            inputRow.appendChild(emojiBadge);
+            inputRow.appendChild(input);
+            main.appendChild(inputRow);
+            const toggles = document.createElement('div');
+            toggles.className = 'category-role-toggles';
+            const roleOptions = [
+                { key: 'admin', label: 'Admin' },
+                { key: 'pin_manager', label: 'Pin Manager' },
+                { key: 'resident', label: 'Warga' }
+            ];
+            const currentRoles = normalizeCategoryRoles(category.roles || {});
+            roleOptions.forEach((role) => {
+                const label = document.createElement('label');
+                label.className = 'category-role-option';
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = Boolean(currentRoles[role.key]);
+                input.addEventListener('change', () => {
+                    const ok = updateCategoryRole(category.id, role.key, input.checked);
+                    if (!ok) {
+                        input.checked = !input.checked;
+                        return;
+                    }
+                    category.roles = {
+                        ...normalizeCategoryRoles(category.roles || {}),
+                        [role.key]: input.checked
+                    };
+                });
+                const text = document.createElement('span');
+                text.textContent = role.label;
+                label.appendChild(input);
+                label.appendChild(text);
+                toggles.appendChild(label);
+            });
+            main.appendChild(toggles);
+            const count = counts.get(normalizeCategoryKey(category.name)) || 0;
+            const meta = document.createElement('div');
+            meta.className = 'category-meta';
+            meta.textContent = count ? `${count} pin` : 'Belum ada pin';
+            main.appendChild(meta);
+            const actions = document.createElement('div');
+            actions.className = 'category-actions';
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.textContent = 'Up';
+            upBtn.disabled = index === 0;
+            upBtn.addEventListener('click', () => moveCategoryOrder(category.id, -1));
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.textContent = 'Down';
+            downBtn.disabled = index === list.length - 1;
+            downBtn.addEventListener('click', () => moveCategoryOrder(category.id, 1));
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.textContent = 'Remove';
+            removeBtn.addEventListener('click', () => removeCategoryById(category.id));
+            actions.appendChild(upBtn);
+            actions.appendChild(downBtn);
+            actions.appendChild(removeBtn);
+            item.appendChild(main);
+            item.appendChild(actions);
+            els.categoriesList.appendChild(item);
+        });
+    }
+
+    async function loadCategories() {
+        try {
+            const response = await fetch('/api/categories', { cache: 'no-store' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Gagal memuat kategori.');
+            }
+            const list = normalizeCategoryList(data?.categories ?? data ?? []);
+            setCategoryDraft(list);
+            populateCategoryFilter();
+            populateCategorySelect();
+            populateMassCategorySelect();
+        } catch (error) {
+            console.warn('Gagal memuat kategori', error);
+            showCategoriesMessage('error', error.message || 'Tidak dapat memuat kategori.');
+        }
+    }
+
+    async function saveCategoriesDraft() {
+        if (!state.categories.dirty || state.categories.isSaving) {
+            return;
+        }
+        const prepared = prepareCategoriesForSave();
+        if (!prepared.ok) {
+            showCategoriesMessage('error', prepared.message || 'Data kategori tidak valid.');
+            return;
+        }
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        setCategoriesSaving(true);
+        showCategoriesMessage(null, '');
+        try {
+            const response = await fetch('/api/categories', {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify({ categories: prepared.categories })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Gagal menyimpan kategori.');
+            }
+            const list = normalizeCategoryList(data?.categories ?? data ?? []);
+            setCategoryDraft(list);
+            showCategoriesMessage('success', 'Kategori berhasil disimpan.');
+            broadcastCategoryUpdate();
+            await loadPins();
+        } catch (error) {
+            console.error('Gagal menyimpan kategori', error);
+            showCategoriesMessage('error', error.message || 'Tidak dapat menyimpan kategori.');
+        } finally {
+            setCategoriesSaving(false);
+        }
+    }
+
     function showMassMessage(type, text) {
         if (!els.massMessage) {
             return;
@@ -753,6 +1257,9 @@
             }
             if (els.tabsContent) {
                 els.tabsContent.classList.add('hidden');
+            }
+            if (els.categoriesContent) {
+                els.categoriesContent.classList.add('hidden');
             }
         }
         applyTabVisibility();
@@ -1950,6 +2457,9 @@
         if (els.tabsContent) {
             els.tabsContent.classList.toggle('hidden', nextTab !== 'tabs');
         }
+        if (els.categoriesContent) {
+            els.categoriesContent.classList.toggle('hidden', nextTab !== 'categories');
+        }
         if (nextTab === 'mass') {
             initMassMap();
             refreshMassMapView();
@@ -1957,6 +2467,9 @@
         if (nextTab === 'tabs') {
             resetTabVisibilityDraft();
             renderTabOrderList();
+        }
+        if (nextTab === 'categories') {
+            resetCategoriesDraft();
         }
         if (nextTab === 'metrics' && !state.metricsLoaded && state.permissions?.isAdmin) {
             refreshAnalytics();
@@ -2042,13 +2555,31 @@
     }
 
     function getAvailableCategories() {
-        return Array.from(
+        const configured = [];
+        const configuredKeys = new Set();
+        (state.categories.list || []).forEach((item) => {
+            const name = normalizeCategoryName(item?.name || '');
+            if (!name) {
+                return;
+            }
+            const key = normalizeCategoryKey(name);
+            if (configuredKeys.has(key)) {
+                return;
+            }
+            configuredKeys.add(key);
+            configured.push(name);
+        });
+        const fromPins = Array.from(
             new Set(
                 state.pins
                     .map((pin) => (pin.category || '').trim())
                     .filter(Boolean)
             )
-        ).sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+        );
+        const extras = fromPins
+            .filter((category) => !configuredKeys.has(normalizeCategoryKey(category)))
+            .sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+        return configured.concat(extras);
     }
 
     function populateCategoryFilter() {
@@ -2226,6 +2757,7 @@
             populateCategoryFilter();
             populateMassCategorySelect();
             applyPinFilters();
+            renderCategoryManager();
             await refreshPinCount();
             if (state.selectedPin) {
                 const selectedId = getPinId(state.selectedPin);
@@ -3714,6 +4246,23 @@
         if (els.tabsSaveBtn) {
             els.tabsSaveBtn.addEventListener('click', saveTabVisibilityDraft);
         }
+        if (els.categoryAddBtn) {
+            els.categoryAddBtn.addEventListener('click', handleAddCategory);
+        }
+        if (els.categoryNewInput) {
+            els.categoryNewInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleAddCategory();
+                }
+            });
+        }
+        if (els.categoriesSaveBtn) {
+            els.categoriesSaveBtn.addEventListener('click', saveCategoriesDraft);
+        }
+        if (els.categoriesResetBtn) {
+            els.categoriesResetBtn.addEventListener('click', resetCategoriesDraft);
+        }
         if (els.seoSaveBtn) {
             els.seoSaveBtn.addEventListener('click', saveSeoSettings);
         }
@@ -3751,6 +4300,7 @@
         updateMassCounts();
         populateMassCategorySelect();
         updateTabsSaveState();
+        updateCategoriesSaveState();
         if (els.metricsYear) {
             els.metricsYear.value = state.metricsFilter.year;
         }
@@ -3785,6 +4335,7 @@
             await loadMaintenanceStatus();
             await loadFeatureFlags();
         }
+        await loadCategories();
         initMiniMap();
         loadPins();
         setActiveTab('pins');

@@ -29,6 +29,7 @@
             <button class="admin-tab" data-tab="features" role="tab" aria-selected="false" data-admin-only="true">Features</button>
             <button class="admin-tab" data-tab="seo" role="tab" aria-selected="false" data-admin-only="true">Manage SEO</button>
             <button class="admin-tab" data-tab="tabs" role="tab" aria-selected="false" data-admin-only="true">Manage Tabs</button>
+            <button class="admin-tab" data-tab="categories" role="tab" aria-selected="false" data-admin-only="true">Manage Categories</button>
         </div>
 
         <section id="admin-pin-content" class="admin-tab-content">
@@ -392,6 +393,29 @@
                 <ul id="tabs-order-list" class="tabs-order-list" aria-label="Tab order list"></ul>
                 <div class="tabs-actions">
                     <button type="button" class="chip-btn" id="tabs-save-btn" disabled>Save Changes</button>
+                </div>
+            </section>
+        </div>
+
+        <div id="admin-categories-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-categories-manager">
+                <div class="panel-header">
+                    <div>
+                        <h2>Manage Categories</h2>
+                        <p class="panel-sub">Tambah, ubah nama, hapus, atau urutkan kategori pin. Menghapus kategori hanya menghilangkan dari daftar, pin tetap menggunakan kategori lama.</p>
+                    </div>
+                </div>
+                <div id="categories-message" class="admin-message" role="status" aria-live="polite"></div>
+                <div class="categories-toolbar">
+                    <div class="categories-input-row">
+                        <input type="text" id="category-new-input" placeholder="Nama kategori baru">
+                        <button type="button" class="chip-btn" id="category-add-btn">Add Category</button>
+                    </div>
+                </div>
+                <ul id="categories-order-list" class="categories-order-list" aria-label="Category order list"></ul>
+                <div class="categories-actions">
+                    <button type="button" class="chip-btn" id="categories-save-btn" disabled>Save Changes</button>
+                    <button type="button" class="ghost-btn chip-btn" id="categories-reset-btn" disabled>Reset</button>
                 </div>
             </section>
         </div>

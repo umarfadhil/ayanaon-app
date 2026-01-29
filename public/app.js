@@ -2555,6 +2555,9 @@ function updateResidentUI(state) {
         }
     }
 
+    if (typeof window.__refreshPinCategoryOptions === 'function') {
+        window.__refreshPinCategoryOptions();
+    }
     updateActionMenuToggleAvatar();
     updateUserMarkerAppearance();
     syncResidentShareMarkersFromCache();
@@ -6414,8 +6417,200 @@ async function handlePinImagesChange(event) {
     refreshPinImageHints();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function normalizeCategoryName(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim();
+}
+
+function normalizeCategoryKey(value) {
+    return normalizeCategoryName(value).toLowerCase();
+}
+
+function normalizeCategoryRoles(raw = {}) {
+    if (!raw || typeof raw !== 'object') {
+        return { admin: true, pin_manager: true, resident: true };
+    }
+    return {
+        admin: raw.admin !== false,
+        pin_manager: raw.pin_manager !== false,
+        resident: raw.resident !== false
+    };
+}
+
+let categorySettingsList = [];
+let categoryRolesByKey = new Map();
+const CATEGORY_SYNC_CHANNEL = 'ayanaon-categories';
+const CATEGORY_SYNC_STORAGE_KEY = 'ayanaon:categories:updated';
+let categorySyncChannel = null;
+let categorySyncTriggered = false;
+
+function getCurrentResidentRoleKey() {
+    const resident = residentSessionState?.resident || null;
+    if (!residentSessionState?.isLoggedIn || !resident) {
+        return 'resident';
+    }
+    const residentUsername = typeof resident?.username === 'string'
+        ? resident.username.trim().toLowerCase()
+        : '';
+    const residentRole = typeof resident?.role === 'string'
+        ? resident.role.trim().toLowerCase()
+        : '';
+    if (resident?.isAdmin || residentRole === 'admin' || residentUsername === 'admin') {
+        return 'admin';
+    }
+    if (
+        resident?.isPinManager ||
+        residentRole === 'pin_manager' ||
+        residentRole === 'pinmanager' ||
+        residentRole === 'pin manager'
+    ) {
+        return 'pin_manager';
+    }
+    return 'resident';
+}
+
+function getCategoryRolesForName(name) {
+    const key = normalizeCategoryKey(name);
+    if (!key) {
+        return normalizeCategoryRoles();
+    }
+    return categoryRolesByKey.get(key) || normalizeCategoryRoles();
+}
+
+function isCategoryAllowedForRole(name, roleKey = getCurrentResidentRoleKey()) {
+    const roles = getCategoryRolesForName(name);
+    if (!roles || !roleKey) {
+        return true;
+    }
+    return roles[roleKey] !== false;
+}
+
+function scheduleCategorySyncReload() {
+    if (categorySyncTriggered) {
+        return;
+    }
+    categorySyncTriggered = true;
+    setTimeout(() => {
+        window.location.reload();
+    }, 120);
+}
+
+function setupCategorySyncListener() {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    const handleMessage = (event) => {
+        if (event?.data?.type === 'categories-updated') {
+            scheduleCategorySyncReload();
+        }
+    };
+    if (typeof BroadcastChannel === 'function') {
+        try {
+            categorySyncChannel = new BroadcastChannel(CATEGORY_SYNC_CHANNEL);
+            categorySyncChannel.addEventListener('message', handleMessage);
+        } catch (error) {
+            // ignore
+        }
+    }
+    window.addEventListener('storage', (event) => {
+        if (event.key === CATEGORY_SYNC_STORAGE_KEY && event.newValue) {
+            scheduleCategorySyncReload();
+        }
+    });
+}
+
+async function fetchCategorySettings() {
+    try {
+        const response = await fetch('/api/categories', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload?.message || 'Gagal memuat kategori.');
+        }
+        const raw = payload?.categories ?? payload ?? [];
+        if (!Array.isArray(raw)) {
+            return [];
+        }
+        const names = [];
+        const seen = new Set();
+        raw.forEach((entry) => {
+            const name = normalizeCategoryName(typeof entry === 'string' ? entry : entry?.name || entry?.label || '');
+            if (!name) {
+                return;
+            }
+            const key = normalizeCategoryKey(name);
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            const roles = normalizeCategoryRoles(typeof entry === 'string' ? {} : entry?.roles || {});
+            names.push({ name, roles });
+        });
+        return names;
+    } catch (error) {
+        console.warn('Gagal memuat kategori', error);
+        return [];
+    }
+}
+
+async function syncCategorySourceFromSettings() {
+    const container = document.getElementById('category-source');
+    if (!container) {
+        return;
+    }
+    const categories = await fetchCategorySettings();
+    if (!categories.length) {
+        return;
+    }
+    categorySettingsList = categories.map((entry) => ({
+        name: normalizeCategoryName(entry.name || entry),
+        roles: normalizeCategoryRoles(entry.roles || {})
+    }));
+    categoryRolesByKey = new Map(
+        categorySettingsList
+            .filter((entry) => entry && entry.name)
+            .map((entry) => [normalizeCategoryKey(entry.name), normalizeCategoryRoles(entry.roles || {})])
+    );
+    container.innerHTML = '';
+    const selectLabel = document.createElement('label');
+    const selectInput = document.createElement('input');
+    selectInput.type = 'checkbox';
+    selectInput.id = 'select-all-categories';
+    selectInput.checked = true;
+    selectLabel.appendChild(selectInput);
+    selectLabel.appendChild(document.createTextNode(' Select All'));
+    container.appendChild(selectLabel);
+    container.appendChild(document.createElement('br'));
+    categorySettingsList.forEach((category) => {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'category-checkbox';
+        input.value = category.name;
+        input.checked = true;
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(` ${category.name}`));
+        container.appendChild(label);
+        container.appendChild(document.createElement('br'));
+    });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
     loadSeoSettings();
+    setupCategorySyncListener();
+    const earlyAddPinForm = document.getElementById('add-pin-form');
+    if (earlyAddPinForm) {
+        earlyAddPinForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (typeof window.__submitPin === 'function') {
+                window.__submitPin(event);
+                return;
+            }
+            alert('Peta belum siap. Tunggu beberapa detik lalu coba lagi.');
+        });
+    }
+    await syncCategorySourceFromSettings();
     const modal = document.getElementById('welcome-modal');
     const closeModalBtn = document.getElementById('close-modal-btn');
     const infoBtn = document.getElementById('info-btn');
@@ -6889,20 +7084,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let lastLiveSellerSearchResults = [];
 
-    const PIN_FORM_CATEGORY_ORDER = [
-        'Budaya & Hiburan',
-        'Barang & Hewan Hilang',
-        'Edukasi',
-        'Jual-Beli Barang',
-        'Konser Musik & Acara',
-        'Olahraga & Aktivitas Hobi',
-        'Pasar Lokal & Pameran',
-        'Promo & Diskon Makanan',
-        'Promo & Diskon Lainnya',
-        'Sosial & Kopdar',
-        'Lain-lain'
-    ];
-
     function shouldIncludePinFormCategory(value) {
         if (!value) {
             return false;
@@ -6910,19 +7091,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isSpecialCategory(value)) {
             return false;
         }
-        if (value.includes('Akomodasi Pilihan') || value.includes('Restoran Legendaris')) {
-            return false;
-        }
         return true;
-    }
-
-    function getPinFormCategoryOrderIndex(value) {
-        for (let i = 0; i < PIN_FORM_CATEGORY_ORDER.length; i += 1) {
-            if (value.includes(PIN_FORM_CATEGORY_ORDER[i])) {
-                return i;
-            }
-        }
-        return PIN_FORM_CATEGORY_ORDER.length;
     }
 
     function populatePinCategoryOptions() {
@@ -6932,23 +7101,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const placeholder = selectEl.querySelector('option[value=""]');
         const fallbackPlaceholder = placeholder || new Option('Pilih Kategori', '');
+        const currentValue = selectEl.value;
+        const roleKey = getCurrentResidentRoleKey();
         const available = categoryCheckboxList
             .map((checkbox) => checkbox.value)
-            .filter(shouldIncludePinFormCategory);
-
-        if (!available.length) {
-            return;
-        }
-
-        const baseOrder = new Map(available.map((value, index) => [value, index]));
-        const ordered = available.slice().sort((a, b) => {
-            const aIndex = getPinFormCategoryOrderIndex(a);
-            const bIndex = getPinFormCategoryOrderIndex(b);
-            if (aIndex !== bIndex) {
-                return aIndex - bIndex;
-            }
-            return (baseOrder.get(a) || 0) - (baseOrder.get(b) || 0);
-        });
+            .filter(shouldIncludePinFormCategory)
+            .filter((value) => isCategoryAllowedForRole(value, roleKey));
 
         selectEl.innerHTML = '';
         if (placeholder) {
@@ -6959,12 +7117,23 @@ document.addEventListener('DOMContentLoaded', () => {
             selectEl.appendChild(fallbackPlaceholder);
         }
 
+        if (!available.length) {
+            return;
+        }
+
+        const ordered = available.slice();
+
         ordered.forEach((value) => {
             const option = new Option(value, value);
             selectEl.appendChild(option);
         });
+
+        if (currentValue && available.includes(currentValue)) {
+            selectEl.value = currentValue;
+        }
     }
 
+    window.__refreshPinCategoryOptions = populatePinCategoryOptions;
     populatePinCategoryOptions();
     renderPinListCategoryOptions();
 
@@ -8197,10 +8366,16 @@ async function initMap() {
                 body: JSON.stringify(pin)
             });
 
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
 
-            if (!response.ok || (data && data.message)) {
-                throw new Error(data && data.message ? data.message : 'Failed to drop pin.');
+            if (!response.ok) {
+                const message = data && data.message
+                    ? data.message
+                    : `Gagal menambahkan pin (HTTP ${response.status}).`;
+                throw new Error(message);
+            }
+            if (data && data.message) {
+                throw new Error(data.message);
             }
 
             clearTemporaryMarkerSelection('Belum ada lokasi yang dipilih.');
@@ -8230,6 +8405,8 @@ async function initMap() {
             }
         }
     }
+
+    window.__submitPin = submitPin;
 
 function handleLocationError(browserHasGeolocation) {
     // You can handle the error here, e.g., show a message to the user
@@ -8346,9 +8523,6 @@ function handleLocationError(browserHasGeolocation) {
         });
     });
 
-    if (addPinFormElement) {
-        addPinFormElement.addEventListener('submit', submitPin);
-    }
     if (!addPinButton) {
         addPinButton = document.getElementById('add-pin-btn');
     }
@@ -8409,6 +8583,12 @@ function downvotePin(id) {
 }
 
 function getIconForCategory(category) {
+    if (typeof category === 'string' && category.trim()) {
+        const emojiMatch = category.match(/\p{Extended_Pictographic}/u);
+        if (emojiMatch && emojiMatch[0]) {
+            return emojiMatch[0];
+        }
+    }
     const icons = {
         '🏆 Restoran Legendaris': '🏆',
         '🏃🏻 Olahraga & Aktivitas Hobi': '🏃🏻',

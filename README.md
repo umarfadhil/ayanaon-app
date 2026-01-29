@@ -96,14 +96,19 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
-### What's New in v2.4.8
-- **Logo Refresh:** Favicon, PWA icons, and social preview image now point to the v2 logo assets for search and sharing updates.
+### What's New in v2.4.10
+- **Manage Categories:** Admins can add, rename, reorder, and remove pin categories with emoji previews, plus role-based availability (Admin/Pin Manager/Warga).
+- **Category Sync Everywhere:** Category updates now sync to the main page (search + add pin) and the `/kategori` landing pages automatically.
+- **More Reliable Pin Sharing:** Add-pin submission now guards against early map loads and surfaces clearer errors when something goes wrong.
 
 ### What's New in v2.4.9
 - **Mass Promotions Tab:** Admins can search places with Google Places, review results on a mini map, select multiple locations, and add pins in bulk with shared details (title, description, category, links, dates, and photos).
 - **Admin Category Sync:** Manage Pins category input now uses a dropdown of existing categories to keep edits consistent.
 - **Tab Management:** New Manage Tabs panel lets admins reorder tabs, set role-based visibility (Admin/Pin Manager/Warga), and save the configuration for all users.
 - **Mobile Admin Navigation:** Admin tabs row now scrolls horizontally on small screens.
+
+### What's New in v2.4.8
+- **Logo Refresh:** Favicon, PWA icons, and social preview image now point to the v2 logo assets for search and sharing updates.
 
 ### What's New in v2.4.7
 - **Share Button Added:** Pin list and map popups now include a share action for quick link sharing.

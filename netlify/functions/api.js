@@ -422,6 +422,8 @@ const DEFAULT_FEATURE_FLAGS = {
     gerobakOnline: true
 };
 
+const CATEGORY_SETTINGS_KEY = 'pinCategories';
+
 const DEFAULT_SEO_SETTINGS = {
     title: 'AyaNaon | Cari Kegiatan Seru Di Sekitarmu!',
     description: 'Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!',
@@ -686,6 +688,181 @@ async function writeTabVisibility(payload = {}) {
     return visibility;
 }
 
+function normalizeCategoryName(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim();
+}
+
+function normalizeCategoryKey(value) {
+    return normalizeCategoryName(value).toLowerCase();
+}
+
+function normalizeCategoryRoles(raw = {}) {
+    if (!raw || typeof raw !== 'object') {
+        return { admin: true, pin_manager: true, resident: true };
+    }
+    return {
+        admin: raw.admin !== false,
+        pin_manager: raw.pin_manager !== false,
+        resident: raw.resident !== false
+    };
+}
+
+function normalizeCategoryPayload(rawList = []) {
+    if (!Array.isArray(rawList)) {
+        return [];
+    }
+    return rawList
+        .map((entry) => {
+            if (!entry) {
+                return null;
+            }
+            if (typeof entry === 'string') {
+                const name = normalizeCategoryName(entry);
+                if (!name) {
+                    return null;
+                }
+                return {
+                    id: new ObjectId().toString(),
+                    name,
+                    roles: normalizeCategoryRoles(),
+                    originalName: name
+                };
+            }
+            const name = normalizeCategoryName(entry.name || entry.label || entry.value || '');
+            if (!name) {
+                return null;
+            }
+            const id = normalizeCategoryName(entry.id || '') || new ObjectId().toString();
+            const originalName = normalizeCategoryName(entry.originalName || entry.previousName || entry.original || '');
+            const roles = normalizeCategoryRoles(entry.roles || entry.permissions || entry.allowedRoles || {});
+            return {
+                id,
+                name,
+                roles,
+                originalName
+            };
+        })
+        .filter(Boolean);
+}
+
+function normalizeStoredCategories(rawList = []) {
+    return normalizeCategoryPayload(rawList).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        roles: normalizeCategoryRoles(entry.roles)
+    }));
+}
+
+function validateCategoryList(list = []) {
+    const seen = new Set();
+    for (const entry of list) {
+        const name = normalizeCategoryName(entry?.name || '');
+        if (!name) {
+            return { ok: false, message: 'Nama kategori wajib diisi.' };
+        }
+        const roles = normalizeCategoryRoles(entry?.roles || {});
+        if (!roles.admin && !roles.pin_manager && !roles.resident) {
+            return { ok: false, message: `Kategori "${name}" harus punya minimal satu role.` };
+        }
+        const key = normalizeCategoryKey(name);
+        if (seen.has(key)) {
+            return { ok: false, message: `Kategori "${name}" sudah ada.` };
+        }
+        seen.add(key);
+    }
+    return { ok: true };
+}
+
+async function buildCategoriesFromPins() {
+    const db = await connectToDatabase();
+    const categories = await db.collection('pins').distinct('category');
+    const unique = new Map();
+    categories.forEach((entry) => {
+        const name = normalizeCategoryName(entry || '');
+        if (!name) {
+            return;
+        }
+        const key = normalizeCategoryKey(name);
+        if (!unique.has(key)) {
+            unique.set(key, name);
+        }
+    });
+    const list = Array.from(unique.values()).sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+    return list.map((name) => ({
+        id: new ObjectId().toString(),
+        name,
+        roles: normalizeCategoryRoles()
+    }));
+}
+
+async function readPinCategories() {
+    try {
+        const settings = await getSettingsCollection();
+        const doc = await settings.findOne({ key: CATEGORY_SETTINGS_KEY });
+        const stored = normalizeStoredCategories(doc?.categories || doc?.list || []);
+        if (stored.length) {
+            return stored.map((entry) => ({
+                id: entry.id,
+                name: entry.name,
+                roles: normalizeCategoryRoles(entry.roles)
+            }));
+        }
+    } catch (error) {
+        console.error('Failed to read category settings', error);
+    }
+    try {
+        return await buildCategoriesFromPins();
+    } catch (error) {
+        console.error('Failed to build categories from pins', error);
+        return [];
+    }
+}
+
+async function writePinCategories(rawCategories = []) {
+    const settings = await getSettingsCollection();
+    const incoming = normalizeCategoryPayload(rawCategories);
+    const validation = validateCategoryList(incoming);
+    if (!validation.ok) {
+        const err = new Error(validation.message || 'Data kategori tidak valid.');
+        err.status = 400;
+        throw err;
+    }
+    const stored = normalizeStoredCategories(incoming).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        roles: normalizeCategoryRoles(entry.roles)
+    }));
+    const currentDoc = await settings.findOne({ key: CATEGORY_SETTINGS_KEY });
+    const currentList = normalizeStoredCategories(currentDoc?.categories || []);
+    const currentById = new Map(currentList.map((entry) => [entry.id, entry.name]));
+    const renamePairs = [];
+    incoming.forEach((entry) => {
+        const previous = normalizeCategoryName(entry.originalName || '') || currentById.get(entry.id) || '';
+        if (!previous) {
+            return;
+        }
+        if (normalizeCategoryName(previous) !== normalizeCategoryName(entry.name)) {
+            renamePairs.push({ from: previous, to: entry.name });
+        }
+    });
+    if (renamePairs.length) {
+        const db = await connectToDatabase();
+        const pins = db.collection('pins');
+        for (const rename of renamePairs) {
+            await pins.updateMany({ category: rename.from }, { $set: { category: rename.to } });
+        }
+    }
+    await settings.updateOne(
+        { key: CATEGORY_SETTINGS_KEY },
+        { $set: { key: CATEGORY_SETTINGS_KEY, categories: stored, updatedAt: new Date() } },
+        { upsert: true }
+    );
+    return stored;
+}
+
 async function readMaintenanceStatus() {
     try {
         const settings = await getSettingsCollection();
@@ -922,21 +1099,47 @@ async function fetchCategoryIndexData() {
             { $group: { _id: '$category', count: { $sum: 1 } } }
         ])
         .toArray();
-    const categories = categoriesRaw
-        .map((doc) => {
-            const label = normalizeLandingText(doc?._id);
-            const slug = slugifyText(label);
-            if (!slug) {
-                return null;
-            }
-            return {
-                label,
-                slug,
-                count: Number(doc?.count) || 0
-            };
-        })
-        .filter(Boolean)
+    const countBySlug = new Map();
+    const labelBySlug = new Map();
+    categoriesRaw.forEach((doc) => {
+        const label = normalizeLandingText(doc?._id);
+        const slug = slugifyText(label);
+        if (!slug) {
+            return;
+        }
+        const current = countBySlug.get(slug) || 0;
+        countBySlug.set(slug, current + (Number(doc?.count) || 0));
+        if (!labelBySlug.has(slug) && label) {
+            labelBySlug.set(slug, label);
+        }
+    });
+    const configured = await readPinCategories();
+    const configuredList = [];
+    const configuredSlugs = new Set();
+    configured.forEach((entry) => {
+        const label = normalizeLandingText(entry?.name || entry || '');
+        const slug = slugifyText(label);
+        if (!slug || configuredSlugs.has(slug)) {
+            return;
+        }
+        configuredSlugs.add(slug);
+        configuredList.push({ label, slug });
+    });
+    const categories = configuredList
+        .map((item) => ({
+            label: item.label,
+            slug: item.slug,
+            count: countBySlug.get(item.slug) || 0
+        }));
+    const extras = Array.from(countBySlug.entries())
+        .filter(([slug]) => !configuredSlugs.has(slug))
+        .map(([slug, count]) => ({
+            label: labelBySlug.get(slug) || slug,
+            slug,
+            count: Number(count) || 0
+        }))
         .sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label));
+    categories.push(...extras);
 
     const regionsRaw = await db.collection('pins')
         .aggregate([
@@ -975,7 +1178,7 @@ async function fetchCategoryIndexData() {
         );
         regionLists.set(categorySlug, list);
     });
-    const totalPins = categories.reduce((sum, item) => sum + (item.count || 0), 0);
+    const totalPins = categoriesRaw.reduce((sum, item) => sum + (Number(item?.count) || 0), 0);
     const regionTotals = new Map();
     regionLists.forEach((list) => {
         list.forEach((region) => {
@@ -1033,16 +1236,29 @@ async function fetchCategoryLandingData(categorySlug, regionSlug) {
     }
     const db = await connectToDatabase();
     const activeQuery = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
-    const categories = await db.collection('pins').distinct('category', activeQuery);
     let categoryLabel = '';
-    for (const entry of categories) {
-        const normalized = normalizeLandingText(entry);
+    const configured = await readPinCategories();
+    for (const entry of configured) {
+        const normalized = normalizeLandingText(entry?.name || entry || '');
         if (!normalized) {
             continue;
         }
         if (slugifyText(normalized) === safeCategorySlug) {
             categoryLabel = normalized;
             break;
+        }
+    }
+    if (!categoryLabel) {
+        const categories = await db.collection('pins').distinct('category', activeQuery);
+        for (const entry of categories) {
+            const normalized = normalizeLandingText(entry);
+            if (!normalized) {
+                continue;
+            }
+            if (slugifyText(normalized) === safeCategorySlug) {
+                categoryLabel = normalized;
+                break;
+            }
         }
     }
     if (!categoryLabel) {
@@ -4074,6 +4290,27 @@ router.put('/tabs-visibility', async (req, res) => {
     }
 });
 
+router.get('/categories', async (req, res) => {
+    const categories = await readPinCategories();
+    res.json({ categories });
+});
+
+router.put('/categories', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengubah kategori.' });
+    }
+    try {
+        const payload = req.body?.categories ?? req.body ?? [];
+        const categories = await writePinCategories(payload);
+        res.json({ categories });
+    } catch (error) {
+        console.error('Failed to update categories', error);
+        res.status(error.status || 500).json({ message: error.message || 'Tidak dapat memperbarui kategori.' });
+    }
+});
+
 router.get('/seo', async (req, res) => {
     const seo = await readSeoSettings();
     res.json(seo);
@@ -4806,31 +5043,52 @@ router.get('/analytics/timeseries', async (req, res) => {
 });
 
 router.post('/pins', async (req, res) => {
-    const db = await connectToDatabase();
-    const pin = req.body;
-    pin.createdAt = new Date();
-    pin.reporter = req.headers['x-nf-client-connection-ip']; // Add this line
-    pin.upvotes = 0;
-    pin.downvotes = 0;
-    pin.upvoterIps = [];
-    pin.downvoterIps = [];
+    try {
+        const db = await connectToDatabase();
+        const pin = req.body || {};
+        const title = typeof pin.title === 'string' ? pin.title.trim() : '';
+        const description = typeof pin.description === 'string' ? pin.description.trim() : '';
+        const category = typeof pin.category === 'string' ? pin.category.trim() : '';
+        const lat = Number(pin.lat);
+        const lng = Number(pin.lng);
+        if (!title || !description || !category) {
+            return res.status(400).json({ message: 'Judul, deskripsi, dan kategori wajib diisi.' });
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return res.status(400).json({ message: 'Koordinat pin tidak valid.' });
+        }
+        pin.title = title;
+        pin.description = description;
+        pin.category = category;
+        pin.lat = lat;
+        pin.lng = lng;
+        pin.createdAt = new Date();
+        pin.reporter = req.headers['x-nf-client-connection-ip'];
+        pin.upvotes = 0;
+        pin.downvotes = 0;
+        pin.upvoterIps = [];
+        pin.downvoterIps = [];
 
-    pin.expiresAt = computeExpiresAtFromLifetime(pin.lifetime);
+        pin.expiresAt = computeExpiresAtFromLifetime(pin.lifetime);
 
-    if (Array.isArray(pin.images) && pin.images.length) {
-        pin.images = normalizeIncomingPinImages([], pin.images);
+        if (Array.isArray(pin.images) && pin.images.length) {
+            pin.images = normalizeIncomingPinImages([], pin.images);
+        }
+        pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
+
+        // Get city from lat/lng (with OSM fallback)
+        const resolvedCity = await resolveCityFromCoords(lat, lng);
+        if (resolvedCity) {
+            pin.city = resolvedCity;
+        }
+
+        const result = await db.collection('pins').insertOne(pin);
+        const insertedPin = await db.collection('pins').findOne({ _id: result.insertedId });
+        res.json(insertedPin);
+    } catch (error) {
+        console.error('Failed to create pin', error);
+        res.status(500).json({ message: 'Gagal menambahkan pin. Coba lagi.' });
     }
-    pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
-
-    // Get city from lat/lng (with OSM fallback)
-    const resolvedCity = await resolveCityFromCoords(Number(pin.lat), Number(pin.lng));
-    if (resolvedCity) {
-        pin.city = resolvedCity;
-    }
-
-    const result = await db.collection('pins').insertOne(pin);
-    const insertedPin = await db.collection('pins').findOne({ _id: result.insertedId });
-    res.json(insertedPin);
 });
 
 router.put('/pins/:id', async (req, res) => {
