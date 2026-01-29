@@ -23,10 +23,12 @@
         </header>
         <div class="admin-tabs" role="tablist" aria-label="Admin Navigation">
             <button class="admin-tab admin-tab--active" data-tab="pins" role="tab" aria-selected="true">Manage Pins</button>
+            <button class="admin-tab" data-tab="mass" role="tab" aria-selected="false">Mass Promotions</button>
             <button class="admin-tab" data-tab="users" role="tab" aria-selected="false" data-admin-only="true">Manage Users</button>
             <button class="admin-tab" data-tab="metrics" role="tab" aria-selected="false" data-admin-only="true">Business Metrics</button>
             <button class="admin-tab" data-tab="features" role="tab" aria-selected="false" data-admin-only="true">Features</button>
             <button class="admin-tab" data-tab="seo" role="tab" aria-selected="false" data-admin-only="true">Manage SEO</button>
+            <button class="admin-tab" data-tab="tabs" role="tab" aria-selected="false" data-admin-only="true">Manage Tabs</button>
         </div>
 
         <section id="admin-pin-content" class="admin-tab-content">
@@ -185,7 +187,9 @@
                     <div class="form-grid">
                         <div class="form-row">
                             <label for="pin-category">Category</label>
-                            <input type="text" id="pin-category" name="category" required placeholder="Category">
+                            <select id="pin-category" name="category" required>
+                                <option value="" disabled selected>Pilih kategori</option>
+                            </select>
                         </div>
                         <div class="form-row">
                             <label for="pin-link">Link (optional)</label>
@@ -247,6 +251,110 @@
         </section>
         </section>
 
+        <div id="admin-mass-pane" class="admin-tab-content hidden">
+            <section class="admin-mass">
+                <div class="panel-header">
+                    <div>
+                        <h2>Mass Promotions</h2>
+                        <p class="panel-sub">Tambahkan banyak pin sekaligus dari hasil pencarian tempat.</p>
+                    </div>
+                </div>
+                <div id="mass-message" class="admin-message" role="status" aria-live="polite"></div>
+                <div class="admin-grid mass-grid">
+                    <aside class="mass-search-panel">
+                        <div class="panel-header">
+                            <div>
+                                <h2>Search Places</h2>
+                                <p class="panel-sub">Cari brand atau alamat. Tambahkan "di Kota/Provinsi" untuk batasi area.</p>
+                            </div>
+                        </div>
+                        <div class="mass-search-row">
+                            <input type="search" id="mass-search-input" placeholder="Kopi Nako di Bogor" aria-label="Search places">
+                            <button type="button" class="search-btn" id="mass-search-btn">Search</button>
+                        </div>
+                        <div class="mass-search-meta">
+                            <div class="mass-counts">
+                                <span id="mass-results-count">0 results</span>
+                                <span id="mass-selected-count">0 selected</span>
+                            </div>
+                            <div class="mass-actions">
+                                <button type="button" class="ghost-btn chip-btn" id="mass-select-all-btn">Select all</button>
+                                <button type="button" class="ghost-btn chip-btn" id="mass-clear-btn">Clear selection</button>
+                            </div>
+                        </div>
+                        <div id="mass-results-map" class="mini-map mass-map" aria-label="Map for search results"></div>
+                        <ul id="mass-search-results" class="mass-results" aria-label="Search results"></ul>
+                    </aside>
+                    <section class="mass-form-panel">
+                        <div class="panel-header">
+                            <div>
+                                <h2>Pin Details</h2>
+                                <p class="panel-sub">Diterapkan ke semua lokasi terpilih.</p>
+                            </div>
+                        </div>
+                        <form id="mass-form" class="pin-form" novalidate>
+                            <div class="form-row">
+                                <label for="mass-title">Title</label>
+                                <input type="text" id="mass-title" name="title" required placeholder="Pin title">
+                            </div>
+                            <div class="form-row">
+                                <label for="mass-description">Description</label>
+                                <textarea id="mass-description" name="description" required rows="3" placeholder="Short description"></textarea>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-row">
+                                    <label for="mass-category">Category</label>
+                                    <select id="mass-category" name="category" required>
+                                        <option value="" disabled selected>Pilih kategori</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <label for="mass-link">Link (optional)</label>
+                                    <input type="url" id="mass-link" name="link" placeholder="https://">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <label for="mass-lifetime">Lifetime</label>
+                                <select id="mass-lifetime">
+                                    <option value="">Leave as is</option>
+                                    <option value="today">Only today</option>
+                                    <option value="date">Select date</option>
+                                </select>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-row">
+                                    <label for="mass-start">Start Date</label>
+                                    <input type="text" id="mass-start" placeholder="dd/mm/yyyy">
+                                </div>
+                                <div class="form-row">
+                                    <label for="mass-end">End Date</label>
+                                    <input type="text" id="mass-end" placeholder="dd/mm/yyyy">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <label>Pin Photos</label>
+                                <div class="image-hint">Maximum 3 photos, 4MB per photo.</div>
+                                <div id="mass-images" class="image-list" aria-live="polite"></div>
+                                <div class="upload-actions-row">
+                                    <div class="upload-row">
+                                        <label class="upload-btn">
+                                            <input type="file" id="mass-image-input" accept="image/*" multiple>
+                                            <span>Add Photos</span>
+                                        </label>
+                                        <span class="upload-remaining" id="mass-photo-remaining"></span>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button type="submit" class="primary-btn" id="mass-create-btn">Add Selected Pins</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mass-status" id="mass-status"></div>
+                        </form>
+                    </section>
+                </div>
+            </section>
+        </div>
+
         <div id="admin-users-pane" class="admin-tab-content hidden" data-admin-only="true">
             <section class="admin-users">
                 <div class="panel-header">
@@ -268,6 +376,22 @@
                         <div role="columnheader">Action</div>
                     </div>
                     <div id="users-table-body" class="users-table__body" role="rowgroup"></div>
+                </div>
+            </section>
+        </div>
+
+        <div id="admin-tabs-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-tabs-manager">
+                <div class="panel-header">
+                    <div>
+                        <h2>Manage Tabs</h2>
+                        <p class="panel-sub">Atur urutan dan visibilitas tab berdasarkan role. Perubahan berlaku untuk semua pengguna.</p>
+                    </div>
+                </div>
+                <div id="tabs-message" class="admin-message" role="status" aria-live="polite"></div>
+                <ul id="tabs-order-list" class="tabs-order-list" aria-label="Tab order list"></ul>
+                <div class="tabs-actions">
+                    <button type="button" class="chip-btn" id="tabs-save-btn" disabled>Save Changes</button>
                 </div>
             </section>
         </div>

@@ -62,7 +62,21 @@
         residents: [],
         permissions: {
             isAdmin: false,
-            canManagePins: false
+            canManagePins: false,
+            role: ''
+        },
+        tabs: {
+            visibilityDraft: null,
+            dirty: false,
+            visibilityRemote: null,
+            isSaving: false
+        },
+        mass: {
+            results: [],
+            selectedPlaceIds: new Set(),
+            addedImages: [],
+            isSearching: false,
+            isCreating: false
         }
     };
 
@@ -71,6 +85,12 @@
     let miniMarker = null;
     let miniGeocoder = null;
     let googleMapsPromise = null;
+    let massMap = null;
+    let massPlacesService = null;
+    let massGeocoder = null;
+    let massInfoWindow = null;
+    let massMarkers = new Map();
+    let massMarkerBounds = null;
 
     function cacheElements() {
         els.pinCount = document.getElementById('pin-count');
@@ -180,6 +200,33 @@
         els.usersRefreshBtn = document.getElementById('users-refresh-btn');
         els.usersMessage = document.getElementById('admin-users-message');
         els.usersTableBody = document.getElementById('users-table-body');
+        els.tabsContent = document.getElementById('admin-tabs-pane');
+        els.tabsOrderList = document.getElementById('tabs-order-list');
+        els.tabsMessage = document.getElementById('tabs-message');
+        els.tabsSaveBtn = document.getElementById('tabs-save-btn');
+        els.massContent = document.getElementById('admin-mass-pane');
+        els.massMessage = document.getElementById('mass-message');
+        els.massSearchInput = document.getElementById('mass-search-input');
+        els.massSearchBtn = document.getElementById('mass-search-btn');
+        els.massResultsList = document.getElementById('mass-search-results');
+        els.massResultsCount = document.getElementById('mass-results-count');
+        els.massSelectedCount = document.getElementById('mass-selected-count');
+        els.massSelectAllBtn = document.getElementById('mass-select-all-btn');
+        els.massClearBtn = document.getElementById('mass-clear-btn');
+        els.massMap = document.getElementById('mass-results-map');
+        els.massForm = document.getElementById('mass-form');
+        els.massTitleInput = document.getElementById('mass-title');
+        els.massDescriptionInput = document.getElementById('mass-description');
+        els.massCategorySelect = document.getElementById('mass-category');
+        els.massLinkInput = document.getElementById('mass-link');
+        els.massLifetimeSelect = document.getElementById('mass-lifetime');
+        els.massStartInput = document.getElementById('mass-start');
+        els.massEndInput = document.getElementById('mass-end');
+        els.massImages = document.getElementById('mass-images');
+        els.massImageInput = document.getElementById('mass-image-input');
+        els.massPhotoRemaining = document.getElementById('mass-photo-remaining');
+        els.massCreateBtn = document.getElementById('mass-create-btn');
+        els.massStatus = document.getElementById('mass-status');
     }
 
     function showMessage(type, text) {
@@ -213,6 +260,435 @@
             els.usersMessage.classList.add('is-success');
         } else if (type === 'error') {
             els.usersMessage.classList.add('is-error');
+        }
+    }
+
+    function showTabsMessage(type, text) {
+        if (!els.tabsMessage) {
+            return;
+        }
+        els.tabsMessage.textContent = text || '';
+        els.tabsMessage.classList.remove('is-success', 'is-error', 'is-visible');
+        if (!text) {
+            return;
+        }
+        els.tabsMessage.classList.add('is-visible');
+        if (type === 'success') {
+            els.tabsMessage.classList.add('is-success');
+        } else if (type === 'error') {
+            els.tabsMessage.classList.add('is-error');
+        }
+    }
+
+    function getTabVisibilityStorageKey() {
+        return 'adminTabVisibility.v1';
+    }
+
+    function getTabButtons() {
+        const container = document.querySelector('.admin-tabs');
+        if (!container) {
+            return [];
+        }
+        return Array.from(container.querySelectorAll('.admin-tab'));
+    }
+
+    function getCurrentTabIds() {
+        return getTabButtons()
+            .map((btn) => btn.dataset.tab)
+            .filter(Boolean);
+    }
+
+    function getDefaultTabVisibility() {
+        const visibility = {};
+        getTabButtons().forEach((btn) => {
+            const tabId = btn.dataset.tab;
+            if (!tabId) {
+                return;
+            }
+            const adminOnly = btn.dataset.adminOnly === 'true';
+            const base = {
+                admin: true,
+                pin_manager: !adminOnly && (tabId === 'pins' || tabId === 'mass'),
+                resident: false
+            };
+            if (adminOnly) {
+                base.pin_manager = false;
+                base.resident = false;
+            }
+            visibility[tabId] = base;
+        });
+        return visibility;
+    }
+
+    function loadTabVisibility() {
+        if (state.tabs.visibilityRemote !== null) {
+            return state.tabs.visibilityRemote || {};
+        }
+        try {
+            const raw = window.localStorage?.getItem(getTabVisibilityStorageKey());
+            const parsed = JSON.parse(raw || '{}');
+            if (!parsed || typeof parsed !== 'object') {
+                return {};
+            }
+            return parsed;
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function saveTabVisibility(visibility) {
+        try {
+            window.localStorage?.setItem(getTabVisibilityStorageKey(), JSON.stringify(visibility));
+        } catch (error) {
+            // ignore storage failures
+        }
+    }
+
+    function getTabVisibilityConfig() {
+        const defaults = getDefaultTabVisibility();
+        const stored = loadTabVisibility();
+        const merged = { ...defaults };
+        Object.keys(stored).forEach((tabId) => {
+            if (!merged[tabId]) {
+                merged[tabId] = { admin: true, pin_manager: false, resident: false };
+            }
+            const entry = stored[tabId] || {};
+            ['admin', 'pin_manager', 'resident'].forEach((role) => {
+                if (typeof entry[role] === 'boolean') {
+                    merged[tabId][role] = entry[role];
+                }
+            });
+        });
+        return merged;
+    }
+
+    function getTabVisibilityDraft() {
+        if (!state.tabs.visibilityDraft) {
+            state.tabs.visibilityDraft = getTabVisibilityConfig();
+        }
+        return state.tabs.visibilityDraft;
+    }
+
+    function updateTabsSaveState() {
+        if (els.tabsSaveBtn) {
+            els.tabsSaveBtn.disabled = !state.tabs.dirty;
+        }
+    }
+
+    function setTabsSaving(isSaving) {
+        state.tabs.isSaving = isSaving;
+        if (!els.tabsSaveBtn) {
+            return;
+        }
+        els.tabsSaveBtn.disabled = isSaving || !state.tabs.dirty;
+        els.tabsSaveBtn.textContent = isSaving ? 'Saving...' : 'Save Changes';
+    }
+
+    function resetTabVisibilityDraft() {
+        state.tabs.visibilityDraft = getTabVisibilityConfig();
+        state.tabs.dirty = false;
+        showTabsMessage(null, '');
+        updateTabsSaveState();
+    }
+
+    function hasAnyTabForRole(draft, roleKey) {
+        return getTabButtons().some((btn) => {
+            const tabId = btn.dataset.tab;
+            if (!tabId) {
+                return false;
+            }
+            const adminOnly = btn.dataset.adminOnly === 'true';
+            if (adminOnly && roleKey !== 'admin') {
+                return false;
+            }
+            return Boolean(draft?.[tabId]?.[roleKey]);
+        });
+    }
+
+    function updateTabVisibilityDraft(tabId, roleKey, allowed) {
+        const draft = getTabVisibilityDraft();
+        if (!draft[tabId]) {
+            draft[tabId] = { admin: true, pin_manager: false, resident: false };
+        }
+        draft[tabId][roleKey] = Boolean(allowed);
+        if (!hasAnyTabForRole(draft, roleKey)) {
+            showTabsMessage('error', 'Setidaknya satu tab harus aktif untuk peran ini.');
+            return false;
+        }
+        state.tabs.visibilityDraft = draft;
+        state.tabs.dirty = true;
+        updateTabsSaveState();
+        showTabsMessage(null, '');
+        return true;
+    }
+
+    async function saveTabVisibilityDraft() {
+        if (!state.tabs.visibilityDraft || state.tabs.isSaving) {
+            return;
+        }
+        const payload = { visibility: state.tabs.visibilityDraft };
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        setTabsSaving(true);
+        showTabsMessage(null, '');
+        try {
+            const response = await fetch('/api/tabs-visibility', {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Tidak dapat menyimpan pengaturan tab.');
+            }
+            const visibility = data?.visibility ?? data ?? {};
+            state.tabs.visibilityRemote = visibility;
+            state.tabs.visibilityDraft = visibility;
+            state.tabs.dirty = false;
+            updateTabsSaveState();
+            applyTabVisibility();
+            renderTabOrderList();
+            showTabsMessage('success', 'Pengaturan tab disimpan.');
+        } catch (error) {
+            console.error('Gagal menyimpan pengaturan tab', error);
+            showTabsMessage('error', error.message || 'Tidak dapat menyimpan pengaturan tab.');
+        } finally {
+            setTabsSaving(false);
+        }
+    }
+
+    async function fetchTabVisibilityRemote() {
+        try {
+            const headers = {};
+            const token = getToken();
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            }
+            const response = await fetch('/api/tabs-visibility', {
+                cache: 'no-store',
+                headers
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.message || 'Gagal memuat pengaturan tab.');
+            }
+            state.tabs.visibilityRemote = data?.visibility ?? data ?? {};
+        } catch (error) {
+            console.warn('Gagal memuat pengaturan tab', error);
+            state.tabs.visibilityRemote = null;
+        }
+        resetTabVisibilityDraft();
+        applyTabVisibility();
+        renderTabOrderList();
+    }
+
+    function getRoleKey() {
+        return state.permissions?.role || 'resident';
+    }
+
+    function getAllowedTabsForRole(roleKey = getRoleKey()) {
+        const visibility = getTabVisibilityConfig();
+        return getTabButtons()
+            .filter((btn) => {
+                const tabId = btn.dataset.tab;
+                if (!tabId) {
+                    return false;
+                }
+                const adminOnly = btn.dataset.adminOnly === 'true';
+                if (adminOnly && roleKey !== 'admin') {
+                    return false;
+                }
+                return Boolean(visibility[tabId]?.[roleKey]);
+            })
+            .map((btn) => btn.dataset.tab);
+    }
+
+    function applyTabVisibility() {
+        const visibility = getTabVisibilityConfig();
+        const roleKey = getRoleKey();
+        const buttons = getTabButtons();
+        buttons.forEach((btn) => {
+            const tabId = btn.dataset.tab;
+            const adminOnly = btn.dataset.adminOnly === 'true';
+            let allowed = Boolean(visibility[tabId]?.[roleKey]);
+            if (adminOnly && roleKey !== 'admin') {
+                allowed = false;
+            }
+            btn.hidden = !allowed;
+            btn.setAttribute('aria-hidden', allowed ? 'false' : 'true');
+        });
+        const allowedTabs = getAllowedTabsForRole(roleKey);
+        const currentActive = buttons.find((btn) => btn.classList.contains('admin-tab--active'))?.dataset.tab;
+        if (!allowedTabs.includes(currentActive)) {
+            setActiveTab(allowedTabs[0] || 'pins');
+        }
+    }
+
+    function getTabOrderStorageKey() {
+        return 'adminTabOrder.v1';
+    }
+
+    function loadTabOrder() {
+        try {
+            const raw = window.localStorage?.getItem(getTabOrderStorageKey());
+            const parsed = JSON.parse(raw || '[]');
+            return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function saveTabOrder(order) {
+        try {
+            window.localStorage?.setItem(getTabOrderStorageKey(), JSON.stringify(order));
+        } catch (error) {
+            // ignore storage failures
+        }
+    }
+
+    function applyTabOrder(order) {
+        const container = document.querySelector('.admin-tabs');
+        if (!container) {
+            return;
+        }
+        const buttons = getTabButtons();
+        const buttonMap = new Map(buttons.map((btn) => [btn.dataset.tab, btn]));
+        const nextOrder = [];
+        order.forEach((tabId) => {
+            const btn = buttonMap.get(tabId);
+            if (btn) {
+                nextOrder.push(btn);
+                buttonMap.delete(tabId);
+            }
+        });
+        buttons.forEach((btn) => {
+            if (buttonMap.has(btn.dataset.tab)) {
+                nextOrder.push(btn);
+                buttonMap.delete(btn.dataset.tab);
+            }
+        });
+        nextOrder.forEach((btn) => container.appendChild(btn));
+        applyTabVisibility();
+    }
+
+    function moveTabOrder(tabId, direction) {
+        const order = getCurrentTabIds();
+        const index = order.indexOf(tabId);
+        if (index === -1) {
+            return;
+        }
+        const nextIndex = index + direction;
+        if (nextIndex < 0 || nextIndex >= order.length) {
+            return;
+        }
+        const nextOrder = order.slice();
+        const temp = nextOrder[index];
+        nextOrder[index] = nextOrder[nextIndex];
+        nextOrder[nextIndex] = temp;
+        applyTabOrder(nextOrder);
+        saveTabOrder(nextOrder);
+        renderTabOrderList();
+    }
+
+    function renderTabOrderList() {
+        if (!els.tabsOrderList) {
+            return;
+        }
+        const buttons = getTabButtons();
+        const visibility = getTabVisibilityDraft();
+        els.tabsOrderList.innerHTML = '';
+        if (!buttons.length) {
+            const empty = document.createElement('div');
+            empty.className = 'pin-list-empty';
+            empty.textContent = 'Tidak ada tab untuk diatur.';
+            els.tabsOrderList.appendChild(empty);
+            return;
+        }
+        buttons.forEach((btn, index) => {
+            const item = document.createElement('li');
+            item.className = 'tabs-order-item';
+            const main = document.createElement('div');
+            main.className = 'tabs-order-main';
+            const title = document.createElement('div');
+            title.className = 'tabs-order-title';
+            title.textContent = btn.textContent.trim() || btn.dataset.tab || 'Tab';
+            if (btn.dataset.adminOnly === 'true') {
+                const tag = document.createElement('span');
+                tag.className = 'tabs-order-tag';
+                tag.textContent = 'Admin only';
+                title.appendChild(tag);
+            }
+            const toggles = document.createElement('div');
+            toggles.className = 'tabs-role-toggles';
+            [
+                { key: 'admin', label: 'Admin' },
+                { key: 'pin_manager', label: 'Pin Manager' },
+                { key: 'resident', label: 'Warga' }
+            ].forEach((role) => {
+                const label = document.createElement('label');
+                label.className = 'tabs-role-option';
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = Boolean(visibility[btn.dataset.tab]?.[role.key]);
+                const adminOnly = btn.dataset.adminOnly === 'true';
+                if (adminOnly && role.key !== 'admin') {
+                    input.disabled = true;
+                    input.checked = false;
+                }
+                input.addEventListener('change', () => {
+                    const nextValue = input.checked;
+                    const ok = updateTabVisibilityDraft(btn.dataset.tab, role.key, nextValue);
+                    if (!ok) {
+                        input.checked = !nextValue;
+                    }
+                });
+                const span = document.createElement('span');
+                span.textContent = role.label;
+                label.appendChild(input);
+                label.appendChild(span);
+                toggles.appendChild(label);
+            });
+            const actions = document.createElement('div');
+            actions.className = 'tabs-order-actions';
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.textContent = 'Up';
+            upBtn.disabled = index === 0;
+            upBtn.addEventListener('click', () => moveTabOrder(btn.dataset.tab, -1));
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.textContent = 'Down';
+            downBtn.disabled = index === buttons.length - 1;
+            downBtn.addEventListener('click', () => moveTabOrder(btn.dataset.tab, 1));
+            actions.appendChild(upBtn);
+            actions.appendChild(downBtn);
+            main.appendChild(title);
+            main.appendChild(toggles);
+            item.appendChild(main);
+            item.appendChild(actions);
+            els.tabsOrderList.appendChild(item);
+        });
+    }
+
+    function showMassMessage(type, text) {
+        if (!els.massMessage) {
+            return;
+        }
+        els.massMessage.textContent = text || '';
+        els.massMessage.classList.remove('is-success', 'is-error', 'is-visible');
+        if (!text) {
+            return;
+        }
+        els.massMessage.classList.add('is-visible');
+        if (type === 'success') {
+            els.massMessage.classList.add('is-success');
+        } else if (type === 'error') {
+            els.massMessage.classList.add('is-error');
         }
     }
 
@@ -275,7 +751,11 @@
             if (els.usersContent) {
                 els.usersContent.classList.add('hidden');
             }
+            if (els.tabsContent) {
+                els.tabsContent.classList.add('hidden');
+            }
         }
+        applyTabVisibility();
     }
 
     function renderMaintenanceStatus(status = state.maintenance) {
@@ -922,7 +1402,7 @@
                         return;
                     }
                     const script = document.createElement('script');
-                    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
+                    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
                     script.async = true;
                     script.defer = true;
                     script.dataset.adminGmaps = 'true';
@@ -964,7 +1444,7 @@
         const role = resolveResidentRole(resident);
         const isAdmin = role === 'admin';
         const canManagePins = role === 'admin' || role === 'pin_manager';
-        state.permissions = { isAdmin, canManagePins };
+        state.permissions = { isAdmin, canManagePins, role };
         applyAdminPermissions();
         if (!canManagePins) {
             showMessage('error', 'Halaman ini hanya untuk admin atau pin manager.');
@@ -1438,10 +1918,12 @@
 
     function setActiveTab(tabKey) {
         if (!els.tabButtons || !els.tabButtons.length) return;
-        const allowedTabs = state.permissions?.isAdmin
-            ? ['pins', 'users', 'metrics', 'features', 'seo']
-            : ['pins'];
-        const nextTab = allowedTabs.includes(tabKey) ? tabKey : 'pins';
+        const roleKey = getRoleKey();
+        let allowedTabs = getAllowedTabsForRole(roleKey);
+        if (!allowedTabs.length) {
+            allowedTabs = ['pins'];
+        }
+        const nextTab = allowedTabs.includes(tabKey) ? tabKey : allowedTabs[0];
         els.tabButtons.forEach((btn) => {
             const isActive = btn.dataset.tab === nextTab;
             btn.classList.toggle('admin-tab--active', isActive);
@@ -1449,6 +1931,9 @@
         });
         if (els.pinContent) {
             els.pinContent.classList.toggle('hidden', nextTab !== 'pins');
+        }
+        if (els.massContent) {
+            els.massContent.classList.toggle('hidden', nextTab !== 'mass');
         }
         if (els.usersContent) {
             els.usersContent.classList.toggle('hidden', nextTab !== 'users');
@@ -1461,6 +1946,17 @@
         }
         if (els.seoContent) {
             els.seoContent.classList.toggle('hidden', nextTab !== 'seo');
+        }
+        if (els.tabsContent) {
+            els.tabsContent.classList.toggle('hidden', nextTab !== 'tabs');
+        }
+        if (nextTab === 'mass') {
+            initMassMap();
+            refreshMassMapView();
+        }
+        if (nextTab === 'tabs') {
+            resetTabVisibilityDraft();
+            renderTabOrderList();
         }
         if (nextTab === 'metrics' && !state.metricsLoaded && state.permissions?.isAdmin) {
             refreshAnalytics();
@@ -1545,18 +2041,22 @@
         }
     }
 
-    function populateCategoryFilter() {
-        if (!els.filterCategory) {
-            return;
-        }
-        const current = state.filters.category || '';
-        const categories = Array.from(
+    function getAvailableCategories() {
+        return Array.from(
             new Set(
                 state.pins
                     .map((pin) => (pin.category || '').trim())
                     .filter(Boolean)
             )
         ).sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+    }
+
+    function populateCategoryFilter() {
+        if (!els.filterCategory) {
+            return;
+        }
+        const current = state.filters.category || '';
+        const categories = getAvailableCategories();
         els.filterCategory.innerHTML = '';
         const defaultOption = document.createElement('option');
         defaultOption.value = '';
@@ -1572,6 +2072,67 @@
             categories.find((category) => category.toLowerCase() === current.toLowerCase()) || '';
         els.filterCategory.value = matched;
         state.filters.category = matched;
+    }
+
+    function populateCategorySelect(selectedValue = '') {
+        if (!els.categoryInput) {
+            return;
+        }
+        const hasSelectedPin = Boolean(state.selectedPin);
+        const current = (selectedValue || (hasSelectedPin ? els.categoryInput.value : '') || '').trim();
+        const categories = getAvailableCategories();
+        let list = categories.slice();
+        if (current && !list.some((category) => category.toLowerCase() === current.toLowerCase())) {
+            list = list.concat(current).sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+        }
+
+        els.categoryInput.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Pilih kategori';
+        placeholder.disabled = true;
+        placeholder.selected = !current;
+        els.categoryInput.appendChild(placeholder);
+        list.forEach((category) => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            els.categoryInput.appendChild(option);
+        });
+        if (current) {
+            const matched = list.find((category) => category.toLowerCase() === current.toLowerCase()) || current;
+            els.categoryInput.value = matched;
+        }
+    }
+
+    function populateMassCategorySelect(selectedValue = '') {
+        if (!els.massCategorySelect) {
+            return;
+        }
+        const current = (selectedValue || els.massCategorySelect.value || '').trim();
+        const categories = getAvailableCategories();
+        let list = categories.slice();
+        if (current && !list.some((category) => category.toLowerCase() === current.toLowerCase())) {
+            list = list.concat(current).sort((a, b) => a.localeCompare(b, 'id', { sensitivity: 'base' }));
+        }
+
+        els.massCategorySelect.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Pilih kategori';
+        placeholder.disabled = true;
+        placeholder.selected = !current;
+        els.massCategorySelect.appendChild(placeholder);
+        list.forEach((category) => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            els.massCategorySelect.appendChild(option);
+        });
+        if (current) {
+            const matched = list.find((category) => category.toLowerCase() === current.toLowerCase()) || current;
+            els.massCategorySelect.value = matched;
+        }
     }
 
     function applyPinFilters() {
@@ -1663,6 +2224,7 @@
             const pins = await response.json().catch(() => []);
             state.pins = Array.isArray(pins) ? pins : [];
             populateCategoryFilter();
+            populateMassCategorySelect();
             applyPinFilters();
             await refreshPinCount();
             if (state.selectedPin) {
@@ -1678,6 +2240,7 @@
                 selectPin(getPinId(initialList[0]), { silentMessage: true });
             } else {
                 clearSelection();
+                populateCategorySelect();
             }
         } catch (error) {
             console.error('Gagal memuat pin', error);
@@ -1753,9 +2316,7 @@
         if (els.descriptionInput) {
             els.descriptionInput.value = pin.description || '';
         }
-        if (els.categoryInput) {
-            els.categoryInput.value = pin.category || '';
-        }
+        populateCategorySelect(pin.category || '');
         if (els.linkInput) {
             els.linkInput.value = pin.link || '';
         }
@@ -2054,6 +2615,623 @@
         } catch (error) {
             console.warn('Pencarian peta mini gagal', error);
             showMessage('error', error.message || 'Gagal mencari lokasi.');
+        }
+    }
+
+    async function initMassMap() {
+        if (!els.massMap || massMap) {
+            return;
+        }
+        try {
+            const gmaps = await ensureGoogleMaps();
+            const center = METRICS_DEFAULT_CENTER;
+            massMap = new gmaps.Map(els.massMap, {
+                center,
+                zoom: 5,
+                mapTypeControl: false,
+                fullscreenControl: false,
+                streetViewControl: false
+            });
+            massInfoWindow = new gmaps.InfoWindow();
+            if (gmaps.places?.PlacesService) {
+                massPlacesService = new gmaps.places.PlacesService(massMap);
+            }
+        } catch (error) {
+            console.warn('Peta hasil mass gagal dimuat', error);
+            showMassMessage('error', 'Peta hasil tidak dapat dimuat.');
+        }
+    }
+
+    function clearMassMarkers() {
+        massMarkers.forEach((marker) => {
+            marker.setMap(null);
+        });
+        massMarkers.clear();
+        massMarkerBounds = null;
+    }
+
+    function renderMassMapMarkers() {
+        if (!massMap || !window.google?.maps) {
+            return;
+        }
+        clearMassMarkers();
+        if (!state.mass.results.length) {
+            massMap.setCenter(METRICS_DEFAULT_CENTER);
+            massMap.setZoom(5);
+            return;
+        }
+        const gmaps = window.google.maps;
+        const bounds = new gmaps.LatLngBounds();
+        state.mass.results.forEach((place, index) => {
+            if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) {
+                return;
+            }
+            const position = { lat: place.lat, lng: place.lng };
+            const marker = new gmaps.Marker({
+                position,
+                map: massMap,
+                label: `${index + 1}`,
+                opacity: state.mass.selectedPlaceIds.has(place.id) ? 1 : 0.35
+            });
+            marker.addListener('click', () => {
+                focusMassMarker(place.id);
+            });
+            massMarkers.set(place.id, marker);
+            bounds.extend(position);
+        });
+        if (!bounds.isEmpty()) {
+            massMarkerBounds = bounds;
+            massMap.fitBounds(bounds);
+        }
+    }
+
+    function focusMassMarker(placeId) {
+        if (!massMap || !massInfoWindow) {
+            return;
+        }
+        const marker = massMarkers.get(placeId);
+        const place = state.mass.results.find((item) => item.id === placeId);
+        if (!marker || !place) {
+            return;
+        }
+        const wrapper = document.createElement('div');
+        const title = document.createElement('div');
+        title.style.fontWeight = '700';
+        title.textContent = place.name || 'Lokasi';
+        const meta = document.createElement('div');
+        meta.style.fontSize = '12px';
+        meta.style.color = '#1f2937';
+        meta.textContent = place.address || '';
+        wrapper.appendChild(title);
+        if (place.address) {
+            wrapper.appendChild(meta);
+        }
+        massInfoWindow.setContent(wrapper);
+        massInfoWindow.open({ map: massMap, anchor: marker });
+        const pos = marker.getPosition();
+        if (pos) {
+            massMap.panTo(pos);
+        }
+    }
+
+    function syncMassMarkerSelection(placeId, selected) {
+        const marker = massMarkers.get(placeId);
+        if (!marker) {
+            return;
+        }
+        marker.setOpacity(selected ? 1 : 0.35);
+    }
+
+    function syncAllMassMarkerSelection() {
+        massMarkers.forEach((marker, id) => {
+            marker.setOpacity(state.mass.selectedPlaceIds.has(id) ? 1 : 0.35);
+        });
+    }
+
+    function refreshMassMapView() {
+        if (!massMap || !window.google?.maps?.event) {
+            return;
+        }
+        window.google.maps.event.trigger(massMap, 'resize');
+        if (massMarkerBounds && !massMarkerBounds.isEmpty()) {
+            massMap.fitBounds(massMarkerBounds);
+        }
+    }
+
+    function setMassSearchState(isSearching) {
+        state.mass.isSearching = isSearching;
+        if (els.massSearchBtn) {
+            els.massSearchBtn.disabled = isSearching;
+            els.massSearchBtn.textContent = isSearching ? 'Searching...' : 'Search';
+        }
+        if (els.massSearchInput) {
+            els.massSearchInput.disabled = isSearching;
+        }
+    }
+
+    function setMassCreateState(isCreating) {
+        state.mass.isCreating = isCreating;
+        if (els.massCreateBtn) {
+            els.massCreateBtn.disabled = isCreating;
+            els.massCreateBtn.textContent = isCreating ? 'Adding...' : 'Add Selected Pins';
+        }
+    }
+
+    function updateMassCounts() {
+        const resultCount = state.mass.results.length;
+        const selectedCount = state.mass.selectedPlaceIds.size;
+        if (els.massResultsCount) {
+            els.massResultsCount.textContent = `${resultCount} results`;
+        }
+        if (els.massSelectedCount) {
+            els.massSelectedCount.textContent = `${selectedCount} selected`;
+        }
+    }
+
+    function renderMassResults() {
+        if (!els.massResultsList) {
+            return;
+        }
+        els.massResultsList.innerHTML = '';
+        if (!state.mass.results.length) {
+            const empty = document.createElement('div');
+            empty.className = 'pin-list-empty';
+            empty.textContent = 'No results yet.';
+            els.massResultsList.appendChild(empty);
+            updateMassCounts();
+            return;
+        }
+        state.mass.results.forEach((place) => {
+            const item = document.createElement('li');
+            item.className = 'mass-result-item';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = state.mass.selectedPlaceIds.has(place.id);
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    state.mass.selectedPlaceIds.add(place.id);
+                } else {
+                    state.mass.selectedPlaceIds.delete(place.id);
+                }
+                syncMassMarkerSelection(place.id, checkbox.checked);
+                updateMassCounts();
+            });
+            const content = document.createElement('div');
+            content.addEventListener('click', () => {
+                focusMassMarker(place.id);
+            });
+            const name = document.createElement('div');
+            name.className = 'mass-result-name';
+            name.textContent = place.name || 'Lokasi';
+            const meta = document.createElement('div');
+            meta.className = 'mass-result-meta';
+            meta.textContent = place.address || 'Alamat tidak tersedia';
+            content.appendChild(name);
+            content.appendChild(meta);
+            item.appendChild(checkbox);
+            item.appendChild(content);
+            els.massResultsList.appendChild(item);
+        });
+        syncAllMassMarkerSelection();
+        updateMassCounts();
+    }
+
+    function parseMassSearchQuery(rawQuery) {
+        const trimmed = (rawQuery || '').trim();
+        if (!trimmed) {
+            return { term: '', location: '' };
+        }
+        const match = /\s+di\s+(.+)$/i.exec(trimmed);
+        if (match) {
+            const location = match[1].trim();
+            const term = trimmed.slice(0, match.index).trim();
+            return { term: term || location, location };
+        }
+        return { term: trimmed, location: '' };
+    }
+
+    function normalizePlaceResult(place) {
+        if (!place || !place.place_id) {
+            return null;
+        }
+        const location = place.geometry?.location;
+        if (!location || typeof location.lat !== 'function' || typeof location.lng !== 'function') {
+            return null;
+        }
+        return {
+            id: place.place_id,
+            name: place.name || '',
+            address: place.formatted_address || place.vicinity || '',
+            lat: location.lat(),
+            lng: location.lng()
+        };
+    }
+
+    async function ensureMassPlacesService() {
+        await initMassMap();
+        const gmaps = await ensureGoogleMaps();
+        if (!gmaps?.places?.PlacesService) {
+            throw new Error('Google Places API belum tersedia.');
+        }
+        if (!massPlacesService) {
+            massPlacesService = new gmaps.places.PlacesService(massMap || document.createElement('div'));
+        }
+        return massPlacesService;
+    }
+
+    function runPlacesTextSearch(service, request) {
+        return new Promise((resolve, reject) => {
+            const collected = [];
+            const handlePage = (results, status, pagination) => {
+                const okStatus = window.google?.maps?.places?.PlacesServiceStatus?.OK || 'OK';
+                const zeroStatus = window.google?.maps?.places?.PlacesServiceStatus?.ZERO_RESULTS || 'ZERO_RESULTS';
+                if (status !== okStatus && status !== zeroStatus) {
+                    reject(new Error('Pencarian tempat gagal.'));
+                    return;
+                }
+                if (Array.isArray(results)) {
+                    collected.push(...results);
+                }
+                if (pagination && pagination.hasNextPage) {
+                    setTimeout(() => {
+                        pagination.nextPage();
+                    }, 2000);
+                } else {
+                    resolve(collected);
+                }
+            };
+            service.textSearch(request, handlePage);
+        });
+    }
+
+    async function geocodeMassLocation(location) {
+        if (!location) {
+            return null;
+        }
+        const gmaps = await ensureGoogleMaps();
+        if (!massGeocoder) {
+            massGeocoder = new gmaps.Geocoder();
+        }
+        const result = await massGeocoder.geocode({ address: location });
+        const results = result?.results || [];
+        if (!results.length) {
+            return null;
+        }
+        const first = results[0];
+        return {
+            location: first.geometry?.location || null,
+            bounds: first.geometry?.viewport || null,
+            formatted: first.formatted_address || location
+        };
+    }
+
+    async function handleMassSearch() {
+        const rawQuery = els.massSearchInput?.value.trim() || '';
+        if (!rawQuery) {
+            showMassMessage('error', 'Masukkan kata kunci pencarian.');
+            return;
+        }
+        if (state.mass.isSearching) {
+            return;
+        }
+        const { term, location } = parseMassSearchQuery(rawQuery);
+        if (!term) {
+            showMassMessage('error', 'Masukkan nama tempat atau brand yang dicari.');
+            return;
+        }
+        setMassSearchState(true);
+        showMassMessage(null, '');
+        if (els.massStatus) {
+            els.massStatus.textContent = '';
+        }
+        try {
+            const service = await ensureMassPlacesService();
+            let requestQuery = rawQuery;
+            const request = {};
+            let scopeLabel = 'di Indonesia';
+            if (location) {
+                const area = await geocodeMassLocation(location);
+                if (!area || !area.location) {
+                    throw new Error('Area lokasi tidak ditemukan. Coba perjelas nama kota/provinsi.');
+                }
+                requestQuery = `${term} ${location}`.trim();
+                if (area.bounds) {
+                    request.bounds = area.bounds;
+                }
+                scopeLabel = `di ${area.formatted || location}`;
+            } else {
+                if (!/indonesia/i.test(rawQuery)) {
+                    requestQuery = `${rawQuery} Indonesia`;
+                }
+                request.region = 'id';
+            }
+            request.query = requestQuery;
+            const results = await runPlacesTextSearch(service, request);
+            const normalized = [];
+            const seen = new Set();
+            results.forEach((place) => {
+                const normalizedPlace = normalizePlaceResult(place);
+                if (!normalizedPlace) {
+                    return;
+                }
+                if (seen.has(normalizedPlace.id)) {
+                    return;
+                }
+                seen.add(normalizedPlace.id);
+                normalized.push(normalizedPlace);
+            });
+            state.mass.results = normalized;
+            state.mass.selectedPlaceIds = new Set(normalized.map((item) => item.id));
+            renderMassMapMarkers();
+            refreshMassMapView();
+            renderMassResults();
+            if (!normalized.length) {
+                showMassMessage('error', `Tidak ada hasil ${scopeLabel}. Coba kata kunci lain atau ganti lokasi.`);
+            } else {
+                showMassMessage('success', `Menemukan ${normalized.length} lokasi ${scopeLabel}. Silakan pilih yang relevan.`);
+            }
+        } catch (error) {
+            console.warn('Gagal mencari lokasi massal', error);
+            showMassMessage('error', error.message || 'Gagal mencari lokasi.');
+        } finally {
+            setMassSearchState(false);
+        }
+    }
+
+    function handleMassSelectAll() {
+        state.mass.selectedPlaceIds = new Set(state.mass.results.map((item) => item.id));
+        renderMassResults();
+    }
+
+    function handleMassClearSelection() {
+        state.mass.selectedPlaceIds.clear();
+        renderMassResults();
+    }
+
+    function renderMassImages() {
+        if (!els.massImages) {
+            return;
+        }
+        els.massImages.innerHTML = '';
+        if (!state.mass.addedImages.length) {
+            updateMassRemainingSlots();
+            return;
+        }
+        state.mass.addedImages.forEach((image, index) => {
+            const card = document.createElement('div');
+            card.className = 'image-card';
+            const img = document.createElement('img');
+            img.src = image.dataUrl;
+            img.alt = image.originalName || 'Foto';
+            card.appendChild(img);
+
+            const actions = document.createElement('div');
+            actions.className = 'image-actions';
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.textContent = 'Hapus';
+            removeBtn.addEventListener('click', () => {
+                removeMassImage(index);
+            });
+            actions.appendChild(removeBtn);
+            card.appendChild(actions);
+
+            const meta = document.createElement('div');
+            meta.className = 'image-meta';
+            meta.textContent = image.originalName || 'Foto';
+            card.appendChild(meta);
+
+            els.massImages.appendChild(card);
+        });
+        updateMassRemainingSlots();
+    }
+
+    function updateMassRemainingSlots() {
+        if (!els.massPhotoRemaining) {
+            return;
+        }
+        const remaining = Math.max(0, MAX_PIN_PHOTO_COUNT - state.mass.addedImages.length);
+        els.massPhotoRemaining.textContent = `${remaining} photos remaining`;
+    }
+
+    async function handleMassImageInput(event) {
+        const files = Array.from(event?.target?.files || []);
+        if (els.massImageInput) {
+            els.massImageInput.value = '';
+        }
+        let remainingSlots = Math.max(0, MAX_PIN_PHOTO_COUNT - state.mass.addedImages.length);
+        if (!remainingSlots) {
+            showMassMessage('error', 'Batas 3 foto per pin. Hapus foto yang tidak dipakai terlebih dulu.');
+            return;
+        }
+        const errors = [];
+        for (const file of files) {
+            if (remainingSlots <= 0) {
+                break;
+            }
+            if (!file.type || !file.type.toLowerCase().startsWith('image/')) {
+                errors.push(`"${file.name}" bukan gambar.`);
+                continue;
+            }
+            if (file.size > MAX_PIN_PHOTO_BYTES) {
+                errors.push(`"${file.name}" lebih dari 4MB.`);
+                continue;
+            }
+            try {
+                const dataUrl = await readFileAsDataUrl(file);
+                state.mass.addedImages.push({
+                    dataUrl,
+                    contentType: file.type || 'image/jpeg',
+                    size: file.size || 0,
+                    originalName: file.name || ''
+                });
+                remainingSlots -= 1;
+            } catch (error) {
+                errors.push(`"${file.name}" tidak bisa dibaca.`);
+            }
+        }
+        if (errors.length) {
+            showMassMessage('error', errors.join(' '));
+        } else {
+            showMassMessage(null, '');
+        }
+        renderMassImages();
+    }
+
+    function removeMassImage(index) {
+        if (index < 0 || index >= state.mass.addedImages.length) {
+            return;
+        }
+        state.mass.addedImages.splice(index, 1);
+        renderMassImages();
+    }
+
+    function buildMassImagesPayload() {
+        return state.mass.addedImages
+            .slice(0, MAX_PIN_PHOTO_COUNT)
+            .map((image) => ({
+                dataUrl: image.dataUrl,
+                contentType: image.contentType,
+                size: image.size,
+                originalName: image.originalName
+            }));
+    }
+
+    function buildLifetimePayload(lifetimeType, startRaw, endRaw) {
+        const lifetimeStart = parseDateInput(startRaw);
+        const lifetimeEnd = parseDateInput(endRaw);
+        if (lifetimeType) {
+            if (lifetimeType === 'date') {
+                const lifetime = { type: 'date' };
+                if (lifetimeStart && lifetimeEnd && lifetimeStart !== lifetimeEnd) {
+                    lifetime.start = lifetimeStart;
+                    lifetime.end = lifetimeEnd;
+                } else if (lifetimeStart) {
+                    lifetime.value = lifetimeStart;
+                } else if (lifetimeEnd) {
+                    lifetime.value = lifetimeEnd;
+                }
+                return lifetime;
+            }
+            return { type: lifetimeType };
+        }
+        if (lifetimeStart || lifetimeEnd) {
+            const lifetime = { type: 'date' };
+            if (lifetimeStart && lifetimeEnd && lifetimeStart !== lifetimeEnd) {
+                lifetime.start = lifetimeStart;
+                lifetime.end = lifetimeEnd;
+            } else if (lifetimeStart) {
+                lifetime.value = lifetimeStart;
+            } else if (lifetimeEnd) {
+                lifetime.value = lifetimeEnd;
+            }
+            return lifetime;
+        }
+        return null;
+    }
+
+    async function handleMassSubmit(event) {
+        event.preventDefault();
+        if (state.mass.isCreating) {
+            return;
+        }
+        const selectedPlaces = state.mass.results.filter((place) => state.mass.selectedPlaceIds.has(place.id));
+        if (!selectedPlaces.length) {
+            showMassMessage('error', 'Pilih minimal satu lokasi dari hasil pencarian.');
+            return;
+        }
+        const title = els.massTitleInput?.value.trim() || '';
+        const description = els.massDescriptionInput?.value.trim() || '';
+        const category = els.massCategorySelect?.value.trim() || '';
+        const link = els.massLinkInput?.value.trim() || '';
+        if (!title || !description || !category) {
+            showMassMessage('error', 'Judul, deskripsi, dan kategori wajib diisi.');
+            return;
+        }
+        const lifetimeType = els.massLifetimeSelect?.value || '';
+        const lifetime = buildLifetimePayload(lifetimeType, els.massStartInput?.value || '', els.massEndInput?.value || '');
+        const imagesPayload = buildMassImagesPayload();
+
+        const confirmed = window.confirm(`Tambahkan ${selectedPlaces.length} pin sekaligus?`);
+        if (!confirmed) {
+            return;
+        }
+
+        const payloadBase = {
+            title,
+            description,
+            category
+        };
+        if (link) {
+            payloadBase.link = link;
+        }
+        if (lifetime) {
+            payloadBase.lifetime = lifetime;
+        }
+        if (imagesPayload.length) {
+            payloadBase.images = imagesPayload;
+        }
+
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+
+        setMassCreateState(true);
+        showMassMessage(null, '');
+        let successCount = 0;
+        const failures = [];
+        try {
+            for (let index = 0; index < selectedPlaces.length; index += 1) {
+                const place = selectedPlaces[index];
+                if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) {
+                    failures.push({ place, reason: 'Koordinat tidak valid.' });
+                    continue;
+                }
+                if (els.massStatus) {
+                    els.massStatus.textContent = `Menambahkan ${index + 1} dari ${selectedPlaces.length}...`;
+                }
+                try {
+                    const response = await fetch('/api/pins', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            ...payloadBase,
+                            lat: place.lat,
+                            lng: place.lng
+                        })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data?.message || 'Gagal menambahkan pin.');
+                    }
+                    successCount += 1;
+                } catch (error) {
+                    failures.push({ place, reason: error.message || 'Gagal menambahkan pin.' });
+                }
+            }
+        } finally {
+            setMassCreateState(false);
+        }
+
+        if (els.massStatus) {
+            els.massStatus.textContent = '';
+        }
+
+        if (successCount) {
+            await loadPins();
+        }
+
+        if (failures.length) {
+            showMassMessage(
+                'error',
+                `Berhasil menambahkan ${successCount} pin, ${failures.length} gagal. Periksa hasil dan coba lagi.`
+            );
+        } else {
+            showMassMessage('success', `Berhasil menambahkan ${successCount} pin.`);
         }
     }
 
@@ -2389,6 +3567,7 @@
             state.selectedPin = null;
             clearSelection();
             populateCategoryFilter();
+            populateCategorySelect();
             applyPinFilters();
             await refreshPinCount();
             showMessage('success', 'Pin berhasil dihapus.');
@@ -2475,6 +3654,29 @@
                 }
             });
         }
+        if (els.massSearchBtn) {
+            els.massSearchBtn.addEventListener('click', handleMassSearch);
+        }
+        if (els.massSearchInput) {
+            els.massSearchInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleMassSearch();
+                }
+            });
+        }
+        if (els.massSelectAllBtn) {
+            els.massSelectAllBtn.addEventListener('click', handleMassSelectAll);
+        }
+        if (els.massClearBtn) {
+            els.massClearBtn.addEventListener('click', handleMassClearSelection);
+        }
+        if (els.massImageInput) {
+            els.massImageInput.addEventListener('change', handleMassImageInput);
+        }
+        if (els.massForm) {
+            els.massForm.addEventListener('submit', handleMassSubmit);
+        }
         if (els.usersRefreshBtn) {
             els.usersRefreshBtn.addEventListener('click', () => {
                 loadResidents({ force: true });
@@ -2509,6 +3711,9 @@
         if (els.featureSaveBtn) {
             els.featureSaveBtn.addEventListener('click', saveFeatureFlags);
         }
+        if (els.tabsSaveBtn) {
+            els.tabsSaveBtn.addEventListener('click', saveTabVisibilityDraft);
+        }
         if (els.seoSaveBtn) {
             els.seoSaveBtn.addEventListener('click', saveSeoSettings);
         }
@@ -2541,6 +3746,11 @@
         setFormDisabled(true);
         bindEvents();
         updateSeoPreview();
+        renderMassResults();
+        renderMassImages();
+        updateMassCounts();
+        populateMassCategorySelect();
+        updateTabsSaveState();
         if (els.metricsYear) {
             els.metricsYear.value = state.metricsFilter.year;
         }
@@ -2565,6 +3775,11 @@
         } catch (error) {
             showMessage('error', error.message || 'Gagal memuat sesi admin.');
             return;
+        }
+        await fetchTabVisibilityRemote();
+        const storedTabOrder = loadTabOrder();
+        if (storedTabOrder.length) {
+            applyTabOrder(storedTabOrder);
         }
         if (state.permissions?.isAdmin) {
             await loadMaintenanceStatus();

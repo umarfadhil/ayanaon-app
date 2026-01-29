@@ -646,6 +646,46 @@ async function writeFeatureFlags(flags = {}) {
     return normalized;
 }
 
+function normalizeTabVisibility(payload = {}) {
+    const visibility = {};
+    Object.entries(payload || {}).forEach(([tabId, roles]) => {
+        if (!roles || typeof roles !== 'object') {
+            return;
+        }
+        visibility[tabId] = {
+            admin: Boolean(roles.admin),
+            pin_manager: Boolean(roles.pin_manager),
+            resident: Boolean(roles.resident)
+        };
+    });
+    return visibility;
+}
+
+async function readTabVisibility() {
+    try {
+        const settings = await getSettingsCollection();
+        const doc = await settings.findOne({ key: 'adminTabs' });
+        const raw = doc?.visibility || doc || {};
+        const { key, updatedAt, ...rest } = raw;
+        return normalizeTabVisibility(rest);
+    } catch (error) {
+        console.error('Failed to read tab visibility', error);
+        return {};
+    }
+}
+
+async function writeTabVisibility(payload = {}) {
+    const settings = await getSettingsCollection();
+    const visibility = normalizeTabVisibility(payload);
+    const stored = {
+        key: 'adminTabs',
+        visibility,
+        updatedAt: new Date()
+    };
+    await settings.updateOne({ key: 'adminTabs' }, { $set: stored }, { upsert: true });
+    return visibility;
+}
+
 async function readMaintenanceStatus() {
     try {
         const settings = await getSettingsCollection();
@@ -4010,6 +4050,27 @@ router.put('/features', async (req, res) => {
     } catch (error) {
         console.error('Failed to update feature flags', error);
         res.status(500).json({ message: 'Tidak dapat memperbarui fitur.' });
+    }
+});
+
+router.get('/tabs-visibility', async (req, res) => {
+    const visibility = await readTabVisibility();
+    res.json({ visibility });
+});
+
+router.put('/tabs-visibility', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengubah tab.' });
+    }
+    try {
+        const payload = req.body?.visibility ?? req.body ?? {};
+        const visibility = await writeTabVisibility(payload);
+        res.json({ visibility });
+    } catch (error) {
+        console.error('Failed to update tab visibility', error);
+        res.status(500).json({ message: 'Tidak dapat memperbarui pengaturan tab.' });
     }
 });
 
