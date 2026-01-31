@@ -30,6 +30,7 @@
             <button class="admin-tab" data-tab="seo" role="tab" aria-selected="false" data-admin-only="true">Manage SEO</button>
             <button class="admin-tab" data-tab="tabs" role="tab" aria-selected="false" data-admin-only="true">Manage Tabs</button>
             <button class="admin-tab" data-tab="categories" role="tab" aria-selected="false" data-admin-only="true">Manage Categories</button>
+            <button class="admin-tab" data-tab="brands" role="tab" aria-selected="false" data-admin-only="true">Manage Brands</button>
         </div>
 
         <section id="admin-pin-content" class="admin-tab-content">
@@ -263,16 +264,43 @@
                 <div id="mass-message" class="admin-message" role="status" aria-live="polite"></div>
                 <div class="admin-grid mass-grid">
                     <aside class="mass-search-panel">
-                        <div class="panel-header">
-                            <div>
-                                <h2>Search Places</h2>
-                                <p class="panel-sub">Cari brand atau alamat. Tambahkan "di Kota/Provinsi" untuk batasi area.</p>
+                        <!-- Source sub-tabs -->
+                        <div class="mass-source-tabs">
+                            <button type="button" class="mass-source-tab mass-source-tab--active" data-mass-source="search">Search Places</button>
+                            <button type="button" class="mass-source-tab" data-mass-source="brands">From Brands</button>
+                        </div>
+
+                        <!-- Source: Search Places -->
+                        <div id="mass-source-search" class="mass-source-section">
+                            <div class="panel-header">
+                                <div>
+                                    <h2>Search Places</h2>
+                                    <p class="panel-sub">Cari brand atau alamat. Tambahkan "di Kota/Provinsi" untuk batasi area.</p>
+                                </div>
+                            </div>
+                            <div class="mass-search-row">
+                                <input type="search" id="mass-search-input" placeholder="Kopi Nako di Bogor" aria-label="Search places">
+                                <button type="button" class="search-btn" id="mass-search-btn">Search</button>
                             </div>
                         </div>
-                        <div class="mass-search-row">
-                            <input type="search" id="mass-search-input" placeholder="Kopi Nako di Bogor" aria-label="Search places">
-                            <button type="button" class="search-btn" id="mass-search-btn">Search</button>
+
+                        <!-- Source: From Brands -->
+                        <div id="mass-source-brands" class="mass-source-section hidden">
+                            <div class="panel-header">
+                                <div>
+                                    <h2>From Brands</h2>
+                                    <p class="panel-sub">Pilih brand yang tersimpan untuk mengambil lokasi-lokasinya.</p>
+                                </div>
+                            </div>
+                            <div class="mass-search-row">
+                                <select id="mass-brand-select" aria-label="Select brand">
+                                    <option value="" disabled selected>Pilih brand...</option>
+                                </select>
+                                <button type="button" class="ghost-btn chip-btn" id="mass-brand-refresh-btn">Refresh</button>
+                            </div>
                         </div>
+
+                        <!-- Shared: counts, actions, map, results list -->
                         <div class="mass-search-meta">
                             <div class="mass-counts">
                                 <span id="mass-results-count">0 results</span>
@@ -669,6 +697,87 @@
                 </div>
             </section>
         </div>
+        <div id="admin-brands-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-brands">
+                <div class="panel-header">
+                    <div>
+                        <h2>Manage Brands</h2>
+                        <p class="panel-sub">Kelola brand dan lokasi-lokasinya.</p>
+                    </div>
+                </div>
+                <div id="brands-message" class="admin-message" role="status" aria-live="polite"></div>
+
+                <!-- Sub-tab toggles -->
+                <div class="brands-subtabs">
+                    <button type="button" class="brands-subtab brands-subtab--active" data-brands-subtab="search">Search Places</button>
+                    <button type="button" class="brands-subtab" data-brands-subtab="details">Brand Details</button>
+                </div>
+
+                <!-- Sub-tab 1: Search & Add -->
+                <div id="brands-search-section" class="brands-section">
+                    <div class="admin-grid brands-grid">
+                        <aside class="brands-search-panel">
+                            <div class="panel-header">
+                                <div>
+                                    <h2>Search Places</h2>
+                                    <p class="panel-sub">Cari lokasi brand. Tambahkan "di Kota/Provinsi" untuk batasi area.</p>
+                                </div>
+                            </div>
+                            <div class="mass-search-row">
+                                <input type="search" id="brands-search-input" placeholder='KFC di Jakarta' aria-label="Search places for brand">
+                                <button type="button" class="search-btn" id="brands-search-btn">Search</button>
+                            </div>
+                            <div class="mass-search-meta">
+                                <div class="mass-counts">
+                                    <span id="brands-results-count">0 results</span>
+                                    <span id="brands-selected-count">0 selected</span>
+                                </div>
+                                <div class="mass-actions">
+                                    <button type="button" class="ghost-btn chip-btn" id="brands-select-all-btn">Select all</button>
+                                    <button type="button" class="ghost-btn chip-btn" id="brands-clear-btn">Clear selection</button>
+                                </div>
+                            </div>
+                            <div id="brands-results-map" class="mini-map mass-map" aria-label="Map for brand search results"></div>
+                            <ul id="brands-search-results" class="mass-results" aria-label="Brand search results"></ul>
+                        </aside>
+                        <section class="brands-form-panel">
+                            <div class="panel-header">
+                                <div>
+                                    <h2>Brand Assignment</h2>
+                                    <p class="panel-sub">Tetapkan nama brand untuk lokasi terpilih.</p>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <label for="brands-name-input">Brand Name</label>
+                                <div class="brands-name-autocomplete">
+                                    <input type="text" id="brands-name-input" placeholder="Search or add new brand..." autocomplete="off" required>
+                                    <ul id="brands-name-suggestions" class="brands-name-suggestions hidden"></ul>
+                                </div>
+                            </div>
+                            <div class="brands-selected-list-header">
+                                <span class="brands-selected-label">Selected Locations</span>
+                                <span id="brands-selected-summary" class="brands-selected-summary">0 of 0 selected</span>
+                            </div>
+                            <ul id="brands-selected-list" class="brands-selected-list" aria-label="Selected locations for brand"></ul>
+                            <div class="form-actions">
+                                <button type="button" class="primary-btn" id="brands-add-btn">Add to Brand</button>
+                            </div>
+                            <div class="brands-add-status" id="brands-add-status"></div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- Sub-tab 2: Brand Details -->
+                <div id="brands-details-section" class="brands-section hidden">
+                    <div class="brands-details-header">
+                        <button type="button" class="ghost-btn chip-btn" id="brands-refresh-btn">Refresh</button>
+                    </div>
+                    <div id="brands-list" class="brands-accordion"></div>
+                    <div id="brands-empty" class="pin-list-empty hidden">No brands saved yet.</div>
+                </div>
+            </section>
+        </div>
+
     </main>
     <script src="resident-session.js"></script>
     <script src="admin.js"></script>

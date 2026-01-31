@@ -96,6 +96,10 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.11
+- **Mass Promotions from Brands:** The Mass Promotions tab now supports selecting locations from stored brands in addition to Google Places search, with sub-tab switching between "Search Places" and "From Brands" for faster bulk pin creation.
+- **Manage Brands:** Admins can search Google Places to build a brand directory, assign locations with auto-detected province/city, view brands organized by region in an accordion layout, and rename, delete, or remove individual locations.
+
 ### What's New in v2.4.10
 - **Manage Categories:** Admins can add, rename, reorder, and remove pin categories with emoji previews, plus role-based availability (Admin/Pin Manager/Warga).
 - **Category Sync Everywhere:** Category updates now sync to the main page (search + add pin) and the `/kategori` landing pages automatically.

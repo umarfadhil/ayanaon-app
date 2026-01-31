@@ -62,6 +62,7 @@ async function ensureIndexes(database) {
         await database.collection('analytics_events').createIndex({ pinId: 1 });
         await database.collection('analytics_events').createIndex({ referrer: 1 });
         await database.collection('analytics_events').createIndex({ lat: 1, lng: 1 });
+        await database.collection('brands').createIndex({ name: 1 });
         indexesEnsured = true;
     } catch (error) {
         console.error('Failed to ensure indexes', error);
@@ -415,6 +416,55 @@ async function reverseGeocodeCity(lat, lng) {
     } catch (error) {
         console.error('Reverse geocode failed', error);
         return null;
+    }
+}
+
+const geocodeProvinceCityCache = new Map();
+
+async function reverseGeocodeProvinceCity(lat, lng) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const key = `${lat},${lng}`;
+    if (geocodeProvinceCityCache.has(key)) {
+        return geocodeProvinceCityCache.get(key);
+    }
+    const useGoogle = Boolean(GOOGLE_MAPS_API_KEY);
+    try {
+        if (useGoogle) {
+            const response = await axios.get(
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+            );
+            const results = response.data?.results || [];
+            if (results.length) {
+                let province = '';
+                let city = '';
+                const components = results[0].address_components || [];
+                components.forEach((component) => {
+                    if (component.types.includes('administrative_area_level_1')) {
+                        province = province || component.long_name || '';
+                    }
+                    if (component.types.includes('locality') || component.types.includes('administrative_area_level_2')) {
+                        city = city || component.long_name || '';
+                    }
+                });
+                const payload = { province, city };
+                geocodeProvinceCityCache.set(key, payload);
+                return payload;
+            }
+        }
+        // Fallback: free OpenStreetMap Nominatim
+        const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+            params: { format: 'json', lat, lon: lng, zoom: 10, addressdetails: 1 },
+            headers: { 'User-Agent': 'ayanaon-analytics/1.0' }
+        });
+        const addr = response.data?.address || {};
+        const province = addr.state || '';
+        const city = addr.city || addr.town || addr.village || addr.county || '';
+        const payload = { province, city };
+        geocodeProvinceCityCache.set(key, payload);
+        return payload;
+    } catch (error) {
+        console.error('Reverse geocode province/city failed', error);
+        return { province: '', city: '' };
     }
 }
 
@@ -5221,6 +5271,247 @@ router.post('/pins/:id/downvote', async (req, res) => {
 
     const result = await db.collection('pins').updateOne({ _id: new ObjectId(id) }, { $inc: { downvotes: 1 }, $push: { downvoterIps: ip } });
     res.json(result);
+});
+
+// ── Brand Management Endpoints ───────────────────
+
+router.get('/admin/brands', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola brand.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const brands = await db.collection('brands').find({}).sort({ name: 1 }).toArray();
+        const payload = brands.map((b) => ({
+            id: b._id.toString(),
+            name: b.name,
+            locations: b.locations || [],
+            createdAt: b.createdAt,
+            updatedAt: b.updatedAt
+        }));
+        res.json({ brands: payload });
+    } catch (error) {
+        console.error('Failed to fetch brands', error);
+        res.status(500).json({ message: 'Tidak dapat memuat daftar brand.' });
+    }
+});
+
+router.post('/admin/brands', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola brand.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const { name, locations } = req.body || {};
+        const brandName = typeof name === 'string' ? name.trim() : '';
+        if (!brandName) {
+            return res.status(400).json({ message: 'Nama brand wajib diisi.' });
+        }
+        if (!Array.isArray(locations) || !locations.length) {
+            return res.status(400).json({ message: 'Pilih setidaknya satu lokasi.' });
+        }
+        // Find or create the brand (case-insensitive match)
+        let brand = await db.collection('brands').findOne({
+            name: { $regex: new RegExp('^' + brandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
+        });
+        const now = new Date();
+        if (!brand) {
+            const insertResult = await db.collection('brands').insertOne({
+                name: brandName,
+                locations: [],
+                createdAt: now,
+                updatedAt: now
+            });
+            brand = await db.collection('brands').findOne({ _id: insertResult.insertedId });
+        }
+        const existingLocations = brand.locations || [];
+        const DUPLICATE_THRESHOLD = 0.0005; // ~50 meters
+        const added = [];
+        const skipped = [];
+
+        // First pass: filter out invalid/duplicate locations
+        const toProcess = [];
+        for (const loc of locations) {
+            const placeId = loc.placeId || loc.id || '';
+            const lat = Number(loc.lat);
+            const lng = Number(loc.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                skipped.push(loc.name || 'Unknown');
+                continue;
+            }
+            const isDuplicate = existingLocations.some((existing) => {
+                if (existing.placeId && existing.placeId === placeId) return true;
+                const dLat = Math.abs(existing.lat - lat);
+                const dLng = Math.abs(existing.lng - lng);
+                if (existing.name === (loc.name || '') && dLat < DUPLICATE_THRESHOLD && dLng < DUPLICATE_THRESHOLD) return true;
+                return false;
+            });
+            if (isDuplicate) {
+                skipped.push(loc.name || placeId);
+                continue;
+            }
+            toProcess.push({ loc, placeId, lat, lng });
+        }
+
+        // Second pass: resolve province/city in parallel for locations that need geocoding
+        const geoPromises = toProcess.map(async ({ loc, placeId, lat, lng }) => {
+            const clientProvince = typeof loc.province === 'string' ? loc.province.trim() : '';
+            const clientCity = typeof loc.city === 'string' ? loc.city.trim() : '';
+            let province = clientProvince;
+            let city = clientCity;
+            if (!province || !city) {
+                try {
+                    const geo = await reverseGeocodeProvinceCity(lat, lng);
+                    if (!province) province = geo?.province || '';
+                    if (!city) city = geo?.city || '';
+                } catch (_) {
+                    // Geocode failed, leave empty
+                }
+            }
+            return {
+                placeId,
+                name: loc.name || '',
+                address: loc.address || '',
+                lat,
+                lng,
+                province,
+                city,
+                addedAt: now
+            };
+        });
+
+        const resolvedLocations = await Promise.all(geoPromises);
+        for (const newLoc of resolvedLocations) {
+            existingLocations.push(newLoc);
+            added.push(newLoc);
+        }
+        await db.collection('brands').updateOne(
+            { _id: brand._id },
+            { $set: { locations: existingLocations, updatedAt: now } }
+        );
+        const updated = await db.collection('brands').findOne({ _id: brand._id });
+        res.json({
+            brand: {
+                id: updated._id.toString(),
+                name: updated.name,
+                locations: updated.locations,
+                createdAt: updated.createdAt,
+                updatedAt: updated.updatedAt
+            },
+            added: added.length,
+            skipped: skipped.length,
+            skippedNames: skipped
+        });
+    } catch (error) {
+        console.error('Failed to create/update brand', error);
+        res.status(500).json({ message: 'Gagal menyimpan brand.' });
+    }
+});
+
+router.put('/admin/brands/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola brand.' });
+    }
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: 'Brand id tidak valid.' });
+    }
+    const newName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!newName) {
+        return res.status(400).json({ message: 'Nama brand wajib diisi.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const result = await db.collection('brands').findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { $set: { name: newName, updatedAt: new Date() } },
+            { returnDocument: 'after' }
+        );
+        const brand = result.value || result;
+        if (!brand) {
+            return res.status(404).json({ message: 'Brand tidak ditemukan.' });
+        }
+        res.json({
+            brand: {
+                id: brand._id.toString(),
+                name: brand.name,
+                locations: brand.locations || [],
+                createdAt: brand.createdAt,
+                updatedAt: brand.updatedAt
+            }
+        });
+    } catch (error) {
+        console.error('Failed to rename brand', error);
+        res.status(500).json({ message: 'Gagal mengubah nama brand.' });
+    }
+});
+
+router.delete('/admin/brands/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola brand.' });
+    }
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: 'Brand id tidak valid.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const result = await db.collection('brands').deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Brand tidak ditemukan.' });
+        }
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Failed to delete brand', error);
+        res.status(500).json({ message: 'Gagal menghapus brand.' });
+    }
+});
+
+router.delete('/admin/brands/:id/locations/:placeId', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola brand.' });
+    }
+    const { id, placeId } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: 'Brand id tidak valid.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const result = await db.collection('brands').findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            {
+                $pull: { locations: { placeId: placeId } },
+                $set: { updatedAt: new Date() }
+            },
+            { returnDocument: 'after' }
+        );
+        const brand = result.value || result;
+        if (!brand) {
+            return res.status(404).json({ message: 'Brand tidak ditemukan.' });
+        }
+        res.json({
+            brand: {
+                id: brand._id.toString(),
+                name: brand.name,
+                locations: brand.locations || [],
+                createdAt: brand.createdAt,
+                updatedAt: brand.updatedAt
+            }
+        });
+    } catch (error) {
+        console.error('Failed to remove location from brand', error);
+        res.status(500).json({ message: 'Gagal menghapus lokasi dari brand.' });
+    }
 });
 
 app.get('/sitemap.xml', handleSitemapRequest);

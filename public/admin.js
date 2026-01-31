@@ -83,7 +83,18 @@
             selectedPlaceIds: new Set(),
             addedImages: [],
             isSearching: false,
-            isCreating: false
+            isCreating: false,
+            source: 'search',
+            brandsLoaded: false
+        },
+        brands: {
+            list: [],
+            searchResults: [],
+            selectedPlaceIds: new Set(),
+            geoOverrides: {},
+            isSearching: false,
+            isAdding: false,
+            loaded: false
         }
     };
 
@@ -98,6 +109,9 @@
     let massInfoWindow = null;
     let massMarkers = new Map();
     let massMarkerBounds = null;
+    let brandsMap = null;
+    let brandsPlacesService = null;
+    let brandsMarkers = new Map();
 
     function cacheElements() {
         els.pinCount = document.getElementById('pin-count');
@@ -241,6 +255,34 @@
         els.massPhotoRemaining = document.getElementById('mass-photo-remaining');
         els.massCreateBtn = document.getElementById('mass-create-btn');
         els.massStatus = document.getElementById('mass-status');
+        els.massSourceSearch = document.getElementById('mass-source-search');
+        els.massSourceBrands = document.getElementById('mass-source-brands');
+        els.massBrandSelect = document.getElementById('mass-brand-select');
+        els.massBrandRefreshBtn = document.getElementById('mass-brand-refresh-btn');
+
+        // Brands tab
+        els.brandsContent = document.getElementById('admin-brands-pane');
+        els.brandsMessage = document.getElementById('brands-message');
+        els.brandsSearchInput = document.getElementById('brands-search-input');
+        els.brandsSearchBtn = document.getElementById('brands-search-btn');
+        els.brandsResultsList = document.getElementById('brands-search-results');
+        els.brandsResultsCount = document.getElementById('brands-results-count');
+        els.brandsSelectedCount = document.getElementById('brands-selected-count');
+        els.brandsSelectAllBtn = document.getElementById('brands-select-all-btn');
+        els.brandsClearBtn = document.getElementById('brands-clear-btn');
+        els.brandsMapEl = document.getElementById('brands-results-map');
+        els.brandsNameInput = document.getElementById('brands-name-input');
+        els.brandsNameSuggestions = document.getElementById('brands-name-suggestions');
+        els.brandsAddBtn = document.getElementById('brands-add-btn');
+        els.brandsAddStatus = document.getElementById('brands-add-status');
+        els.brandsSelectedList = document.getElementById('brands-selected-list');
+        els.brandsSelectedSummary = document.getElementById('brands-selected-summary');
+        els.brandsRefreshBtn = document.getElementById('brands-refresh-btn');
+        els.brandsList = document.getElementById('brands-list');
+        els.brandsEmpty = document.getElementById('brands-empty');
+        els.brandsSearchSection = document.getElementById('brands-search-section');
+        els.brandsDetailsSection = document.getElementById('brands-details-section');
+        els.brandsSubtabs = Array.from(document.querySelectorAll('.brands-subtab') || []);
     }
 
     function showMessage(type, text) {
@@ -2460,6 +2502,9 @@
         if (els.categoriesContent) {
             els.categoriesContent.classList.toggle('hidden', nextTab !== 'categories');
         }
+        if (els.brandsContent) {
+            els.brandsContent.classList.toggle('hidden', nextTab !== 'brands');
+        }
         if (nextTab === 'mass') {
             initMassMap();
             refreshMassMapView();
@@ -2479,6 +2524,12 @@
         }
         if (nextTab === 'seo' && !state.seoLoaded && state.permissions?.isAdmin) {
             loadSeoSettings();
+        }
+        if (nextTab === 'brands') {
+            initBrandsMap();
+            if (!state.brands.loaded && state.permissions?.isAdmin) {
+                loadBrands();
+            }
         }
     }
 
@@ -3437,6 +3488,88 @@
         };
     }
 
+    function switchMassSource(source) {
+        if (source === state.mass.source) return;
+        state.mass.source = source;
+        // Toggle sub-tab active state
+        document.querySelectorAll('.mass-source-tab').forEach((btn) => {
+            btn.classList.toggle('mass-source-tab--active', btn.dataset.massSource === source);
+        });
+        // Toggle section visibility
+        if (els.massSourceSearch) {
+            els.massSourceSearch.classList.toggle('hidden', source !== 'search');
+        }
+        if (els.massSourceBrands) {
+            els.massSourceBrands.classList.toggle('hidden', source !== 'brands');
+        }
+        // Clear current results when switching
+        state.mass.results = [];
+        state.mass.selectedPlaceIds.clear();
+        clearMassMarkers();
+        renderMassResults();
+        showMassMessage(null, '');
+        if (els.massStatus) els.massStatus.textContent = '';
+        // Load brands list if switching to brands and not yet loaded
+        if (source === 'brands' && !state.mass.brandsLoaded) {
+            loadMassBrands();
+        }
+    }
+
+    async function loadMassBrands() {
+        try {
+            const headers = {};
+            const token = getToken();
+            if (token) headers.Authorization = 'Bearer ' + token;
+            const response = await fetch('/api/admin/brands', { headers, cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal memuat brand.');
+            const brands = data.brands || [];
+            state.mass.brandsLoaded = true;
+            if (els.massBrandSelect) {
+                els.massBrandSelect.innerHTML = '<option value="" disabled selected>Pilih brand...</option>';
+                brands.forEach((brand) => {
+                    const opt = document.createElement('option');
+                    opt.value = brand.id;
+                    opt.textContent = `${brand.name} (${(brand.locations || []).length} locations)`;
+                    opt.dataset.brandJson = JSON.stringify(brand);
+                    els.massBrandSelect.appendChild(opt);
+                });
+            }
+        } catch (error) {
+            showMassMessage('error', error.message || 'Gagal memuat daftar brand.');
+        }
+    }
+
+    function handleMassBrandSelect() {
+        const select = els.massBrandSelect;
+        if (!select || !select.value) return;
+        const selectedOption = select.options[select.selectedIndex];
+        let brand;
+        try {
+            brand = JSON.parse(selectedOption.dataset.brandJson || '{}');
+        } catch (e) {
+            return;
+        }
+        const locations = brand.locations || [];
+        const normalized = locations.map((loc) => ({
+            id: loc.placeId || loc._id || `${loc.lat}_${loc.lng}`,
+            name: loc.name || '',
+            address: loc.address || '',
+            lat: loc.lat,
+            lng: loc.lng
+        })).filter((loc) => Number.isFinite(loc.lat) && Number.isFinite(loc.lng));
+        state.mass.results = normalized;
+        state.mass.selectedPlaceIds = new Set(normalized.map((item) => item.id));
+        renderMassMapMarkers();
+        refreshMassMapView();
+        renderMassResults();
+        if (!normalized.length) {
+            showMassMessage('error', `Brand "${brand.name}" tidak memiliki lokasi.`);
+        } else {
+            showMassMessage('success', `${normalized.length} lokasi dari brand "${brand.name}".`);
+        }
+    }
+
     async function handleMassSearch() {
         const rawQuery = els.massSearchInput?.value.trim() || '';
         if (!rawQuery) {
@@ -4209,6 +4342,68 @@
         if (els.massForm) {
             els.massForm.addEventListener('submit', handleMassSubmit);
         }
+        document.querySelectorAll('.mass-source-tab').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                switchMassSource(btn.dataset.massSource);
+            });
+        });
+        if (els.massBrandSelect) {
+            els.massBrandSelect.addEventListener('change', handleMassBrandSelect);
+        }
+        if (els.massBrandRefreshBtn) {
+            els.massBrandRefreshBtn.addEventListener('click', () => {
+                state.mass.brandsLoaded = false;
+                loadMassBrands();
+            });
+        }
+
+        // Brands tab events
+        if (els.brandsSearchBtn) {
+            els.brandsSearchBtn.addEventListener('click', handleBrandsSearch);
+        }
+        if (els.brandsSearchInput) {
+            els.brandsSearchInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleBrandsSearch();
+                }
+            });
+        }
+        if (els.brandsSelectAllBtn) {
+            els.brandsSelectAllBtn.addEventListener('click', function () {
+                state.brands.selectedPlaceIds = new Set(state.brands.searchResults.map(function (i) { return i.id; }));
+                renderBrandsSearchResults();
+            });
+        }
+        if (els.brandsClearBtn) {
+            els.brandsClearBtn.addEventListener('click', function () {
+                state.brands.selectedPlaceIds.clear();
+                renderBrandsSearchResults();
+            });
+        }
+        if (els.brandsNameInput) {
+            els.brandsNameInput.addEventListener('input', updateBrandsNameSuggestions);
+            els.brandsNameInput.addEventListener('focus', function () {
+                if (els.brandsNameInput.value.trim()) {
+                    updateBrandsNameSuggestions();
+                }
+            });
+        }
+        document.addEventListener('click', hideBrandsNameSuggestions);
+        if (els.brandsAddBtn) {
+            els.brandsAddBtn.addEventListener('click', handleBrandsAdd);
+        }
+        if (els.brandsRefreshBtn) {
+            els.brandsRefreshBtn.addEventListener('click', function () {
+                loadBrands();
+            });
+        }
+        els.brandsSubtabs.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                switchBrandsSubtab(btn.dataset.brandsSubtab || 'search');
+            });
+        });
+
         if (els.usersRefreshBtn) {
             els.usersRefreshBtn.addEventListener('click', () => {
                 loadResidents({ force: true });
@@ -4290,6 +4485,635 @@
         }
     }
 
+    // ── Brands Tab Functions ───────────────────
+
+    function showBrandsMessage(type, text) {
+        if (!els.brandsMessage) return;
+        els.brandsMessage.textContent = text || '';
+        els.brandsMessage.className = 'admin-message' + (type ? ' admin-message--' + type : '');
+    }
+
+    function switchBrandsSubtab(subtab) {
+        els.brandsSubtabs.forEach(function (btn) {
+            btn.classList.toggle('brands-subtab--active', btn.dataset.brandsSubtab === subtab);
+        });
+        if (els.brandsSearchSection) {
+            els.brandsSearchSection.classList.toggle('hidden', subtab !== 'search');
+        }
+        if (els.brandsDetailsSection) {
+            els.brandsDetailsSection.classList.toggle('hidden', subtab !== 'details');
+        }
+        if (subtab === 'details' && !state.brands.loaded) {
+            loadBrands();
+        }
+    }
+
+    async function initBrandsMap() {
+        if (brandsMap || !els.brandsMapEl) return;
+        var gmaps = await ensureGoogleMaps();
+        brandsMap = new gmaps.Map(els.brandsMapEl, {
+            center: DEFAULT_COORDS,
+            zoom: 5,
+            disableDefaultUI: true,
+            zoomControl: true
+        });
+    }
+
+    async function ensureBrandsPlacesService() {
+        await initBrandsMap();
+        var gmaps = await ensureGoogleMaps();
+        if (!gmaps || !gmaps.places || !gmaps.places.PlacesService) {
+            throw new Error('Google Places API belum tersedia.');
+        }
+        if (!brandsPlacesService) {
+            brandsPlacesService = new gmaps.places.PlacesService(brandsMap || document.createElement('div'));
+        }
+        return brandsPlacesService;
+    }
+
+    function setBrandsSearchState(isSearching) {
+        state.brands.isSearching = isSearching;
+        if (els.brandsSearchBtn) {
+            els.brandsSearchBtn.disabled = isSearching;
+            els.brandsSearchBtn.textContent = isSearching ? 'Searching...' : 'Search';
+        }
+        if (els.brandsSearchInput) {
+            els.brandsSearchInput.disabled = isSearching;
+        }
+    }
+
+    function updateBrandsCounts() {
+        var resultCount = state.brands.searchResults.length;
+        var selectedCount = state.brands.selectedPlaceIds.size;
+        if (els.brandsResultsCount) {
+            els.brandsResultsCount.textContent = resultCount + ' results';
+        }
+        if (els.brandsSelectedCount) {
+            els.brandsSelectedCount.textContent = selectedCount + ' selected';
+        }
+        if (els.brandsSelectedSummary) {
+            els.brandsSelectedSummary.textContent = selectedCount + ' of ' + resultCount + ' selected';
+        }
+    }
+
+    function renderBrandsSearchResults() {
+        if (!els.brandsResultsList) return;
+        els.brandsResultsList.innerHTML = '';
+        if (!state.brands.searchResults.length) {
+            var empty = document.createElement('div');
+            empty.className = 'pin-list-empty';
+            empty.textContent = 'No results yet.';
+            els.brandsResultsList.appendChild(empty);
+            updateBrandsCounts();
+            renderBrandsSelectedList();
+            return;
+        }
+        state.brands.searchResults.forEach(function (place) {
+            var item = document.createElement('li');
+            item.className = 'mass-result-item';
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = state.brands.selectedPlaceIds.has(place.id);
+            checkbox.addEventListener('change', function () {
+                if (checkbox.checked) {
+                    state.brands.selectedPlaceIds.add(place.id);
+                } else {
+                    state.brands.selectedPlaceIds.delete(place.id);
+                }
+                updateBrandsCounts();
+                renderBrandsSelectedList();
+            });
+            var content = document.createElement('div');
+            var nameEl = document.createElement('div');
+            nameEl.className = 'mass-result-name';
+            nameEl.textContent = place.name || 'Lokasi';
+            var meta = document.createElement('div');
+            meta.className = 'mass-result-meta';
+            meta.textContent = place.address || 'Alamat tidak tersedia';
+            content.appendChild(nameEl);
+            content.appendChild(meta);
+            item.appendChild(checkbox);
+            item.appendChild(content);
+            els.brandsResultsList.appendChild(item);
+        });
+        updateBrandsCounts();
+        renderBrandsSelectedList();
+    }
+
+    function renderBrandsSelectedList() {
+        if (!els.brandsSelectedList) return;
+        els.brandsSelectedList.innerHTML = '';
+        var selected = state.brands.searchResults.filter(function (r) {
+            return state.brands.selectedPlaceIds.has(r.id);
+        });
+        if (!selected.length) {
+            var empty = document.createElement('div');
+            empty.className = 'brands-selected-empty';
+            empty.textContent = selected.length === 0 && state.brands.searchResults.length === 0
+                ? 'Search for places first.'
+                : 'No locations selected.';
+            els.brandsSelectedList.appendChild(empty);
+            return;
+        }
+        selected.forEach(function (place) {
+            var li = document.createElement('li');
+            li.className = 'brands-selected-item';
+
+            // Row 1: checkbox + name + address
+            var row1 = document.createElement('div');
+            row1.className = 'brands-selected-item-row';
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            checkbox.addEventListener('change', function () {
+                state.brands.selectedPlaceIds.delete(place.id);
+                updateBrandsCounts();
+                renderBrandsSearchResults();
+            });
+            var nameEl = document.createElement('span');
+            nameEl.className = 'brands-selected-item-name';
+            nameEl.textContent = place.name || 'Lokasi';
+            var addrEl = document.createElement('span');
+            addrEl.className = 'brands-selected-item-address';
+            addrEl.textContent = place.address || '';
+            row1.appendChild(checkbox);
+            row1.appendChild(nameEl);
+            row1.appendChild(addrEl);
+
+            // Row 2: province + city inputs
+            var row2 = document.createElement('div');
+            row2.className = 'brands-selected-geo-row';
+
+            var override = state.brands.geoOverrides[place.id] || {};
+            var provInput = document.createElement('input');
+            provInput.type = 'text';
+            provInput.placeholder = 'Province';
+            provInput.value = override.province || '';
+            if (!override.province) provInput.classList.add('geo-unknown');
+            provInput.addEventListener('input', function () {
+                if (!state.brands.geoOverrides[place.id]) {
+                    state.brands.geoOverrides[place.id] = {};
+                }
+                state.brands.geoOverrides[place.id].province = provInput.value.trim();
+                provInput.classList.toggle('geo-unknown', !provInput.value.trim());
+            });
+
+            var cityInput = document.createElement('input');
+            cityInput.type = 'text';
+            cityInput.placeholder = 'City';
+            cityInput.value = override.city || '';
+            if (!override.city) cityInput.classList.add('geo-unknown');
+            cityInput.addEventListener('input', function () {
+                if (!state.brands.geoOverrides[place.id]) {
+                    state.brands.geoOverrides[place.id] = {};
+                }
+                state.brands.geoOverrides[place.id].city = cityInput.value.trim();
+                cityInput.classList.toggle('geo-unknown', !cityInput.value.trim());
+            });
+
+            row2.appendChild(provInput);
+            row2.appendChild(cityInput);
+
+            li.appendChild(row1);
+            li.appendChild(row2);
+            els.brandsSelectedList.appendChild(li);
+        });
+    }
+
+    function updateBrandsNameSuggestions() {
+        if (!els.brandsNameSuggestions || !els.brandsNameInput) return;
+        var query = els.brandsNameInput.value.trim().toLowerCase();
+        els.brandsNameSuggestions.innerHTML = '';
+
+        if (!query) {
+            els.brandsNameSuggestions.classList.add('hidden');
+            return;
+        }
+
+        var brands = state.brands.list || [];
+        var matches = brands.filter(function (b) {
+            return b.name.toLowerCase().indexOf(query) !== -1;
+        });
+
+        // Check if there's an exact match (case-insensitive)
+        var exactMatch = brands.some(function (b) {
+            return b.name.toLowerCase() === query;
+        });
+
+        if (!matches.length && !query) {
+            els.brandsNameSuggestions.classList.add('hidden');
+            return;
+        }
+
+        // Show matching existing brands
+        matches.forEach(function (brand) {
+            var li = document.createElement('li');
+            li.className = 'brands-name-suggestion';
+            var nameSpan = document.createElement('span');
+            nameSpan.textContent = brand.name;
+            var countSpan = document.createElement('span');
+            countSpan.className = 'brands-name-suggestion-count';
+            countSpan.textContent = (brand.locations || []).length + ' locations';
+            li.appendChild(nameSpan);
+            li.appendChild(countSpan);
+            li.addEventListener('click', function () {
+                els.brandsNameInput.value = brand.name;
+                els.brandsNameSuggestions.classList.add('hidden');
+            });
+            els.brandsNameSuggestions.appendChild(li);
+        });
+
+        // Show "Add new" option if no exact match
+        if (!exactMatch && query) {
+            var addLi = document.createElement('li');
+            addLi.className = 'brands-name-suggestion brands-name-suggestion--new';
+            addLi.textContent = '+ Add new brand "' + els.brandsNameInput.value.trim() + '"';
+            addLi.addEventListener('click', function () {
+                els.brandsNameSuggestions.classList.add('hidden');
+            });
+            els.brandsNameSuggestions.appendChild(addLi);
+        }
+
+        els.brandsNameSuggestions.classList.remove('hidden');
+    }
+
+    function hideBrandsNameSuggestions(e) {
+        if (!els.brandsNameSuggestions) return;
+        // Don't hide if clicking inside the suggestions or the input
+        if (e && (els.brandsNameSuggestions.contains(e.target) || els.brandsNameInput === e.target)) return;
+        els.brandsNameSuggestions.classList.add('hidden');
+    }
+
+    function parseProvinceCityFromAddress(address) {
+        if (!address) return { province: '', city: '' };
+        // Indonesian formatted_address typically: "Name, Street, City, Province PostalCode, Indonesia"
+        // or "Name, Street, Kecamatan, City, Province PostalCode, Indonesia"
+        var parts = address.split(',').map(function (s) { return s.trim(); });
+        // Remove "Indonesia" or country at the end
+        if (parts.length > 1 && /^indonesia$/i.test(parts[parts.length - 1])) {
+            parts.pop();
+        }
+        if (parts.length < 2) return { province: '', city: '' };
+        // Last part is typically "Province PostalCode" or just "Province"
+        var provincePart = parts[parts.length - 1].replace(/\d{5,}/, '').trim();
+        // Second-to-last is typically the city
+        var cityPart = parts[parts.length - 2].replace(/\d{5,}/, '').trim();
+        return { province: provincePart, city: cityPart };
+    }
+
+    function renderBrandsMapMarkers() {
+        brandsMarkers.forEach(function (marker) { marker.setMap(null); });
+        brandsMarkers.clear();
+        if (!brandsMap) return;
+        var gmaps = window.google && window.google.maps;
+        if (!gmaps) return;
+        var bounds = new gmaps.LatLngBounds();
+        state.brands.searchResults.forEach(function (place) {
+            var marker = new gmaps.Marker({
+                position: { lat: place.lat, lng: place.lng },
+                map: brandsMap,
+                title: place.name
+            });
+            brandsMarkers.set(place.id, marker);
+            bounds.extend(marker.getPosition());
+        });
+        if (state.brands.searchResults.length) {
+            brandsMap.fitBounds(bounds);
+        }
+    }
+
+    async function handleBrandsSearch() {
+        var rawQuery = (els.brandsSearchInput ? els.brandsSearchInput.value.trim() : '');
+        if (!rawQuery) {
+            showBrandsMessage('error', 'Masukkan kata kunci pencarian.');
+            return;
+        }
+        if (state.brands.isSearching) return;
+        var parsed = parseMassSearchQuery(rawQuery);
+        var term = parsed.term;
+        var location = parsed.location;
+        if (!term) {
+            showBrandsMessage('error', 'Masukkan nama tempat atau brand yang dicari.');
+            return;
+        }
+        setBrandsSearchState(true);
+        showBrandsMessage(null, '');
+        try {
+            var service = await ensureBrandsPlacesService();
+            var requestQuery = rawQuery;
+            var request = {};
+            var scopeLabel = 'di Indonesia';
+            if (location) {
+                var area = await geocodeMassLocation(location);
+                if (!area || !area.location) {
+                    throw new Error('Area lokasi tidak ditemukan.');
+                }
+                requestQuery = (term + ' ' + location).trim();
+                if (area.bounds) request.bounds = area.bounds;
+                scopeLabel = 'di ' + (area.formatted || location);
+            } else {
+                if (!/indonesia/i.test(rawQuery)) {
+                    requestQuery = rawQuery + ' Indonesia';
+                }
+                request.region = 'id';
+            }
+            request.query = requestQuery;
+            var results = await runPlacesTextSearch(service, request);
+            var normalized = [];
+            var seen = new Set();
+            results.forEach(function (place) {
+                var n = normalizePlaceResult(place);
+                if (!n || seen.has(n.id)) return;
+                seen.add(n.id);
+                normalized.push(n);
+            });
+            state.brands.searchResults = normalized;
+            state.brands.selectedPlaceIds = new Set(normalized.map(function (i) { return i.id; }));
+            // Auto-fill province/city from address; leave blank if not detected
+            var overrides = {};
+            normalized.forEach(function (place) {
+                var parsed = parseProvinceCityFromAddress(place.address);
+                overrides[place.id] = {
+                    province: parsed.province || '',
+                    city: parsed.city || ''
+                };
+            });
+            state.brands.geoOverrides = overrides;
+            renderBrandsSearchResults();
+            renderBrandsMapMarkers();
+            if (!normalized.length) {
+                showBrandsMessage('error', 'Tidak ada hasil ' + scopeLabel + '.');
+            } else {
+                showBrandsMessage('success', 'Menemukan ' + normalized.length + ' lokasi ' + scopeLabel + '.');
+            }
+        } catch (error) {
+            showBrandsMessage('error', error.message || 'Gagal mencari lokasi.');
+        } finally {
+            setBrandsSearchState(false);
+        }
+    }
+
+    async function handleBrandsAdd() {
+        var brandName = (els.brandsNameInput ? els.brandsNameInput.value.trim() : '');
+        if (!brandName) {
+            showBrandsMessage('error', 'Masukkan nama brand.');
+            return;
+        }
+        var selected = state.brands.searchResults.filter(function (r) {
+            return state.brands.selectedPlaceIds.has(r.id);
+        });
+        if (!selected.length) {
+            showBrandsMessage('error', 'Pilih setidaknya satu lokasi.');
+            return;
+        }
+        if (state.brands.isAdding) return;
+        state.brands.isAdding = true;
+        if (els.brandsAddBtn) {
+            els.brandsAddBtn.disabled = true;
+            els.brandsAddBtn.textContent = 'Adding...';
+        }
+        try {
+            var headers = { 'Content-Type': 'application/json' };
+            var token = getToken();
+            if (token) headers.Authorization = 'Bearer ' + token;
+            var locations = selected.map(function (place) {
+                var override = state.brands.geoOverrides[place.id] || {};
+                var loc = {
+                    placeId: place.id,
+                    name: place.name,
+                    address: place.address,
+                    lat: place.lat,
+                    lng: place.lng
+                };
+                if (override.province) loc.province = override.province;
+                if (override.city) loc.city = override.city;
+                return loc;
+            });
+            var response = await fetch('/api/admin/brands', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ name: brandName, locations: locations })
+            });
+            if (!response.ok) {
+                var errData = await response.json().catch(function () { return {}; });
+                throw new Error(errData.message || 'Server error (' + response.status + '). Coba lagi.');
+            }
+            var data = await response.json();
+            var msg = 'Berhasil menambahkan ' + data.added + ' lokasi ke brand "' + data.brand.name + '".';
+            if (data.skipped > 0) {
+                msg += ' ' + data.skipped + ' lokasi dilewati (duplikat).';
+            }
+            showBrandsMessage('success', msg);
+            if (els.brandsAddStatus) {
+                els.brandsAddStatus.textContent = msg;
+            }
+            state.brands.loaded = false;
+        } catch (error) {
+            showBrandsMessage('error', error.message);
+        } finally {
+            state.brands.isAdding = false;
+            if (els.brandsAddBtn) {
+                els.brandsAddBtn.disabled = false;
+                els.brandsAddBtn.textContent = 'Add to Brand';
+            }
+        }
+    }
+
+    async function loadBrands() {
+        try {
+            var headers = {};
+            var token = getToken();
+            if (token) headers.Authorization = 'Bearer ' + token;
+            var response = await fetch('/api/admin/brands', { headers: headers, cache: 'no-store' });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal memuat brand.');
+            state.brands.list = data.brands || [];
+            state.brands.loaded = true;
+            renderBrandsList();
+        } catch (error) {
+            showBrandsMessage('error', error.message);
+        }
+    }
+
+    function buildProvinceHierarchy(locations) {
+        var tree = {};
+        (locations || []).forEach(function (loc) {
+            var prov = loc.province || 'Unknown Province';
+            var city = loc.city || 'Unknown City';
+            if (!tree[prov]) tree[prov] = {};
+            if (!tree[prov][city]) tree[prov][city] = [];
+            tree[prov][city].push(loc);
+        });
+        return tree;
+    }
+
+    function renderBrandsList() {
+        if (!els.brandsList) return;
+        els.brandsList.innerHTML = '';
+        var brands = state.brands.list || [];
+        if (els.brandsEmpty) {
+            // Only show "No brands" when loaded and truly empty
+            if (state.brands.loaded && brands.length === 0) {
+                els.brandsEmpty.classList.remove('hidden');
+            } else {
+                els.brandsEmpty.classList.add('hidden');
+            }
+        }
+        brands.forEach(function (brand) {
+            var card = document.createElement('div');
+            card.className = 'brand-card';
+            card.dataset.brandId = brand.id;
+
+            var header = document.createElement('div');
+            header.className = 'brand-card-header';
+            var title = document.createElement('div');
+            title.className = 'brand-card-title';
+            title.textContent = brand.name;
+            var count = document.createElement('div');
+            count.className = 'brand-card-count';
+            count.textContent = (brand.locations || []).length + ' locations';
+            var actions = document.createElement('div');
+            actions.className = 'brand-card-actions';
+
+            var renameBtn = document.createElement('button');
+            renameBtn.className = 'ghost-btn chip-btn';
+            renameBtn.textContent = 'Rename';
+            renameBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                handleRenameBrand(brand.id, brand.name);
+            });
+            var deleteBtn = document.createElement('button');
+            deleteBtn.className = 'ghost-btn chip-btn ghost-btn--danger';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                handleDeleteBrand(brand.id, brand.name);
+            });
+            actions.appendChild(renameBtn);
+            actions.appendChild(deleteBtn);
+
+            header.appendChild(title);
+            header.appendChild(count);
+            header.appendChild(actions);
+            header.addEventListener('click', function () {
+                card.classList.toggle('expanded');
+            });
+
+            var body = document.createElement('div');
+            body.className = 'brand-card-body';
+            var tree = buildProvinceHierarchy(brand.locations);
+            var sortedProvinces = Object.keys(tree).sort();
+            sortedProvinces.forEach(function (prov) {
+                var provDiv = document.createElement('div');
+                provDiv.className = 'brand-province';
+                var provTitle = document.createElement('div');
+                provTitle.className = 'brand-province-title';
+                provTitle.textContent = prov;
+                provDiv.appendChild(provTitle);
+
+                var sortedCities = Object.keys(tree[prov]).sort();
+                sortedCities.forEach(function (city) {
+                    var cityDiv = document.createElement('div');
+                    cityDiv.className = 'brand-city';
+                    var cityTitle = document.createElement('div');
+                    cityTitle.className = 'brand-city-title';
+                    cityTitle.textContent = city;
+                    cityDiv.appendChild(cityTitle);
+
+                    tree[prov][city].forEach(function (loc) {
+                        var locItem = document.createElement('div');
+                        locItem.className = 'brand-location-item';
+                        var locName = document.createElement('span');
+                        locName.className = 'brand-location-name';
+                        locName.textContent = loc.name;
+                        var locAddr = document.createElement('span');
+                        locAddr.className = 'brand-location-address';
+                        locAddr.textContent = loc.address || '';
+                        var removeBtn = document.createElement('button');
+                        removeBtn.className = 'brand-location-remove';
+                        removeBtn.textContent = 'Remove';
+                        removeBtn.addEventListener('click', function () {
+                            handleRemoveLocation(brand.id, loc.placeId, loc.name);
+                        });
+                        locItem.appendChild(locName);
+                        locItem.appendChild(locAddr);
+                        locItem.appendChild(removeBtn);
+                        cityDiv.appendChild(locItem);
+                    });
+                    provDiv.appendChild(cityDiv);
+                });
+                body.appendChild(provDiv);
+            });
+
+            card.appendChild(header);
+            card.appendChild(body);
+            els.brandsList.appendChild(card);
+        });
+    }
+
+    async function handleRenameBrand(brandId, currentName) {
+        var newName = prompt('Enter new brand name:', currentName);
+        if (!newName || newName.trim() === currentName) return;
+        try {
+            var headers = { 'Content-Type': 'application/json' };
+            var token = getToken();
+            if (token) headers.Authorization = 'Bearer ' + token;
+            var response = await fetch('/api/admin/brands/' + brandId, {
+                method: 'PUT',
+                headers: headers,
+                body: JSON.stringify({ name: newName.trim() })
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal mengubah nama brand.');
+            showBrandsMessage('success', 'Brand renamed to "' + data.brand.name + '".');
+            await loadBrands();
+        } catch (error) {
+            showBrandsMessage('error', error.message);
+        }
+    }
+
+    async function handleDeleteBrand(brandId, brandName) {
+        if (!confirm('Delete brand "' + brandName + '" and all its locations?')) return;
+        try {
+            var headers = {};
+            var token = getToken();
+            if (token) headers.Authorization = 'Bearer ' + token;
+            var response = await fetch('/api/admin/brands/' + brandId, {
+                method: 'DELETE',
+                headers: headers
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal menghapus brand.');
+            showBrandsMessage('success', 'Brand "' + brandName + '" deleted.');
+            await loadBrands();
+        } catch (error) {
+            showBrandsMessage('error', error.message);
+        }
+    }
+
+    async function handleRemoveLocation(brandId, placeId, locationName) {
+        if (!confirm('Remove "' + locationName + '" from this brand?')) return;
+        try {
+            var headers = {};
+            var token = getToken();
+            if (token) headers.Authorization = 'Bearer ' + token;
+            var response = await fetch('/api/admin/brands/' + brandId + '/locations/' + encodeURIComponent(placeId), {
+                method: 'DELETE',
+                headers: headers
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal menghapus lokasi.');
+            showBrandsMessage('success', 'Location "' + locationName + '" removed.');
+            var brandIdx = state.brands.list.findIndex(function (b) { return b.id === brandId; });
+            if (brandIdx !== -1) {
+                state.brands.list[brandIdx] = data.brand;
+            }
+            renderBrandsList();
+        } catch (error) {
+            showBrandsMessage('error', error.message);
+        }
+    }
+
     async function init() {
         cacheElements();
         setFormDisabled(true);
@@ -4298,6 +5122,8 @@
         renderMassResults();
         renderMassImages();
         updateMassCounts();
+        renderBrandsSearchResults();
+        updateBrandsCounts();
         populateMassCategorySelect();
         updateTabsSaveState();
         updateCategoriesSaveState();
