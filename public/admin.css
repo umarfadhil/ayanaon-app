@@ -797,6 +797,7 @@ a {
 .admin-tab-content.hidden,
 .brands-section.hidden,
 #brands-empty.hidden,
+#areas-empty.hidden,
 .brands-name-suggestions.hidden {
     display: none;
 }
@@ -1716,6 +1717,8 @@ textarea {
     padding: 14px 16px 16px;
     box-shadow: var(--shadow);
     min-height: 400px;
+    min-width: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -1775,7 +1778,8 @@ textarea {
 .brands-selected-item-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px 8px;
+    flex-wrap: wrap;
 }
 
 .brands-selected-item-row input[type="checkbox"] {
@@ -1785,7 +1789,7 @@ textarea {
 .brands-selected-item-name {
     font-weight: 600;
     flex: 1;
-    min-width: 0;
+    min-width: 80px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1794,6 +1798,8 @@ textarea {
 .brands-selected-item-address {
     color: var(--muted);
     font-size: 12px;
+    flex-basis: 100%;
+    padding-left: 24px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1949,6 +1955,206 @@ textarea {
 
 .brand-location-remove:hover {
     background: rgba(239, 68, 68, 0.15);
+}
+
+/* ── Areas Manager ───────────────────────────── */
+
+.admin-areas-manager {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px 24px;
+}
+
+.areas-add-form {
+    margin-bottom: 16px;
+}
+
+.areas-add-form h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+
+.areas-form-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.areas-form-row input {
+    flex: 1;
+    min-width: 140px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-size: 13px;
+}
+
+.areas-filter-row {
+    margin-bottom: 16px;
+}
+
+.areas-filter-row input {
+    width: 100%;
+    max-width: 400px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-size: 13px;
+}
+
+.areas-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.area-province-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.area-province-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    gap: 12px;
+    transition: background 0.15s;
+}
+
+.area-province-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.area-province-title {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.area-province-subtitle {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.area-province-body {
+    padding: 0 14px 14px;
+    display: none;
+}
+
+.area-province-body.open {
+    display: block;
+}
+
+.area-edit-province-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.area-edit-province-row input {
+    flex: 1;
+    min-width: 100px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-size: 12px;
+}
+
+.area-city-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    flex-wrap: wrap;
+}
+
+.area-city-row:last-of-type {
+    border-bottom: none;
+}
+
+.area-city-row input {
+    flex: 1;
+    min-width: 80px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-size: 12px;
+}
+
+.area-add-city-row {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.area-add-city-row input {
+    flex: 1;
+    min-width: 80px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-size: 12px;
+}
+
+.area-cities-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.area-btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+
+.area-btn-sm:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.area-btn-sm.danger {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.area-btn-sm.danger:hover {
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.area-btn-sm.primary {
+    color: var(--accent);
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+.area-btn-sm.primary:hover {
+    background: rgba(56, 189, 248, 0.12);
 }
 
 @media (max-width: 960px) {

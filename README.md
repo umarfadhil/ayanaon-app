@@ -96,6 +96,12 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.12
+- **Manage Areas:** New admin tab with a full directory of Indonesian provinces and cities in both Bahasa Indonesia and English, with seed data for all 38 provinces, plus add/edit/delete support for provinces, cities, and aliases.
+- **Auto-Translate Province/City:** Brand search results now automatically translate English province and city names (e.g., "West Java", "Bandung City") to Indonesian equivalents ("Jawa Barat", "Kota Bandung") using the areas directory, both client-side and server-side.
+- **Brand Details Accordion Persistence:** Removing a location from a brand in the Brand Details sub-tab no longer collapses the card, so admins can continue removing locations without re-expanding.
+- **Mobile Responsive Fixes:** Brand search section and selected location names now display correctly on mobile browsers without overflowing the screen.
+
 ### What's New in v2.4.11
 - **Mass Promotions from Brands:** The Mass Promotions tab now supports selecting locations from stored brands in addition to Google Places search, with sub-tab switching between "Search Places" and "From Brands" for faster bulk pin creation.
 - **Manage Brands:** Admins can search Google Places to build a brand directory, assign locations with auto-detected province/city, view brands organized by region in an accordion layout, and rename, delete, or remove individual locations.

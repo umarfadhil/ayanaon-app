@@ -95,6 +95,11 @@
             isSearching: false,
             isAdding: false,
             loaded: false
+        },
+        areas: {
+            list: [],
+            loaded: false,
+            isLoading: false
         }
     };
 
@@ -283,6 +288,19 @@
         els.brandsSearchSection = document.getElementById('brands-search-section');
         els.brandsDetailsSection = document.getElementById('brands-details-section');
         els.brandsSubtabs = Array.from(document.querySelectorAll('.brands-subtab') || []);
+
+        // Areas
+        els.areasContent = document.getElementById('admin-areas-pane');
+        els.areasList = document.getElementById('areas-list');
+        els.areasEmpty = document.getElementById('areas-empty');
+        els.areasMessage = document.getElementById('areas-message');
+        els.areasSeedBtn = document.getElementById('areas-seed-btn');
+        els.areasRefreshBtn = document.getElementById('areas-refresh-btn');
+        els.areaNewNameId = document.getElementById('area-new-nameId');
+        els.areaNewNameEn = document.getElementById('area-new-nameEn');
+        els.areaNewAliases = document.getElementById('area-new-aliases');
+        els.areaAddProvinceBtn = document.getElementById('area-add-province-btn');
+        els.areasSearchInput = document.getElementById('areas-search-input');
     }
 
     function showMessage(type, text) {
@@ -2505,6 +2523,9 @@
         if (els.brandsContent) {
             els.brandsContent.classList.toggle('hidden', nextTab !== 'brands');
         }
+        if (els.areasContent) {
+            els.areasContent.classList.toggle('hidden', nextTab !== 'areas');
+        }
         if (nextTab === 'mass') {
             initMassMap();
             refreshMassMapView();
@@ -2530,6 +2551,9 @@
             if (!state.brands.loaded && state.permissions?.isAdmin) {
                 loadBrands();
             }
+        }
+        if (nextTab === 'areas' && !state.areas.loaded && state.permissions?.isAdmin) {
+            loadAreas();
         }
     }
 
@@ -4483,6 +4507,394 @@
         if (els.seoRobotsFollowToggle) {
             els.seoRobotsFollowToggle.addEventListener('change', updateSeoPreview);
         }
+
+        // Areas
+        if (els.areasSeedBtn) {
+            els.areasSeedBtn.addEventListener('click', handleSeedAreas);
+        }
+        if (els.areasRefreshBtn) {
+            els.areasRefreshBtn.addEventListener('click', function () {
+                state.areas.loaded = false;
+                loadAreas();
+            });
+        }
+        if (els.areaAddProvinceBtn) {
+            els.areaAddProvinceBtn.addEventListener('click', handleAddProvince);
+        }
+        if (els.areasSearchInput) {
+            els.areasSearchInput.addEventListener('input', function () {
+                renderAreasList(els.areasSearchInput.value);
+            });
+        }
+    }
+
+    // ── Area Directory Cache & Translation (client-side) ─────────
+    var areasDirectoryCache = null;
+
+    async function loadAreasDirectoryForTranslation() {
+        if (areasDirectoryCache) return areasDirectoryCache;
+        try {
+            var response = await fetch('/api/areas');
+            var data = await response.json();
+            areasDirectoryCache = data.areas || [];
+            return areasDirectoryCache;
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function normalizeForAreaMatch(str) {
+        return (str || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    }
+
+    function translateProvinceCityClient(province, city) {
+        if (!areasDirectoryCache || !areasDirectoryCache.length) {
+            return { province: province, city: city };
+        }
+        var normProv = normalizeForAreaMatch(province);
+        var normCity = normalizeForAreaMatch(city);
+        var translatedProvince = province || '';
+        var translatedCity = city || '';
+        if (!normProv && !normCity) return { province: translatedProvince, city: translatedCity };
+        for (var i = 0; i < areasDirectoryCache.length; i++) {
+            var area = areasDirectoryCache[i];
+            var provAliases = (area.aliases || []).map(normalizeForAreaMatch);
+            provAliases.push(normalizeForAreaMatch(area.nameId), normalizeForAreaMatch(area.nameEn));
+            var provMatch = normProv && provAliases.some(function (a) {
+                return a && (a === normProv || normProv.indexOf(a) !== -1 || a.indexOf(normProv) !== -1);
+            });
+            if (provMatch) {
+                translatedProvince = area.nameId;
+                if (normCity) {
+                    for (var j = 0; j < (area.cities || []).length; j++) {
+                        var c = area.cities[j];
+                        var cityAliases = (c.aliases || []).map(normalizeForAreaMatch);
+                        cityAliases.push(normalizeForAreaMatch(c.nameId), normalizeForAreaMatch(c.nameEn));
+                        var cityMatch = cityAliases.some(function (a) {
+                            return a && (a === normCity || normCity.indexOf(a) !== -1 || a.indexOf(normCity) !== -1);
+                        });
+                        if (cityMatch) {
+                            translatedCity = c.nameId;
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        return { province: translatedProvince, city: translatedCity };
+    }
+
+    // ── Areas Tab Functions ───────────────────
+
+    function showAreasMessage(type, text) {
+        if (!els.areasMessage) return;
+        els.areasMessage.textContent = text || '';
+        els.areasMessage.className = 'admin-message' + (type ? ' admin-message--' + type : '');
+    }
+
+    async function loadAreas() {
+        if (state.areas.isLoading) return;
+        state.areas.isLoading = true;
+        try {
+            var headers = {};
+            var token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            var response = await fetch('/api/admin/areas', { headers: headers, cache: 'no-store' });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal memuat area.');
+            state.areas.list = data.areas || [];
+            state.areas.loaded = true;
+            areasDirectoryCache = state.areas.list;
+            renderAreasList();
+        } catch (error) {
+            showAreasMessage('error', error.message);
+        } finally {
+            state.areas.isLoading = false;
+        }
+    }
+
+    function renderAreasList(filter) {
+        if (!els.areasList) return;
+        els.areasList.innerHTML = '';
+        var list = state.areas.list;
+        var filterNorm = normalizeForAreaMatch(filter || '');
+
+        var filtered = filterNorm ? list.filter(function (area) {
+            var haystack = [area.nameId, area.nameEn].concat(area.aliases || []).join(' ').toLowerCase();
+            if (haystack.indexOf(filterNorm) !== -1) return true;
+            return (area.cities || []).some(function (c) {
+                return [c.nameId, c.nameEn].concat(c.aliases || []).join(' ').toLowerCase().indexOf(filterNorm) !== -1;
+            });
+        }) : list;
+
+        if (els.areasEmpty) {
+            els.areasEmpty.classList.toggle('hidden', filtered.length > 0);
+        }
+
+        filtered.forEach(function (area) {
+            var card = document.createElement('div');
+            card.className = 'area-province-card';
+
+            var header = document.createElement('div');
+            header.className = 'area-province-header';
+            var headerLeft = document.createElement('div');
+            var titleSpan = document.createElement('span');
+            titleSpan.className = 'area-province-title';
+            titleSpan.textContent = area.nameId;
+            var subtitleSpan = document.createElement('span');
+            subtitleSpan.className = 'area-province-subtitle';
+            subtitleSpan.textContent = ' (' + area.nameEn + ')';
+            headerLeft.appendChild(titleSpan);
+            headerLeft.appendChild(subtitleSpan);
+            var headerRight = document.createElement('span');
+            headerRight.className = 'area-province-subtitle';
+            headerRight.textContent = (area.cities || []).length + ' cities';
+            header.appendChild(headerLeft);
+            header.appendChild(headerRight);
+
+            var body = document.createElement('div');
+            body.className = 'area-province-body';
+
+            header.addEventListener('click', function () {
+                body.classList.toggle('open');
+            });
+
+            // Province edit row
+            var editRow = document.createElement('div');
+            editRow.className = 'area-edit-province-row';
+            var provNameIdInput = document.createElement('input');
+            provNameIdInput.type = 'text';
+            provNameIdInput.value = area.nameId;
+            provNameIdInput.placeholder = 'Nama ID';
+            var provNameEnInput = document.createElement('input');
+            provNameEnInput.type = 'text';
+            provNameEnInput.value = area.nameEn;
+            provNameEnInput.placeholder = 'Name EN';
+            var provAliasesInput = document.createElement('input');
+            provAliasesInput.type = 'text';
+            provAliasesInput.value = (area.aliases || []).join(', ');
+            provAliasesInput.placeholder = 'Aliases';
+            var provSaveBtn = document.createElement('button');
+            provSaveBtn.className = 'area-btn-sm primary';
+            provSaveBtn.textContent = 'Save';
+            provSaveBtn.addEventListener('click', function () {
+                handleUpdateProvince(area.id, {
+                    nameId: provNameIdInput.value.trim(),
+                    nameEn: provNameEnInput.value.trim(),
+                    aliases: provAliasesInput.value.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean)
+                });
+            });
+            var provDeleteBtn = document.createElement('button');
+            provDeleteBtn.className = 'area-btn-sm danger';
+            provDeleteBtn.textContent = 'Delete';
+            provDeleteBtn.addEventListener('click', function () {
+                if (confirm('Hapus provinsi "' + area.nameId + '"?')) {
+                    handleDeleteProvince(area.id);
+                }
+            });
+            editRow.appendChild(provNameIdInput);
+            editRow.appendChild(provNameEnInput);
+            editRow.appendChild(provAliasesInput);
+            editRow.appendChild(provSaveBtn);
+            editRow.appendChild(provDeleteBtn);
+            body.appendChild(editRow);
+
+            // Cities label
+            var citiesLabel = document.createElement('div');
+            citiesLabel.className = 'area-cities-label';
+            citiesLabel.textContent = 'Cities';
+            body.appendChild(citiesLabel);
+
+            // City rows
+            (area.cities || []).forEach(function (city, idx) {
+                var cityRow = document.createElement('div');
+                cityRow.className = 'area-city-row';
+                var cityNameIdInput = document.createElement('input');
+                cityNameIdInput.type = 'text';
+                cityNameIdInput.value = city.nameId;
+                cityNameIdInput.placeholder = 'Nama ID';
+                var cityNameEnInput = document.createElement('input');
+                cityNameEnInput.type = 'text';
+                cityNameEnInput.value = city.nameEn;
+                cityNameEnInput.placeholder = 'Name EN';
+                var cityAliasesInput = document.createElement('input');
+                cityAliasesInput.type = 'text';
+                cityAliasesInput.value = (city.aliases || []).join(', ');
+                cityAliasesInput.placeholder = 'Aliases';
+                var cityDeleteBtn = document.createElement('button');
+                cityDeleteBtn.className = 'area-btn-sm danger';
+                cityDeleteBtn.textContent = 'X';
+                cityDeleteBtn.addEventListener('click', function () {
+                    handleDeleteCity(area, idx);
+                });
+                var citySaveBtn = document.createElement('button');
+                citySaveBtn.className = 'area-btn-sm primary';
+                citySaveBtn.textContent = 'Save';
+                citySaveBtn.addEventListener('click', function () {
+                    handleUpdateCity(area, idx, {
+                        nameId: cityNameIdInput.value.trim(),
+                        nameEn: cityNameEnInput.value.trim(),
+                        aliases: cityAliasesInput.value.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean)
+                    });
+                });
+                cityRow.appendChild(cityNameIdInput);
+                cityRow.appendChild(cityNameEnInput);
+                cityRow.appendChild(cityAliasesInput);
+                cityRow.appendChild(citySaveBtn);
+                cityRow.appendChild(cityDeleteBtn);
+                body.appendChild(cityRow);
+            });
+
+            // Add city row
+            var addCityRow = document.createElement('div');
+            addCityRow.className = 'area-add-city-row';
+            var newCityNameId = document.createElement('input');
+            newCityNameId.type = 'text';
+            newCityNameId.placeholder = 'Nama ID kota baru';
+            var newCityNameEn = document.createElement('input');
+            newCityNameEn.type = 'text';
+            newCityNameEn.placeholder = 'English name';
+            var newCityAliases = document.createElement('input');
+            newCityAliases.type = 'text';
+            newCityAliases.placeholder = 'Aliases';
+            var addCityBtn = document.createElement('button');
+            addCityBtn.className = 'area-btn-sm primary';
+            addCityBtn.textContent = '+ Add City';
+            addCityBtn.addEventListener('click', function () {
+                handleAddCity(area, {
+                    nameId: newCityNameId.value.trim(),
+                    nameEn: newCityNameEn.value.trim(),
+                    aliases: newCityAliases.value.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean)
+                });
+            });
+            addCityRow.appendChild(newCityNameId);
+            addCityRow.appendChild(newCityNameEn);
+            addCityRow.appendChild(newCityAliases);
+            addCityRow.appendChild(addCityBtn);
+            body.appendChild(addCityRow);
+
+            card.appendChild(header);
+            card.appendChild(body);
+            els.areasList.appendChild(card);
+        });
+    }
+
+    async function handleSeedAreas() {
+        if (!confirm('Ini akan mengisi direktori area dengan 38 provinsi Indonesia. Lanjutkan?')) return;
+        try {
+            var headers = { 'Content-Type': 'application/json' };
+            var token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            var response = await fetch('/api/admin/areas/seed?force=true', {
+                method: 'POST',
+                headers: headers
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Seed gagal.');
+            showAreasMessage('success', data.message || 'Seed berhasil.');
+            state.areas.loaded = false;
+            loadAreas();
+        } catch (error) {
+            showAreasMessage('error', error.message);
+        }
+    }
+
+    async function handleAddProvince() {
+        var nameId = (els.areaNewNameId ? els.areaNewNameId.value : '').trim();
+        var nameEn = (els.areaNewNameEn ? els.areaNewNameEn.value : '').trim();
+        var aliasesRaw = (els.areaNewAliases ? els.areaNewAliases.value : '').trim();
+        if (!nameId || !nameEn) {
+            showAreasMessage('error', 'Nama Indonesia dan English wajib diisi.');
+            return;
+        }
+        var aliases = aliasesRaw ? aliasesRaw.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean) : [];
+        aliases.push(nameId.toLowerCase(), nameEn.toLowerCase());
+        try {
+            var headers = { 'Content-Type': 'application/json' };
+            var token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            var response = await fetch('/api/admin/areas', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ nameId: nameId, nameEn: nameEn, aliases: aliases, cities: [] })
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal menambah provinsi.');
+            showAreasMessage('success', 'Provinsi "' + nameId + '" berhasil ditambahkan.');
+            if (els.areaNewNameId) els.areaNewNameId.value = '';
+            if (els.areaNewNameEn) els.areaNewNameEn.value = '';
+            if (els.areaNewAliases) els.areaNewAliases.value = '';
+            state.areas.loaded = false;
+            loadAreas();
+        } catch (error) {
+            showAreasMessage('error', error.message);
+        }
+    }
+
+    async function handleUpdateProvince(id, updates) {
+        try {
+            var headers = { 'Content-Type': 'application/json' };
+            var token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            var response = await fetch('/api/admin/areas/' + id, {
+                method: 'PUT',
+                headers: headers,
+                body: JSON.stringify(updates)
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal memperbarui provinsi.');
+            showAreasMessage('success', 'Provinsi berhasil diperbarui.');
+            state.areas.loaded = false;
+            loadAreas();
+        } catch (error) {
+            showAreasMessage('error', error.message);
+        }
+    }
+
+    async function handleDeleteProvince(id) {
+        try {
+            var headers = {};
+            var token = getToken();
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            var response = await fetch('/api/admin/areas/' + id, {
+                method: 'DELETE',
+                headers: headers
+            });
+            var data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Gagal menghapus provinsi.');
+            showAreasMessage('success', data.message || 'Provinsi berhasil dihapus.');
+            state.areas.loaded = false;
+            loadAreas();
+        } catch (error) {
+            showAreasMessage('error', error.message);
+        }
+    }
+
+    async function handleAddCity(area, cityData) {
+        if (!cityData.nameId || !cityData.nameEn) {
+            showAreasMessage('error', 'Nama ID dan English kota wajib diisi.');
+            return;
+        }
+        var updatedCities = (area.cities || []).slice();
+        cityData.aliases = (cityData.aliases || []);
+        cityData.aliases.push(cityData.nameId.toLowerCase(), cityData.nameEn.toLowerCase());
+        updatedCities.push(cityData);
+        await handleUpdateProvince(area.id, { cities: updatedCities });
+    }
+
+    async function handleUpdateCity(area, cityIndex, cityData) {
+        var updatedCities = (area.cities || []).slice();
+        updatedCities[cityIndex] = cityData;
+        await handleUpdateProvince(area.id, { cities: updatedCities });
+    }
+
+    async function handleDeleteCity(area, cityIndex) {
+        var cityName = (area.cities || [])[cityIndex]?.nameId || '';
+        if (!confirm('Hapus kota "' + cityName + '"?')) return;
+        var updatedCities = (area.cities || []).slice();
+        updatedCities.splice(cityIndex, 1);
+        await handleUpdateProvince(area.id, { cities: updatedCities });
     }
 
     // ── Brands Tab Functions ───────────────────
@@ -4829,13 +5241,15 @@
             });
             state.brands.searchResults = normalized;
             state.brands.selectedPlaceIds = new Set(normalized.map(function (i) { return i.id; }));
-            // Auto-fill province/city from address; leave blank if not detected
+            // Auto-fill province/city from address; translate to Indonesian
+            await loadAreasDirectoryForTranslation();
             var overrides = {};
             normalized.forEach(function (place) {
                 var parsed = parseProvinceCityFromAddress(place.address);
+                var translated = translateProvinceCityClient(parsed.province, parsed.city);
                 overrides[place.id] = {
-                    province: parsed.province || '',
-                    city: parsed.city || ''
+                    province: translated.province || '',
+                    city: translated.city || ''
                 };
             });
             state.brands.geoOverrides = overrides;
@@ -4949,6 +5363,11 @@
 
     function renderBrandsList() {
         if (!els.brandsList) return;
+        // Remember which brand cards are expanded before clearing
+        var expandedBrandIds = new Set();
+        els.brandsList.querySelectorAll('.brand-card.expanded').forEach(function (card) {
+            if (card.dataset.brandId) expandedBrandIds.add(card.dataset.brandId);
+        });
         els.brandsList.innerHTML = '';
         var brands = state.brands.list || [];
         if (els.brandsEmpty) {
@@ -5047,6 +5466,9 @@
 
             card.appendChild(header);
             card.appendChild(body);
+            if (expandedBrandIds.has(brand.id)) {
+                card.classList.add('expanded');
+            }
             els.brandsList.appendChild(card);
         });
     }
@@ -5163,6 +5585,7 @@
         }
         await loadCategories();
         initMiniMap();
+        loadAreasDirectoryForTranslation(); // pre-load for brand search translation
         loadPins();
         setActiveTab('pins');
         if (state.permissions?.isAdmin) {

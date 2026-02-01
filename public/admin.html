@@ -31,6 +31,7 @@
             <button class="admin-tab" data-tab="tabs" role="tab" aria-selected="false" data-admin-only="true">Manage Tabs</button>
             <button class="admin-tab" data-tab="categories" role="tab" aria-selected="false" data-admin-only="true">Manage Categories</button>
             <button class="admin-tab" data-tab="brands" role="tab" aria-selected="false" data-admin-only="true">Manage Brands</button>
+            <button class="admin-tab" data-tab="areas" role="tab" aria-selected="false" data-admin-only="true">Manage Areas</button>
         </div>
 
         <section id="admin-pin-content" class="admin-tab-content">
@@ -775,6 +776,40 @@
                     <div id="brands-list" class="brands-accordion"></div>
                     <div id="brands-empty" class="pin-list-empty hidden">No brands saved yet.</div>
                 </div>
+            </section>
+        </div>
+
+        <!-- Manage Areas Tab -->
+        <div id="admin-areas-pane" class="admin-tab-content hidden" data-admin-only="true">
+            <section class="admin-areas-manager">
+                <div class="panel-header">
+                    <div>
+                        <h2>Manage Areas</h2>
+                        <p class="panel-sub">Kelola direktori provinsi dan kota Indonesia (Bahasa &amp; English).</p>
+                    </div>
+                    <div class="panel-actions">
+                        <button type="button" id="areas-seed-btn" class="ghost-btn chip-btn">Seed Data</button>
+                        <button type="button" id="areas-refresh-btn" class="ghost-btn chip-btn">Refresh</button>
+                    </div>
+                </div>
+                <div id="areas-message" class="admin-message" role="status" aria-live="polite"></div>
+
+                <div class="areas-add-form">
+                    <h3>Add Province</h3>
+                    <div class="areas-form-row">
+                        <input type="text" id="area-new-nameId" placeholder="Nama Indonesia (e.g. Jawa Barat)">
+                        <input type="text" id="area-new-nameEn" placeholder="English Name (e.g. West Java)">
+                        <input type="text" id="area-new-aliases" placeholder="Aliases, comma separated">
+                        <button type="button" class="chip-btn" id="area-add-province-btn">Add</button>
+                    </div>
+                </div>
+
+                <div class="areas-filter-row">
+                    <input type="search" id="areas-search-input" placeholder="Cari provinsi atau kota...">
+                </div>
+
+                <div id="areas-list" class="areas-accordion"></div>
+                <div id="areas-empty" class="pin-list-empty hidden">No areas yet. Click "Seed Data" to populate.</div>
             </section>
         </div>
 

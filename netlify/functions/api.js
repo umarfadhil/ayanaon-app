@@ -63,6 +63,7 @@ async function ensureIndexes(database) {
         await database.collection('analytics_events').createIndex({ referrer: 1 });
         await database.collection('analytics_events').createIndex({ lat: 1, lng: 1 });
         await database.collection('brands').createIndex({ name: 1 });
+        await database.collection('areas').createIndex({ nameId: 1 });
         indexesEnsured = true;
     } catch (error) {
         console.error('Failed to ensure indexes', error);
@@ -429,37 +430,39 @@ async function reverseGeocodeProvinceCity(lat, lng) {
     }
     const useGoogle = Boolean(GOOGLE_MAPS_API_KEY);
     try {
+        let rawProvince = '';
+        let rawCity = '';
         if (useGoogle) {
             const response = await axios.get(
                 `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
             );
             const results = response.data?.results || [];
             if (results.length) {
-                let province = '';
-                let city = '';
                 const components = results[0].address_components || [];
                 components.forEach((component) => {
                     if (component.types.includes('administrative_area_level_1')) {
-                        province = province || component.long_name || '';
+                        rawProvince = rawProvince || component.long_name || '';
                     }
                     if (component.types.includes('locality') || component.types.includes('administrative_area_level_2')) {
-                        city = city || component.long_name || '';
+                        rawCity = rawCity || component.long_name || '';
                     }
                 });
-                const payload = { province, city };
-                geocodeProvinceCityCache.set(key, payload);
-                return payload;
             }
         }
-        // Fallback: free OpenStreetMap Nominatim
-        const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
-            params: { format: 'json', lat, lon: lng, zoom: 10, addressdetails: 1 },
-            headers: { 'User-Agent': 'ayanaon-analytics/1.0' }
-        });
-        const addr = response.data?.address || {};
-        const province = addr.state || '';
-        const city = addr.city || addr.town || addr.village || addr.county || '';
-        const payload = { province, city };
+        if (!rawProvince && !rawCity) {
+            // Fallback: free OpenStreetMap Nominatim
+            const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+                params: { format: 'json', lat, lon: lng, zoom: 10, addressdetails: 1 },
+                headers: { 'User-Agent': 'ayanaon-analytics/1.0' }
+            });
+            const addr = response.data?.address || {};
+            rawProvince = addr.state || '';
+            rawCity = addr.city || addr.town || addr.village || addr.county || '';
+        }
+        // Translate English names to Indonesian using areas directory
+        const areas = await getAreasDirectory();
+        const translated = translateProvinceCity(rawProvince, rawCity, areas);
+        const payload = { province: translated.province, city: translated.city };
         geocodeProvinceCityCache.set(key, payload);
         return payload;
     } catch (error) {
@@ -467,6 +470,350 @@ async function reverseGeocodeProvinceCity(lat, lng) {
         return { province: '', city: '' };
     }
 }
+
+// ── Area Directory Cache & Translation ────────────────────────────
+let areasCache = null;
+let areasCacheExpiresAt = 0;
+const AREAS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function getAreasDirectory() {
+    const now = Date.now();
+    if (areasCache && now < areasCacheExpiresAt) return areasCache;
+    try {
+        const db = await connectToDatabase();
+        areasCache = await db.collection('areas').find({}).toArray();
+        areasCacheExpiresAt = now + AREAS_CACHE_TTL_MS;
+    } catch (_) {
+        areasCache = areasCache || [];
+    }
+    return areasCache;
+}
+
+function normalizeForAreaMatch(str) {
+    return (str || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+}
+
+function translateProvinceCity(province, city, areas) {
+    let translatedProvince = province || '';
+    let translatedCity = city || '';
+    if (!areas || !areas.length) return { province: translatedProvince, city: translatedCity };
+    const normProv = normalizeForAreaMatch(province);
+    const normCity = normalizeForAreaMatch(city);
+    if (!normProv && !normCity) return { province: translatedProvince, city: translatedCity };
+    for (const area of areas) {
+        const provAliases = (area.aliases || []).map(normalizeForAreaMatch);
+        provAliases.push(normalizeForAreaMatch(area.nameId), normalizeForAreaMatch(area.nameEn));
+        const provMatch = normProv && provAliases.some(a => a && (a === normProv || normProv.includes(a) || a.includes(normProv)));
+        if (provMatch) {
+            translatedProvince = area.nameId;
+            if (normCity) {
+                for (const c of (area.cities || [])) {
+                    const cityAliases = (c.aliases || []).map(normalizeForAreaMatch);
+                    cityAliases.push(normalizeForAreaMatch(c.nameId), normalizeForAreaMatch(c.nameEn));
+                    const cityMatch = cityAliases.some(a => a && (a === normCity || normCity.includes(a) || a.includes(normCity)));
+                    if (cityMatch) {
+                        translatedCity = c.nameId;
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    return { province: translatedProvince, city: translatedCity };
+}
+
+const INDONESIA_AREAS_SEED = [
+    { nameId: 'Aceh', nameEn: 'Aceh', aliases: ['aceh', 'nanggroe aceh darussalam', 'nad', 'special region of aceh'], cities: [
+        { nameId: 'Kota Banda Aceh', nameEn: 'Banda Aceh City', aliases: ['banda aceh', 'kota banda aceh'] },
+        { nameId: 'Kota Sabang', nameEn: 'Sabang City', aliases: ['sabang', 'kota sabang'] },
+        { nameId: 'Kota Langsa', nameEn: 'Langsa City', aliases: ['langsa', 'kota langsa'] },
+        { nameId: 'Kota Lhokseumawe', nameEn: 'Lhokseumawe City', aliases: ['lhokseumawe', 'kota lhokseumawe'] },
+        { nameId: 'Kota Subulussalam', nameEn: 'Subulussalam City', aliases: ['subulussalam', 'kota subulussalam'] },
+        { nameId: 'Kabupaten Aceh Besar', nameEn: 'Aceh Besar Regency', aliases: ['aceh besar', 'kabupaten aceh besar'] },
+        { nameId: 'Kabupaten Pidie', nameEn: 'Pidie Regency', aliases: ['pidie', 'kabupaten pidie'] },
+        { nameId: 'Kabupaten Aceh Utara', nameEn: 'North Aceh Regency', aliases: ['aceh utara', 'north aceh', 'kabupaten aceh utara'] },
+        { nameId: 'Kabupaten Aceh Timur', nameEn: 'East Aceh Regency', aliases: ['aceh timur', 'east aceh', 'kabupaten aceh timur'] },
+        { nameId: 'Kabupaten Aceh Selatan', nameEn: 'South Aceh Regency', aliases: ['aceh selatan', 'south aceh', 'kabupaten aceh selatan'] },
+        { nameId: 'Kabupaten Aceh Barat', nameEn: 'West Aceh Regency', aliases: ['aceh barat', 'west aceh', 'kabupaten aceh barat'] },
+        { nameId: 'Kabupaten Aceh Tengah', nameEn: 'Central Aceh Regency', aliases: ['aceh tengah', 'central aceh', 'kabupaten aceh tengah'] },
+    ]},
+    { nameId: 'Sumatera Utara', nameEn: 'North Sumatra', aliases: ['sumatera utara', 'north sumatra', 'north sumatera', 'sumut'], cities: [
+        { nameId: 'Kota Medan', nameEn: 'Medan City', aliases: ['medan', 'kota medan'] },
+        { nameId: 'Kota Binjai', nameEn: 'Binjai City', aliases: ['binjai', 'kota binjai'] },
+        { nameId: 'Kota Pematang Siantar', nameEn: 'Pematang Siantar City', aliases: ['pematang siantar', 'kota pematang siantar'] },
+        { nameId: 'Kota Tebing Tinggi', nameEn: 'Tebing Tinggi City', aliases: ['tebing tinggi', 'kota tebing tinggi'] },
+        { nameId: 'Kota Padang Sidempuan', nameEn: 'Padang Sidempuan City', aliases: ['padang sidempuan', 'kota padang sidempuan'] },
+        { nameId: 'Kota Tanjung Balai', nameEn: 'Tanjung Balai City', aliases: ['tanjung balai', 'kota tanjung balai'] },
+        { nameId: 'Kota Sibolga', nameEn: 'Sibolga City', aliases: ['sibolga', 'kota sibolga'] },
+        { nameId: 'Kota Gunungsitoli', nameEn: 'Gunungsitoli City', aliases: ['gunungsitoli', 'kota gunungsitoli'] },
+        { nameId: 'Kabupaten Deli Serdang', nameEn: 'Deli Serdang Regency', aliases: ['deli serdang', 'kabupaten deli serdang'] },
+        { nameId: 'Kabupaten Langkat', nameEn: 'Langkat Regency', aliases: ['langkat', 'kabupaten langkat'] },
+        { nameId: 'Kabupaten Karo', nameEn: 'Karo Regency', aliases: ['karo', 'kabupaten karo'] },
+        { nameId: 'Kabupaten Simalungun', nameEn: 'Simalungun Regency', aliases: ['simalungun', 'kabupaten simalungun'] },
+    ]},
+    { nameId: 'Sumatera Barat', nameEn: 'West Sumatra', aliases: ['sumatera barat', 'west sumatra', 'west sumatera', 'sumbar'], cities: [
+        { nameId: 'Kota Padang', nameEn: 'Padang City', aliases: ['padang', 'kota padang'] },
+        { nameId: 'Kota Bukittinggi', nameEn: 'Bukittinggi City', aliases: ['bukittinggi', 'kota bukittinggi'] },
+        { nameId: 'Kota Payakumbuh', nameEn: 'Payakumbuh City', aliases: ['payakumbuh', 'kota payakumbuh'] },
+        { nameId: 'Kota Solok', nameEn: 'Solok City', aliases: ['solok', 'kota solok'] },
+        { nameId: 'Kota Sawahlunto', nameEn: 'Sawahlunto City', aliases: ['sawahlunto', 'kota sawahlunto'] },
+        { nameId: 'Kota Padang Panjang', nameEn: 'Padang Panjang City', aliases: ['padang panjang', 'kota padang panjang'] },
+        { nameId: 'Kota Pariaman', nameEn: 'Pariaman City', aliases: ['pariaman', 'kota pariaman'] },
+    ]},
+    { nameId: 'Riau', nameEn: 'Riau', aliases: ['riau'], cities: [
+        { nameId: 'Kota Pekanbaru', nameEn: 'Pekanbaru City', aliases: ['pekanbaru', 'kota pekanbaru'] },
+        { nameId: 'Kota Dumai', nameEn: 'Dumai City', aliases: ['dumai', 'kota dumai'] },
+        { nameId: 'Kabupaten Kampar', nameEn: 'Kampar Regency', aliases: ['kampar', 'kabupaten kampar'] },
+        { nameId: 'Kabupaten Bengkalis', nameEn: 'Bengkalis Regency', aliases: ['bengkalis', 'kabupaten bengkalis'] },
+        { nameId: 'Kabupaten Indragiri Hilir', nameEn: 'Indragiri Hilir Regency', aliases: ['indragiri hilir', 'kabupaten indragiri hilir'] },
+        { nameId: 'Kabupaten Indragiri Hulu', nameEn: 'Indragiri Hulu Regency', aliases: ['indragiri hulu', 'kabupaten indragiri hulu'] },
+        { nameId: 'Kabupaten Siak', nameEn: 'Siak Regency', aliases: ['siak', 'kabupaten siak'] },
+        { nameId: 'Kabupaten Rokan Hilir', nameEn: 'Rokan Hilir Regency', aliases: ['rokan hilir', 'kabupaten rokan hilir'] },
+        { nameId: 'Kabupaten Rokan Hulu', nameEn: 'Rokan Hulu Regency', aliases: ['rokan hulu', 'kabupaten rokan hulu'] },
+    ]},
+    { nameId: 'Jambi', nameEn: 'Jambi', aliases: ['jambi'], cities: [
+        { nameId: 'Kota Jambi', nameEn: 'Jambi City', aliases: ['kota jambi'] },
+        { nameId: 'Kota Sungai Penuh', nameEn: 'Sungai Penuh City', aliases: ['sungai penuh', 'kota sungai penuh'] },
+        { nameId: 'Kabupaten Muaro Jambi', nameEn: 'Muaro Jambi Regency', aliases: ['muaro jambi', 'kabupaten muaro jambi'] },
+        { nameId: 'Kabupaten Batanghari', nameEn: 'Batanghari Regency', aliases: ['batanghari', 'kabupaten batanghari'] },
+        { nameId: 'Kabupaten Kerinci', nameEn: 'Kerinci Regency', aliases: ['kerinci', 'kabupaten kerinci'] },
+    ]},
+    { nameId: 'Sumatera Selatan', nameEn: 'South Sumatra', aliases: ['sumatera selatan', 'south sumatra', 'south sumatera', 'sumsel'], cities: [
+        { nameId: 'Kota Palembang', nameEn: 'Palembang City', aliases: ['palembang', 'kota palembang'] },
+        { nameId: 'Kota Prabumulih', nameEn: 'Prabumulih City', aliases: ['prabumulih', 'kota prabumulih'] },
+        { nameId: 'Kota Pagar Alam', nameEn: 'Pagar Alam City', aliases: ['pagar alam', 'kota pagar alam'] },
+        { nameId: 'Kota Lubuklinggau', nameEn: 'Lubuklinggau City', aliases: ['lubuklinggau', 'kota lubuklinggau'] },
+    ]},
+    { nameId: 'Bengkulu', nameEn: 'Bengkulu', aliases: ['bengkulu'], cities: [
+        { nameId: 'Kota Bengkulu', nameEn: 'Bengkulu City', aliases: ['kota bengkulu'] },
+    ]},
+    { nameId: 'Lampung', nameEn: 'Lampung', aliases: ['lampung'], cities: [
+        { nameId: 'Kota Bandar Lampung', nameEn: 'Bandar Lampung City', aliases: ['bandar lampung', 'kota bandar lampung'] },
+        { nameId: 'Kota Metro', nameEn: 'Metro City', aliases: ['metro', 'kota metro'] },
+        { nameId: 'Kabupaten Lampung Selatan', nameEn: 'South Lampung Regency', aliases: ['lampung selatan', 'south lampung'] },
+        { nameId: 'Kabupaten Lampung Tengah', nameEn: 'Central Lampung Regency', aliases: ['lampung tengah', 'central lampung'] },
+        { nameId: 'Kabupaten Lampung Utara', nameEn: 'North Lampung Regency', aliases: ['lampung utara', 'north lampung'] },
+    ]},
+    { nameId: 'Kepulauan Bangka Belitung', nameEn: 'Bangka Belitung Islands', aliases: ['kepulauan bangka belitung', 'bangka belitung islands', 'bangka belitung', 'babel'], cities: [
+        { nameId: 'Kota Pangkal Pinang', nameEn: 'Pangkal Pinang City', aliases: ['pangkal pinang', 'kota pangkal pinang', 'pangkalpinang'] },
+        { nameId: 'Kabupaten Bangka', nameEn: 'Bangka Regency', aliases: ['bangka', 'kabupaten bangka'] },
+        { nameId: 'Kabupaten Belitung', nameEn: 'Belitung Regency', aliases: ['belitung', 'kabupaten belitung'] },
+    ]},
+    { nameId: 'Kepulauan Riau', nameEn: 'Riau Islands', aliases: ['kepulauan riau', 'riau islands', 'kepri'], cities: [
+        { nameId: 'Kota Batam', nameEn: 'Batam City', aliases: ['batam', 'kota batam'] },
+        { nameId: 'Kota Tanjung Pinang', nameEn: 'Tanjung Pinang City', aliases: ['tanjung pinang', 'kota tanjung pinang', 'tanjungpinang'] },
+        { nameId: 'Kabupaten Bintan', nameEn: 'Bintan Regency', aliases: ['bintan', 'kabupaten bintan'] },
+        { nameId: 'Kabupaten Karimun', nameEn: 'Karimun Regency', aliases: ['karimun', 'kabupaten karimun'] },
+    ]},
+    { nameId: 'DKI Jakarta', nameEn: 'Jakarta', aliases: ['dki jakarta', 'jakarta', 'special capital region of jakarta', 'jakarta special capital region'], cities: [
+        { nameId: 'Jakarta Pusat', nameEn: 'Central Jakarta', aliases: ['jakarta pusat', 'central jakarta'] },
+        { nameId: 'Jakarta Utara', nameEn: 'North Jakarta', aliases: ['jakarta utara', 'north jakarta'] },
+        { nameId: 'Jakarta Selatan', nameEn: 'South Jakarta', aliases: ['jakarta selatan', 'south jakarta'] },
+        { nameId: 'Jakarta Timur', nameEn: 'East Jakarta', aliases: ['jakarta timur', 'east jakarta'] },
+        { nameId: 'Jakarta Barat', nameEn: 'West Jakarta', aliases: ['jakarta barat', 'west jakarta'] },
+        { nameId: 'Kepulauan Seribu', nameEn: 'Thousand Islands', aliases: ['kepulauan seribu', 'thousand islands'] },
+    ]},
+    { nameId: 'Jawa Barat', nameEn: 'West Java', aliases: ['jawa barat', 'west java', 'jabar'], cities: [
+        { nameId: 'Kota Bandung', nameEn: 'Bandung City', aliases: ['bandung', 'kota bandung', 'bandung city'] },
+        { nameId: 'Kota Bekasi', nameEn: 'Bekasi City', aliases: ['bekasi', 'kota bekasi'] },
+        { nameId: 'Kota Depok', nameEn: 'Depok City', aliases: ['depok', 'kota depok'] },
+        { nameId: 'Kota Bogor', nameEn: 'Bogor City', aliases: ['bogor', 'kota bogor'] },
+        { nameId: 'Kota Cimahi', nameEn: 'Cimahi City', aliases: ['cimahi', 'kota cimahi'] },
+        { nameId: 'Kota Tasikmalaya', nameEn: 'Tasikmalaya City', aliases: ['tasikmalaya', 'kota tasikmalaya'] },
+        { nameId: 'Kota Cirebon', nameEn: 'Cirebon City', aliases: ['cirebon', 'kota cirebon'] },
+        { nameId: 'Kota Sukabumi', nameEn: 'Sukabumi City', aliases: ['sukabumi', 'kota sukabumi'] },
+        { nameId: 'Kota Banjar', nameEn: 'Banjar City', aliases: ['banjar', 'kota banjar'] },
+        { nameId: 'Kabupaten Bandung', nameEn: 'Bandung Regency', aliases: ['kabupaten bandung'] },
+        { nameId: 'Kabupaten Bogor', nameEn: 'Bogor Regency', aliases: ['kabupaten bogor'] },
+        { nameId: 'Kabupaten Bekasi', nameEn: 'Bekasi Regency', aliases: ['kabupaten bekasi'] },
+        { nameId: 'Kabupaten Karawang', nameEn: 'Karawang Regency', aliases: ['karawang', 'kabupaten karawang'] },
+        { nameId: 'Kabupaten Subang', nameEn: 'Subang Regency', aliases: ['subang', 'kabupaten subang'] },
+        { nameId: 'Kabupaten Garut', nameEn: 'Garut Regency', aliases: ['garut', 'kabupaten garut'] },
+        { nameId: 'Kabupaten Cianjur', nameEn: 'Cianjur Regency', aliases: ['cianjur', 'kabupaten cianjur'] },
+        { nameId: 'Kabupaten Purwakarta', nameEn: 'Purwakarta Regency', aliases: ['purwakarta', 'kabupaten purwakarta'] },
+    ]},
+    { nameId: 'Jawa Tengah', nameEn: 'Central Java', aliases: ['jawa tengah', 'central java', 'jateng'], cities: [
+        { nameId: 'Kota Semarang', nameEn: 'Semarang City', aliases: ['semarang', 'kota semarang'] },
+        { nameId: 'Kota Surakarta', nameEn: 'Surakarta City', aliases: ['surakarta', 'solo', 'kota surakarta', 'kota solo'] },
+        { nameId: 'Kota Salatiga', nameEn: 'Salatiga City', aliases: ['salatiga', 'kota salatiga'] },
+        { nameId: 'Kota Magelang', nameEn: 'Magelang City', aliases: ['magelang', 'kota magelang'] },
+        { nameId: 'Kota Pekalongan', nameEn: 'Pekalongan City', aliases: ['pekalongan', 'kota pekalongan'] },
+        { nameId: 'Kota Tegal', nameEn: 'Tegal City', aliases: ['tegal', 'kota tegal'] },
+        { nameId: 'Kabupaten Banyumas', nameEn: 'Banyumas Regency', aliases: ['banyumas', 'kabupaten banyumas'] },
+        { nameId: 'Kabupaten Cilacap', nameEn: 'Cilacap Regency', aliases: ['cilacap', 'kabupaten cilacap'] },
+        { nameId: 'Kabupaten Kudus', nameEn: 'Kudus Regency', aliases: ['kudus', 'kabupaten kudus'] },
+        { nameId: 'Kabupaten Jepara', nameEn: 'Jepara Regency', aliases: ['jepara', 'kabupaten jepara'] },
+        { nameId: 'Kabupaten Klaten', nameEn: 'Klaten Regency', aliases: ['klaten', 'kabupaten klaten'] },
+        { nameId: 'Kabupaten Kebumen', nameEn: 'Kebumen Regency', aliases: ['kebumen', 'kabupaten kebumen'] },
+    ]},
+    { nameId: 'DI Yogyakarta', nameEn: 'Yogyakarta', aliases: ['di yogyakarta', 'yogyakarta', 'special region of yogyakarta', 'diy', 'daerah istimewa yogyakarta'], cities: [
+        { nameId: 'Kota Yogyakarta', nameEn: 'Yogyakarta City', aliases: ['yogyakarta', 'kota yogyakarta', 'jogja', 'jogjakarta'] },
+        { nameId: 'Kabupaten Sleman', nameEn: 'Sleman Regency', aliases: ['sleman', 'kabupaten sleman'] },
+        { nameId: 'Kabupaten Bantul', nameEn: 'Bantul Regency', aliases: ['bantul', 'kabupaten bantul'] },
+        { nameId: 'Kabupaten Gunungkidul', nameEn: 'Gunungkidul Regency', aliases: ['gunungkidul', 'gunung kidul', 'kabupaten gunungkidul'] },
+        { nameId: 'Kabupaten Kulon Progo', nameEn: 'Kulon Progo Regency', aliases: ['kulon progo', 'kabupaten kulon progo'] },
+    ]},
+    { nameId: 'Jawa Timur', nameEn: 'East Java', aliases: ['jawa timur', 'east java', 'jatim'], cities: [
+        { nameId: 'Kota Surabaya', nameEn: 'Surabaya City', aliases: ['surabaya', 'kota surabaya'] },
+        { nameId: 'Kota Malang', nameEn: 'Malang City', aliases: ['malang', 'kota malang'] },
+        { nameId: 'Kota Batu', nameEn: 'Batu City', aliases: ['batu', 'kota batu'] },
+        { nameId: 'Kota Kediri', nameEn: 'Kediri City', aliases: ['kediri', 'kota kediri'] },
+        { nameId: 'Kota Blitar', nameEn: 'Blitar City', aliases: ['blitar', 'kota blitar'] },
+        { nameId: 'Kota Madiun', nameEn: 'Madiun City', aliases: ['madiun', 'kota madiun'] },
+        { nameId: 'Kota Mojokerto', nameEn: 'Mojokerto City', aliases: ['mojokerto', 'kota mojokerto'] },
+        { nameId: 'Kota Pasuruan', nameEn: 'Pasuruan City', aliases: ['pasuruan', 'kota pasuruan'] },
+        { nameId: 'Kota Probolinggo', nameEn: 'Probolinggo City', aliases: ['probolinggo', 'kota probolinggo'] },
+        { nameId: 'Kabupaten Sidoarjo', nameEn: 'Sidoarjo Regency', aliases: ['sidoarjo', 'kabupaten sidoarjo'] },
+        { nameId: 'Kabupaten Gresik', nameEn: 'Gresik Regency', aliases: ['gresik', 'kabupaten gresik'] },
+        { nameId: 'Kabupaten Jember', nameEn: 'Jember Regency', aliases: ['jember', 'kabupaten jember'] },
+        { nameId: 'Kabupaten Banyuwangi', nameEn: 'Banyuwangi Regency', aliases: ['banyuwangi', 'kabupaten banyuwangi'] },
+        { nameId: 'Kabupaten Lamongan', nameEn: 'Lamongan Regency', aliases: ['lamongan', 'kabupaten lamongan'] },
+        { nameId: 'Kabupaten Tuban', nameEn: 'Tuban Regency', aliases: ['tuban', 'kabupaten tuban'] },
+    ]},
+    { nameId: 'Banten', nameEn: 'Banten', aliases: ['banten'], cities: [
+        { nameId: 'Kota Tangerang', nameEn: 'Tangerang City', aliases: ['tangerang', 'kota tangerang'] },
+        { nameId: 'Kota Tangerang Selatan', nameEn: 'South Tangerang City', aliases: ['tangerang selatan', 'south tangerang', 'tangsel', 'kota tangerang selatan'] },
+        { nameId: 'Kota Serang', nameEn: 'Serang City', aliases: ['serang', 'kota serang'] },
+        { nameId: 'Kota Cilegon', nameEn: 'Cilegon City', aliases: ['cilegon', 'kota cilegon'] },
+        { nameId: 'Kabupaten Tangerang', nameEn: 'Tangerang Regency', aliases: ['kabupaten tangerang'] },
+        { nameId: 'Kabupaten Serang', nameEn: 'Serang Regency', aliases: ['kabupaten serang'] },
+        { nameId: 'Kabupaten Pandeglang', nameEn: 'Pandeglang Regency', aliases: ['pandeglang', 'kabupaten pandeglang'] },
+        { nameId: 'Kabupaten Lebak', nameEn: 'Lebak Regency', aliases: ['lebak', 'kabupaten lebak'] },
+    ]},
+    { nameId: 'Bali', nameEn: 'Bali', aliases: ['bali'], cities: [
+        { nameId: 'Kota Denpasar', nameEn: 'Denpasar City', aliases: ['denpasar', 'kota denpasar'] },
+        { nameId: 'Kabupaten Badung', nameEn: 'Badung Regency', aliases: ['badung', 'kabupaten badung'] },
+        { nameId: 'Kabupaten Gianyar', nameEn: 'Gianyar Regency', aliases: ['gianyar', 'kabupaten gianyar'] },
+        { nameId: 'Kabupaten Tabanan', nameEn: 'Tabanan Regency', aliases: ['tabanan', 'kabupaten tabanan'] },
+        { nameId: 'Kabupaten Buleleng', nameEn: 'Buleleng Regency', aliases: ['buleleng', 'kabupaten buleleng', 'singaraja'] },
+        { nameId: 'Kabupaten Karangasem', nameEn: 'Karangasem Regency', aliases: ['karangasem', 'kabupaten karangasem'] },
+        { nameId: 'Kabupaten Klungkung', nameEn: 'Klungkung Regency', aliases: ['klungkung', 'kabupaten klungkung'] },
+        { nameId: 'Kabupaten Bangli', nameEn: 'Bangli Regency', aliases: ['bangli', 'kabupaten bangli'] },
+        { nameId: 'Kabupaten Jembrana', nameEn: 'Jembrana Regency', aliases: ['jembrana', 'kabupaten jembrana'] },
+    ]},
+    { nameId: 'Nusa Tenggara Barat', nameEn: 'West Nusa Tenggara', aliases: ['nusa tenggara barat', 'west nusa tenggara', 'ntb'], cities: [
+        { nameId: 'Kota Mataram', nameEn: 'Mataram City', aliases: ['mataram', 'kota mataram'] },
+        { nameId: 'Kota Bima', nameEn: 'Bima City', aliases: ['bima', 'kota bima'] },
+        { nameId: 'Kabupaten Lombok Barat', nameEn: 'West Lombok Regency', aliases: ['lombok barat', 'west lombok'] },
+        { nameId: 'Kabupaten Lombok Tengah', nameEn: 'Central Lombok Regency', aliases: ['lombok tengah', 'central lombok'] },
+        { nameId: 'Kabupaten Lombok Timur', nameEn: 'East Lombok Regency', aliases: ['lombok timur', 'east lombok'] },
+        { nameId: 'Kabupaten Sumbawa', nameEn: 'Sumbawa Regency', aliases: ['sumbawa', 'kabupaten sumbawa'] },
+    ]},
+    { nameId: 'Nusa Tenggara Timur', nameEn: 'East Nusa Tenggara', aliases: ['nusa tenggara timur', 'east nusa tenggara', 'ntt'], cities: [
+        { nameId: 'Kota Kupang', nameEn: 'Kupang City', aliases: ['kupang', 'kota kupang'] },
+        { nameId: 'Kabupaten Manggarai', nameEn: 'Manggarai Regency', aliases: ['manggarai', 'kabupaten manggarai'] },
+        { nameId: 'Kabupaten Ende', nameEn: 'Ende Regency', aliases: ['ende', 'kabupaten ende'] },
+        { nameId: 'Kabupaten Flores Timur', nameEn: 'East Flores Regency', aliases: ['flores timur', 'east flores'] },
+        { nameId: 'Kabupaten Sikka', nameEn: 'Sikka Regency', aliases: ['sikka', 'kabupaten sikka', 'maumere'] },
+    ]},
+    { nameId: 'Kalimantan Barat', nameEn: 'West Kalimantan', aliases: ['kalimantan barat', 'west kalimantan', 'kalbar'], cities: [
+        { nameId: 'Kota Pontianak', nameEn: 'Pontianak City', aliases: ['pontianak', 'kota pontianak'] },
+        { nameId: 'Kota Singkawang', nameEn: 'Singkawang City', aliases: ['singkawang', 'kota singkawang'] },
+        { nameId: 'Kabupaten Kubu Raya', nameEn: 'Kubu Raya Regency', aliases: ['kubu raya', 'kabupaten kubu raya'] },
+        { nameId: 'Kabupaten Sambas', nameEn: 'Sambas Regency', aliases: ['sambas', 'kabupaten sambas'] },
+    ]},
+    { nameId: 'Kalimantan Tengah', nameEn: 'Central Kalimantan', aliases: ['kalimantan tengah', 'central kalimantan', 'kalteng'], cities: [
+        { nameId: 'Kota Palangka Raya', nameEn: 'Palangka Raya City', aliases: ['palangka raya', 'kota palangka raya', 'palangkaraya'] },
+        { nameId: 'Kabupaten Kotawaringin Timur', nameEn: 'East Kotawaringin Regency', aliases: ['kotawaringin timur', 'sampit'] },
+        { nameId: 'Kabupaten Kotawaringin Barat', nameEn: 'West Kotawaringin Regency', aliases: ['kotawaringin barat', 'pangkalan bun'] },
+    ]},
+    { nameId: 'Kalimantan Selatan', nameEn: 'South Kalimantan', aliases: ['kalimantan selatan', 'south kalimantan', 'kalsel'], cities: [
+        { nameId: 'Kota Banjarmasin', nameEn: 'Banjarmasin City', aliases: ['banjarmasin', 'kota banjarmasin'] },
+        { nameId: 'Kota Banjarbaru', nameEn: 'Banjarbaru City', aliases: ['banjarbaru', 'kota banjarbaru'] },
+        { nameId: 'Kabupaten Banjar', nameEn: 'Banjar Regency', aliases: ['kabupaten banjar'] },
+        { nameId: 'Kabupaten Tanah Laut', nameEn: 'Tanah Laut Regency', aliases: ['tanah laut', 'kabupaten tanah laut'] },
+    ]},
+    { nameId: 'Kalimantan Timur', nameEn: 'East Kalimantan', aliases: ['kalimantan timur', 'east kalimantan', 'kaltim'], cities: [
+        { nameId: 'Kota Samarinda', nameEn: 'Samarinda City', aliases: ['samarinda', 'kota samarinda'] },
+        { nameId: 'Kota Balikpapan', nameEn: 'Balikpapan City', aliases: ['balikpapan', 'kota balikpapan'] },
+        { nameId: 'Kota Bontang', nameEn: 'Bontang City', aliases: ['bontang', 'kota bontang'] },
+        { nameId: 'Kabupaten Kutai Kartanegara', nameEn: 'Kutai Kartanegara Regency', aliases: ['kutai kartanegara', 'tenggarong'] },
+        { nameId: 'Kabupaten Berau', nameEn: 'Berau Regency', aliases: ['berau', 'kabupaten berau'] },
+    ]},
+    { nameId: 'Kalimantan Utara', nameEn: 'North Kalimantan', aliases: ['kalimantan utara', 'north kalimantan', 'kaltara'], cities: [
+        { nameId: 'Kota Tarakan', nameEn: 'Tarakan City', aliases: ['tarakan', 'kota tarakan'] },
+        { nameId: 'Kabupaten Bulungan', nameEn: 'Bulungan Regency', aliases: ['bulungan', 'tanjung selor'] },
+        { nameId: 'Kabupaten Malinau', nameEn: 'Malinau Regency', aliases: ['malinau', 'kabupaten malinau'] },
+        { nameId: 'Kabupaten Nunukan', nameEn: 'Nunukan Regency', aliases: ['nunukan', 'kabupaten nunukan'] },
+    ]},
+    { nameId: 'Sulawesi Utara', nameEn: 'North Sulawesi', aliases: ['sulawesi utara', 'north sulawesi', 'sulut'], cities: [
+        { nameId: 'Kota Manado', nameEn: 'Manado City', aliases: ['manado', 'kota manado'] },
+        { nameId: 'Kota Bitung', nameEn: 'Bitung City', aliases: ['bitung', 'kota bitung'] },
+        { nameId: 'Kota Tomohon', nameEn: 'Tomohon City', aliases: ['tomohon', 'kota tomohon'] },
+        { nameId: 'Kota Kotamobagu', nameEn: 'Kotamobagu City', aliases: ['kotamobagu', 'kota kotamobagu'] },
+        { nameId: 'Kabupaten Minahasa', nameEn: 'Minahasa Regency', aliases: ['minahasa', 'kabupaten minahasa'] },
+    ]},
+    { nameId: 'Sulawesi Tengah', nameEn: 'Central Sulawesi', aliases: ['sulawesi tengah', 'central sulawesi', 'sulteng'], cities: [
+        { nameId: 'Kota Palu', nameEn: 'Palu City', aliases: ['palu', 'kota palu'] },
+        { nameId: 'Kabupaten Donggala', nameEn: 'Donggala Regency', aliases: ['donggala', 'kabupaten donggala'] },
+        { nameId: 'Kabupaten Poso', nameEn: 'Poso Regency', aliases: ['poso', 'kabupaten poso'] },
+    ]},
+    { nameId: 'Sulawesi Selatan', nameEn: 'South Sulawesi', aliases: ['sulawesi selatan', 'south sulawesi', 'sulsel'], cities: [
+        { nameId: 'Kota Makassar', nameEn: 'Makassar City', aliases: ['makassar', 'kota makassar', 'ujung pandang'] },
+        { nameId: 'Kota Parepare', nameEn: 'Parepare City', aliases: ['parepare', 'kota parepare', 'pare pare'] },
+        { nameId: 'Kota Palopo', nameEn: 'Palopo City', aliases: ['palopo', 'kota palopo'] },
+        { nameId: 'Kabupaten Gowa', nameEn: 'Gowa Regency', aliases: ['gowa', 'kabupaten gowa'] },
+        { nameId: 'Kabupaten Maros', nameEn: 'Maros Regency', aliases: ['maros', 'kabupaten maros'] },
+        { nameId: 'Kabupaten Bone', nameEn: 'Bone Regency', aliases: ['bone', 'kabupaten bone'] },
+    ]},
+    { nameId: 'Sulawesi Tenggara', nameEn: 'Southeast Sulawesi', aliases: ['sulawesi tenggara', 'southeast sulawesi', 'sultra'], cities: [
+        { nameId: 'Kota Kendari', nameEn: 'Kendari City', aliases: ['kendari', 'kota kendari'] },
+        { nameId: 'Kota Bau-Bau', nameEn: 'Bau-Bau City', aliases: ['bau bau', 'baubau', 'kota bau bau'] },
+    ]},
+    { nameId: 'Gorontalo', nameEn: 'Gorontalo', aliases: ['gorontalo'], cities: [
+        { nameId: 'Kota Gorontalo', nameEn: 'Gorontalo City', aliases: ['kota gorontalo'] },
+        { nameId: 'Kabupaten Gorontalo', nameEn: 'Gorontalo Regency', aliases: ['kabupaten gorontalo'] },
+        { nameId: 'Kabupaten Bone Bolango', nameEn: 'Bone Bolango Regency', aliases: ['bone bolango', 'kabupaten bone bolango'] },
+    ]},
+    { nameId: 'Sulawesi Barat', nameEn: 'West Sulawesi', aliases: ['sulawesi barat', 'west sulawesi', 'sulbar'], cities: [
+        { nameId: 'Kabupaten Mamuju', nameEn: 'Mamuju Regency', aliases: ['mamuju', 'kabupaten mamuju'] },
+        { nameId: 'Kabupaten Polewali Mandar', nameEn: 'Polewali Mandar Regency', aliases: ['polewali mandar', 'polman'] },
+        { nameId: 'Kabupaten Majene', nameEn: 'Majene Regency', aliases: ['majene', 'kabupaten majene'] },
+    ]},
+    { nameId: 'Maluku', nameEn: 'Maluku', aliases: ['maluku', 'moluccas'], cities: [
+        { nameId: 'Kota Ambon', nameEn: 'Ambon City', aliases: ['ambon', 'kota ambon'] },
+        { nameId: 'Kota Tual', nameEn: 'Tual City', aliases: ['tual', 'kota tual'] },
+        { nameId: 'Kabupaten Maluku Tengah', nameEn: 'Central Maluku Regency', aliases: ['maluku tengah', 'central maluku'] },
+    ]},
+    { nameId: 'Maluku Utara', nameEn: 'North Maluku', aliases: ['maluku utara', 'north maluku'], cities: [
+        { nameId: 'Kota Ternate', nameEn: 'Ternate City', aliases: ['ternate', 'kota ternate'] },
+        { nameId: 'Kota Tidore Kepulauan', nameEn: 'Tidore Islands City', aliases: ['tidore', 'tidore kepulauan', 'kota tidore kepulauan'] },
+        { nameId: 'Kabupaten Halmahera Utara', nameEn: 'North Halmahera Regency', aliases: ['halmahera utara', 'north halmahera'] },
+    ]},
+    { nameId: 'Papua', nameEn: 'Papua', aliases: ['papua'], cities: [
+        { nameId: 'Kota Jayapura', nameEn: 'Jayapura City', aliases: ['jayapura', 'kota jayapura'] },
+        { nameId: 'Kabupaten Jayapura', nameEn: 'Jayapura Regency', aliases: ['kabupaten jayapura'] },
+        { nameId: 'Kabupaten Merauke', nameEn: 'Merauke Regency', aliases: ['merauke', 'kabupaten merauke'] },
+        { nameId: 'Kabupaten Mimika', nameEn: 'Mimika Regency', aliases: ['mimika', 'timika', 'kabupaten mimika'] },
+    ]},
+    { nameId: 'Papua Barat', nameEn: 'West Papua', aliases: ['papua barat', 'west papua'], cities: [
+        { nameId: 'Kota Manokwari', nameEn: 'Manokwari City', aliases: ['manokwari', 'kota manokwari'] },
+        { nameId: 'Kabupaten Sorong', nameEn: 'Sorong Regency', aliases: ['kabupaten sorong'] },
+        { nameId: 'Kota Sorong', nameEn: 'Sorong City', aliases: ['sorong', 'kota sorong'] },
+    ]},
+    { nameId: 'Papua Selatan', nameEn: 'South Papua', aliases: ['papua selatan', 'south papua'], cities: [
+        { nameId: 'Kabupaten Merauke', nameEn: 'Merauke Regency', aliases: ['merauke'] },
+        { nameId: 'Kabupaten Boven Digoel', nameEn: 'Boven Digoel Regency', aliases: ['boven digoel'] },
+        { nameId: 'Kabupaten Mappi', nameEn: 'Mappi Regency', aliases: ['mappi'] },
+        { nameId: 'Kabupaten Asmat', nameEn: 'Asmat Regency', aliases: ['asmat'] },
+    ]},
+    { nameId: 'Papua Tengah', nameEn: 'Central Papua', aliases: ['papua tengah', 'central papua'], cities: [
+        { nameId: 'Kabupaten Nabire', nameEn: 'Nabire Regency', aliases: ['nabire'] },
+        { nameId: 'Kabupaten Paniai', nameEn: 'Paniai Regency', aliases: ['paniai'] },
+        { nameId: 'Kabupaten Mimika', nameEn: 'Mimika Regency', aliases: ['mimika', 'timika'] },
+    ]},
+    { nameId: 'Papua Pegunungan', nameEn: 'Highland Papua', aliases: ['papua pegunungan', 'highland papua', 'papua highlands'], cities: [
+        { nameId: 'Kabupaten Jayawijaya', nameEn: 'Jayawijaya Regency', aliases: ['jayawijaya', 'wamena'] },
+        { nameId: 'Kabupaten Puncak Jaya', nameEn: 'Puncak Jaya Regency', aliases: ['puncak jaya'] },
+        { nameId: 'Kabupaten Lanny Jaya', nameEn: 'Lanny Jaya Regency', aliases: ['lanny jaya'] },
+    ]},
+    { nameId: 'Papua Barat Daya', nameEn: 'Southwest Papua', aliases: ['papua barat daya', 'southwest papua'], cities: [
+        { nameId: 'Kota Sorong', nameEn: 'Sorong City', aliases: ['sorong', 'kota sorong'] },
+        { nameId: 'Kabupaten Sorong', nameEn: 'Sorong Regency', aliases: ['kabupaten sorong'] },
+        { nameId: 'Kabupaten Raja Ampat', nameEn: 'Raja Ampat Regency', aliases: ['raja ampat', 'kabupaten raja ampat'] },
+    ]},
+];
 
 const DEFAULT_FEATURE_FLAGS = {
     gerobakOnline: true
@@ -5511,6 +5858,159 @@ router.delete('/admin/brands/:id/locations/:placeId', async (req, res) => {
     } catch (error) {
         console.error('Failed to remove location from brand', error);
         res.status(500).json({ message: 'Gagal menghapus lokasi dari brand.' });
+    }
+});
+
+// ── Area Directory Endpoints ──────────────────────────────────────
+
+router.get('/areas', async (req, res) => {
+    try {
+        const areas = await getAreasDirectory();
+        res.json({ areas: areas.map(a => ({ id: a._id.toString(), nameId: a.nameId, nameEn: a.nameEn, aliases: a.aliases || [], cities: a.cities || [] })) });
+    } catch (error) {
+        console.error('Failed to fetch areas', error);
+        res.status(500).json({ message: 'Tidak dapat memuat daftar area.' });
+    }
+});
+
+router.get('/admin/areas', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola area.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const areas = await db.collection('areas').find({}).sort({ nameId: 1 }).toArray();
+        res.json({ areas: areas.map(a => ({ id: a._id.toString(), nameId: a.nameId, nameEn: a.nameEn, aliases: a.aliases || [], cities: a.cities || [], updatedAt: a.updatedAt })) });
+    } catch (error) {
+        console.error('Failed to fetch areas', error);
+        res.status(500).json({ message: 'Tidak dapat memuat daftar area.' });
+    }
+});
+
+router.post('/admin/areas/seed', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola area.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const existing = await db.collection('areas').countDocuments();
+        if (existing > 0 && req.query.force !== 'true') {
+            return res.status(400).json({ message: `Sudah ada ${existing} provinsi. Gunakan ?force=true untuk menimpa.` });
+        }
+        if (req.query.force === 'true' && existing > 0) {
+            await db.collection('areas').deleteMany({});
+        }
+        const now = new Date();
+        const docs = INDONESIA_AREAS_SEED.map(p => ({ ...p, updatedAt: now }));
+        await db.collection('areas').insertMany(docs);
+        areasCache = null;
+        areasCacheExpiresAt = 0;
+        res.json({ message: `Berhasil menambahkan ${docs.length} provinsi.`, count: docs.length });
+    } catch (error) {
+        console.error('Failed to seed areas', error);
+        res.status(500).json({ message: 'Gagal seed data area.' });
+    }
+});
+
+router.post('/admin/areas', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola area.' });
+    }
+    try {
+        const { nameId, nameEn, aliases, cities } = req.body;
+        if (!nameId || !nameEn) {
+            return res.status(400).json({ message: 'nameId dan nameEn wajib diisi.' });
+        }
+        const db = await connectToDatabase();
+        const doc = {
+            nameId: nameId.trim(),
+            nameEn: nameEn.trim(),
+            aliases: (aliases || []).map(a => a.toLowerCase().trim()).filter(Boolean),
+            cities: (cities || []).map(c => ({
+                nameId: (c.nameId || '').trim(),
+                nameEn: (c.nameEn || '').trim(),
+                aliases: (c.aliases || []).map(a => a.toLowerCase().trim()).filter(Boolean)
+            })),
+            updatedAt: new Date()
+        };
+        const result = await db.collection('areas').insertOne(doc);
+        areasCache = null;
+        areasCacheExpiresAt = 0;
+        res.json({ area: { id: result.insertedId.toString(), ...doc } });
+    } catch (error) {
+        console.error('Failed to create area', error);
+        res.status(500).json({ message: 'Gagal menambah provinsi.' });
+    }
+});
+
+router.put('/admin/areas/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola area.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        let oid;
+        try { oid = new ObjectId(req.params.id); } catch (_) {
+            return res.status(400).json({ message: 'ID tidak valid.' });
+        }
+        const { nameId, nameEn, aliases, cities } = req.body;
+        const update = { updatedAt: new Date() };
+        if (nameId !== undefined) update.nameId = nameId.trim();
+        if (nameEn !== undefined) update.nameEn = nameEn.trim();
+        if (aliases !== undefined) update.aliases = aliases.map(a => a.toLowerCase().trim()).filter(Boolean);
+        if (cities !== undefined) update.cities = cities.map(c => ({
+            nameId: (c.nameId || '').trim(),
+            nameEn: (c.nameEn || '').trim(),
+            aliases: (c.aliases || []).map(a => a.toLowerCase().trim()).filter(Boolean)
+        }));
+        const result = await db.collection('areas').findOneAndUpdate(
+            { _id: oid },
+            { $set: update },
+            { returnDocument: 'after' }
+        );
+        if (!result.value && !result) {
+            return res.status(404).json({ message: 'Provinsi tidak ditemukan.' });
+        }
+        areasCache = null;
+        areasCacheExpiresAt = 0;
+        const doc = result.value || result;
+        res.json({ area: { id: doc._id.toString(), nameId: doc.nameId, nameEn: doc.nameEn, aliases: doc.aliases || [], cities: doc.cities || [], updatedAt: doc.updatedAt } });
+    } catch (error) {
+        console.error('Failed to update area', error);
+        res.status(500).json({ message: 'Gagal memperbarui provinsi.' });
+    }
+});
+
+router.delete('/admin/areas/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!resident.isAdmin) {
+        return res.status(403).json({ message: 'Hanya admin yang dapat mengelola area.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        let oid;
+        try { oid = new ObjectId(req.params.id); } catch (_) {
+            return res.status(400).json({ message: 'ID tidak valid.' });
+        }
+        const result = await db.collection('areas').deleteOne({ _id: oid });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Provinsi tidak ditemukan.' });
+        }
+        areasCache = null;
+        areasCacheExpiresAt = 0;
+        res.json({ message: 'Provinsi berhasil dihapus.' });
+    } catch (error) {
+        console.error('Failed to delete area', error);
+        res.status(500).json({ message: 'Gagal menghapus provinsi.' });
     }
 });
 
