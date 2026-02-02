@@ -96,6 +96,16 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.13
+- **Province-Level Category Cards:** Category cards on `/kategori` now display province-level areas instead of city-level for broader regional grouping.
+- **Server-Side Pin Search & Pagination:** The "Cari pin" section on both `/kategori` and `/kategori/<category>` pages now queries all active pins via a server-side API with paginated results (10 per page), replacing the previous client-side filtering of 200 pins.
+- **Province & City Filter Dropdowns:** Region filtering upgraded from a single dropdown to cascading province and city selects, with city options populated dynamically based on the selected province.
+- **Date Range Filter:** Renamed "Range tanggal" to "Select date" with start/end date inputs for filtering pins by date range overlap.
+- **Reset Filter Button:** Added a themed reset button next to the date filter to clear all search, region, and date inputs in one click.
+- **Geolocation Sorting:** When browser location is available, pin results are sorted by proximity to the user's position.
+- **Pin Detail Province Field:** Pin detail pages (`/pin/<id>`) now display the province alongside the city in the metadata section.
+- **Pin Detail Action Buttons:** Redesigned action buttons with a prominent "Temukan lebih banyak di Ayanaon" CTA, plus compact "Arahkan" (Google Maps) and "Website" buttons side by side.
+
 ### What's New in v2.4.12
 - **Manage Areas:** New admin tab with a full directory of Indonesian provinces and cities in both Bahasa Indonesia and English, with seed data for all 38 provinces, plus add/edit/delete support for provinces, cities, and aliases.
 - **Auto-Translate Province/City:** Brand search results now automatically translate English province and city names (e.g., "West Java", "Bandung City") to Indonesian equivalents ("Jawa Barat", "Kota Bandung") using the areas directory, both client-side and server-side.

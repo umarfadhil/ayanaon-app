@@ -1404,7 +1404,7 @@ async function fetchActivePinsForSitemap() {
     const db = await connectToDatabase();
     return db.collection('pins')
         .find({ $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] })
-        .project({ _id: 1, createdAt: 1, updatedAt: 1, category: 1, city: 1 })
+        .project({ _id: 1, createdAt: 1, updatedAt: 1, category: 1, province: 1, city: 1 })
         .toArray();
 }
 
@@ -1445,6 +1445,8 @@ function buildLandingEntriesFromPins(pins = [], baseUrl = '') {
         if (!categories.has(categorySlug)) {
             categories.set(categorySlug, category);
         }
+        const province = normalizeLandingText(pin?.province);
+        const provinceSlug = slugifyText(province);
         const city = normalizeLandingText(pin?.city);
         const regionSlug = slugifyText(city);
         if (!regionSlug) {
@@ -1454,8 +1456,9 @@ function buildLandingEntriesFromPins(pins = [], baseUrl = '') {
             regionsByCategory.set(categorySlug, new Map());
         }
         const regionMap = regionsByCategory.get(categorySlug);
-        if (!regionMap.has(regionSlug)) {
-            regionMap.set(regionSlug, city);
+        const regionKey = provinceSlug ? `${provinceSlug}/${regionSlug}` : regionSlug;
+        if (!regionMap.has(regionKey)) {
+            regionMap.set(regionKey, { provinceSlug, regionSlug });
         }
     });
     const lastmod = formatSitemapDate(new Date());
@@ -1474,10 +1477,27 @@ function buildLandingEntriesFromPins(pins = [], baseUrl = '') {
             priority: '0.6'
         });
     });
+    const addedProvincePaths = new Set();
     regionsByCategory.forEach((regionMap, categorySlug) => {
-        regionMap.forEach((_label, regionSlug) => {
+        regionMap.forEach(({ provinceSlug, regionSlug }) => {
+            // Add province-level entry if not already added
+            if (provinceSlug) {
+                const provincePath = `${baseUrl}/kategori/${categorySlug}/${provinceSlug}`;
+                if (!addedProvincePaths.has(provincePath)) {
+                    addedProvincePaths.add(provincePath);
+                    entries.push({
+                        loc: provincePath,
+                        lastmod,
+                        changefreq: 'weekly',
+                        priority: '0.55'
+                    });
+                }
+            }
+            const path = provinceSlug
+                ? `${baseUrl}/kategori/${categorySlug}/${provinceSlug}/${regionSlug}`
+                : `${baseUrl}/kategori/${categorySlug}/${regionSlug}`;
             entries.push({
-                loc: `${baseUrl}/kategori/${categorySlug}/${regionSlug}`,
+                loc: path,
                 lastmod,
                 changefreq: 'weekly',
                 priority: '0.5'
@@ -1541,29 +1561,29 @@ async function fetchCategoryIndexData() {
     const regionsRaw = await db.collection('pins')
         .aggregate([
             { $match: activeQuery },
-            { $group: { _id: { category: '$category', city: '$city' }, count: { $sum: 1 } } }
+            { $group: { _id: { category: '$category', province: '$province' }, count: { $sum: 1 } } }
         ])
         .toArray();
     const regionsByCategory = new Map();
     regionsRaw.forEach((doc) => {
         const categoryLabel = normalizeLandingText(doc?._id?.category);
-        const cityLabel = normalizeLandingText(doc?._id?.city);
+        const provinceLabel = normalizeLandingText(doc?._id?.province);
         const categorySlug = slugifyText(categoryLabel);
-        const regionSlug = slugifyText(cityLabel);
-        if (!categorySlug || !regionSlug) {
+        const provinceSlug = slugifyText(provinceLabel);
+        if (!categorySlug || !provinceSlug) {
             return;
         }
         if (!regionsByCategory.has(categorySlug)) {
             regionsByCategory.set(categorySlug, new Map());
         }
         const regionMap = regionsByCategory.get(categorySlug);
-        const existing = regionMap.get(regionSlug);
+        const existing = regionMap.get(provinceSlug);
         if (existing) {
             existing.count += Number(doc?.count) || 0;
         } else {
-            regionMap.set(regionSlug, {
-                label: cityLabel,
-                slug: regionSlug,
+            regionMap.set(provinceSlug, {
+                label: provinceLabel,
+                slug: provinceSlug,
                 count: Number(doc?.count) || 0
             });
         }
@@ -1601,6 +1621,44 @@ async function fetchCategoryIndexData() {
     const regions = Array.from(regionTotals.values()).sort(
         (a, b) => (b.count - a.count) || a.label.localeCompare(b.label)
     );
+
+    const regionTreeRaw = await db.collection('pins')
+        .aggregate([
+            { $match: activeQuery },
+            { $group: { _id: { province: '$province', city: '$city' }, count: { $sum: 1 } } }
+        ])
+        .toArray();
+    const provinceMap = new Map();
+    regionTreeRaw.forEach((doc) => {
+        const provLabel = normalizeLandingText(doc?._id?.province);
+        const cityLabel = normalizeLandingText(doc?._id?.city);
+        const provSlug = slugifyText(provLabel);
+        if (!provSlug) return;
+        if (!provinceMap.has(provSlug)) {
+            provinceMap.set(provSlug, { label: provLabel, slug: provSlug, count: 0, cities: new Map() });
+        }
+        const prov = provinceMap.get(provSlug);
+        const cnt = Number(doc?.count) || 0;
+        prov.count += cnt;
+        const citySlug = slugifyText(cityLabel);
+        if (citySlug) {
+            const existing = prov.cities.get(citySlug);
+            if (existing) {
+                existing.count += cnt;
+            } else {
+                prov.cities.set(citySlug, { label: cityLabel, slug: citySlug, count: cnt });
+            }
+        }
+    });
+    const regionTree = Array.from(provinceMap.values())
+        .map(p => ({
+            label: p.label,
+            slug: p.slug,
+            count: p.count,
+            cities: Array.from(p.cities.values()).sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label))
+        }))
+        .sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label));
+
     const pins = await db.collection('pins')
         .find(activeQuery)
         .project({
@@ -1608,25 +1666,27 @@ async function fetchCategoryIndexData() {
             title: 1,
             description: 1,
             category: 1,
+            province: 1,
             city: 1,
             lifetime: 1,
-            createdAt: 1,
-            updatedAt: 1
+            createdAt: 1
         })
-        .sort({ _id: -1 })
-        .limit(200)
+        .sort({ createdAt: -1 })
+        .limit(10)
         .toArray();
     return {
         categories,
         regionsByCategory: regionLists,
         totalPins,
         pins,
-        regions
+        regions,
+        regionTree
     };
 }
 
-async function fetchCategoryLandingData(categorySlug, regionSlug) {
+async function fetchCategoryLandingData(categorySlug, provinceSlug, regionSlug) {
     const safeCategorySlug = slugifyText(categorySlug);
+    const safeProvinceSlug = slugifyText(provinceSlug);
     const safeRegionSlug = slugifyText(regionSlug);
     if (!safeCategorySlug) {
         return null;
@@ -1662,22 +1722,45 @@ async function fetchCategoryLandingData(categorySlug, regionSlug) {
         return null;
     }
     const categoryQuery = { ...activeQuery, category: categoryLabel };
+    // Resolve province label if province slug provided
+    let provinceLabel = '';
+    if (safeProvinceSlug) {
+        const provinces = await db.collection('pins').distinct('province', categoryQuery);
+        for (const entry of provinces) {
+            const normalized = normalizeLandingText(entry);
+            if (!normalized) {
+                continue;
+            }
+            if (slugifyText(normalized) === safeProvinceSlug) {
+                provinceLabel = normalized;
+                break;
+            }
+        }
+        if (!provinceLabel) {
+            return null;
+        }
+        categoryQuery.province = provinceLabel;
+    }
     const regionDocs = await db.collection('pins')
         .aggregate([
             { $match: categoryQuery },
-            { $group: { _id: '$city', count: { $sum: 1 } } }
+            { $group: { _id: { province: '$province', city: '$city' }, count: { $sum: 1 } } }
         ])
         .toArray();
     const regions = regionDocs
         .map((doc) => {
-            const label = normalizeLandingText(doc?._id);
+            const label = normalizeLandingText(doc?._id?.city);
             const slug = slugifyText(label);
+            const provLabel = normalizeLandingText(doc?._id?.province);
+            const provSlug = slugifyText(provLabel);
             if (!label || !slug) {
                 return null;
             }
             return {
                 label,
                 slug,
+                provinceLabel: provLabel || '',
+                provinceSlug: provSlug || '',
                 count: Number(doc?.count) || 0
             };
         })
@@ -1710,22 +1793,55 @@ async function fetchCategoryLandingData(categorySlug, regionSlug) {
             title: 1,
             description: 1,
             category: 1,
+            province: 1,
             city: 1,
             lifetime: 1,
             createdAt: 1,
             updatedAt: 1
         })
-        .sort({ _id: -1 })
-        .limit(200)
+        .sort({ createdAt: -1 })
+        .limit(10)
         .toArray();
+    // Build province→city region tree for filter dropdowns
+    const regionTreeRaw = await db.collection('pins')
+        .aggregate([
+            { $match: categoryQuery },
+            { $group: { _id: { province: '$province', city: '$city' }, count: { $sum: 1 } } }
+        ])
+        .toArray();
+    const regionTreeMap = new Map();
+    for (const doc of regionTreeRaw) {
+        const provLabel = normalizeLandingText(doc?._id?.province);
+        const provSlug = slugifyText(provLabel);
+        const cityLabel = normalizeLandingText(doc?._id?.city);
+        const citySlug = slugifyText(cityLabel);
+        const count = Number(doc?.count) || 0;
+        if (!provLabel || !provSlug) continue;
+        if (!regionTreeMap.has(provSlug)) {
+            regionTreeMap.set(provSlug, { label: provLabel, slug: provSlug, count: 0, cities: [] });
+        }
+        const prov = regionTreeMap.get(provSlug);
+        prov.count += count;
+        if (cityLabel && citySlug) {
+            prov.cities.push({ label: cityLabel, slug: citySlug, count });
+        }
+    }
+    const regionTree = Array.from(regionTreeMap.values())
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    for (const prov of regionTree) {
+        prov.cities.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    }
     return {
         categoryLabel,
+        provinceLabel,
         regionLabel,
         categorySlug: safeCategorySlug,
+        provinceSlug: safeProvinceSlug,
         regionSlug: safeRegionSlug,
         pins,
         totalCount,
-        regions
+        regions,
+        regionTree
     };
 }
 
@@ -1797,6 +1913,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
     const whenLabel = formatPinWhenLabel(pin?.lifetime);
+    const province = pin?.province ? String(pin.province).trim() : '';
     const city = pin?.city ? String(pin.city).trim() : '';
     const hasCoords = Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng);
     const lat = hasCoords ? Number(pin.lat) : null;
@@ -1853,6 +1970,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const metaKeywords = seo?.keywords ? escapeHtml(seo.keywords) : '';
     const categoryLabel = pin?.category ? escapeHtml(pin.category) : '';
     const whenLabelHtml = whenLabel ? escapeHtml(whenLabel) : '';
+    const provinceHtml = province ? escapeHtml(province) : '';
     const cityHtml = city ? escapeHtml(city) : '';
     const coordsHtml = coords ? escapeHtml(coords) : '';
     const linkLabel = (externalLink && typeof pin?.link === 'string')
@@ -1887,6 +2005,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const metaItems = [
         { label: 'Kategori', value: categoryLabel },
         { label: 'Waktu', value: whenLabelHtml },
+        { label: 'Provinsi', value: provinceHtml },
         { label: 'Kota', value: cityHtml },
         { label: 'Koordinat', value: coordsHtml }
     ].filter((item) => item.value);
@@ -1914,21 +2033,24 @@ function buildPinPageHtml(pin, seo, baseUrl) {
             </div>
         </div>`
         : '';
-    const actionItems = [
-        mapLink ? { href: mapLink, label: 'Buka di Google Maps', external: true } : null,
-        externalLink ? { href: externalLink, label: linkButtonLabel || linkLabel || 'Buka tautan', external: true } : null,
-        mapFocusUrl ? { href: mapFocusUrl, label: 'Lihat di peta AyaNaon', external: false } : null
+    const ctaAction = mapFocusUrl
+        ? `<a class="pin-detail-action pin-detail-action--cta" href="${escapeHtml(mapFocusUrl)}">Temukan lebih banyak di AyaNaon</a>`
+        : '';
+    const secondaryItems = [
+        mapLink ? { href: mapLink, label: 'Arahkan', external: true } : null,
+        externalLink ? { href: externalLink, label: 'Website', external: true } : null
     ].filter(Boolean);
-    const actionsHtml = actionItems.length
-        ? `<div class="pin-detail-actions">
-            ${actionItems.map((item) => {
+    const secondaryHtml = secondaryItems.length
+        ? `<div class="pin-detail-actions-row">
+            ${secondaryItems.map((item) => {
                 const safeHref = escapeHtml(item.href);
                 const safeLabel = escapeHtml(item.label);
-                const rel = item.external ? ' rel="noopener"' : '';
-                const target = item.external ? ' target="_blank"' : '';
-                return `<a class="pin-detail-action" href="${safeHref}"${target}${rel}>${safeLabel}</a>`;
+                return `<a class="pin-detail-action pin-detail-action--secondary" href="${safeHref}" target="_blank" rel="noopener">${safeLabel}</a>`;
             }).join('')}
         </div>`
+        : '';
+    const actionsHtml = (ctaAction || secondaryHtml)
+        ? `<div class="pin-detail-actions">${ctaAction}${secondaryHtml}</div>`
         : '';
     const lightboxHtml = galleryImages.length
         ? `<div class="pin-detail-lightbox" role="dialog" aria-modal="true" aria-hidden="true">
@@ -2235,6 +2357,27 @@ function buildPinPageHtml(pin, seo, baseUrl) {
       transform: translateY(-1px);
       outline: none;
     }
+    .pin-detail-action--cta {
+      background: var(--app-accent-strong);
+      color: #fff;
+      font-size: 15px;
+      padding: 14px 16px;
+      border-color: var(--app-accent-strong);
+    }
+    .pin-detail-action--cta:hover,
+    .pin-detail-action--cta:focus-visible {
+      background: var(--app-accent);
+      border-color: var(--app-accent);
+    }
+    .pin-detail-actions-row {
+      display: flex;
+      gap: 10px;
+    }
+    .pin-detail-action--secondary {
+      flex: 1;
+      font-size: 13px;
+      padding: 10px 12px;
+    }
     .pin-detail-lightbox {
       position: fixed;
       inset: 0;
@@ -2312,8 +2455,8 @@ function buildPinPageHtml(pin, seo, baseUrl) {
         <span>AyaNaon</span>
       </a>
       <div class="pin-detail-header-actions">
-        <a class="pin-detail-ghost" href="${categoryIndexUrl}">Lihat kategori</a>
-        ${mapFocusUrl ? `<a class="pin-detail-ghost" href="${mapFocusUrl}">Lihat di peta</a>` : ''}
+        <a class="pin-detail-ghost" href="${categoryIndexUrl}">Lihat Kategori</a>
+        ${mapFocusUrl ? `<a class="pin-detail-ghost" href="${mapFocusUrl}">Lihat di Peta</a>` : ''}
       </div>
     </header>
     <main class="pin-detail-main">
@@ -2332,7 +2475,7 @@ function buildPinPageHtml(pin, seo, baseUrl) {
         ${actionsHtml}
       </aside>
     </main>
-    <footer class="pin-detail-footer">AyaNaon pin detail page</footer>
+    <footer class="pin-detail-footer">AyaNaon.app powered by Petalytix</footer>
   </div>
   ${lightboxHtml}
   ${lightboxScript}
@@ -2388,7 +2531,8 @@ function buildCategoryIndexHtml({
     regionsByCategory,
     totalPins,
     pins,
-    regions
+    regions,
+    regionTree
 }) {
     const heading = 'Kategori dan Wilayah';
     const totalCount = Number(totalPins) || 0;
@@ -2402,7 +2546,7 @@ function buildCategoryIndexHtml({
     const metaDescription = truncateText(introText, 160);
     const canonicalUrl = baseUrl ? `${baseUrl}/kategori` : '';
     const backHref = baseUrl ? `${baseUrl}/` : '/';
-    const backLabel = 'Kembali ke peta';
+    const backLabel = 'Kembali ke Peta';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
@@ -2436,7 +2580,8 @@ function buildCategoryIndexHtml({
             }
             const regionCount = Number(region?.count) || 0;
             const regionCountLabel = regionCount ? `${regionCount} pin` : '';
-            return `<a class="category-card-region" href="/kategori/${categorySlug}/${regionSlug}">
+            const regionHref = `/kategori/${categorySlug}/${regionSlug}`;
+            return `<a class="category-card-region" href="${regionHref}">
                 <span class="category-card-region-name">${escapeHtml(regionLabel)}</span>
                 ${regionCountLabel ? `<span class="category-card-region-count">${regionCountLabel}</span>` : ''}
             </a>`;
@@ -2466,20 +2611,34 @@ function buildCategoryIndexHtml({
     const pinList = Array.isArray(pins) ? pins : [];
     const pinDisplayCount = pinList.length;
     const pinListHtml = pinList
-        .map((pin) => buildPinLandingListItem(pin, { includeCategory: true }))
+        .map((pin) => {
+            if (!pin || !pin._id) return '';
+            const pinTitle = typeof pin.title === 'string' && pin.title.trim() ? pin.title.trim() : 'Pin tanpa judul';
+            const pinUrl = `/pin/${pin._id}`;
+            const pinCity = normalizeLandingText(pin.city);
+            const pinCategory = normalizeLandingText(pin.category);
+            const pinWhen = formatPinWhenLabel(pin.lifetime);
+            const metaParts = [];
+            if (pinCategory) metaParts.push(pinCategory);
+            if (pinCity) metaParts.push(pinCity);
+            if (pinWhen) metaParts.push(pinWhen);
+            const metaLabel = metaParts.join(' - ');
+            const description = typeof pin.description === 'string' ? pin.description.trim() : '';
+            const descriptionText = truncateText(description, 140);
+            return `<li class="pin-landing-item">
+                <a class="pin-landing-link" href="${pinUrl}">${escapeHtml(pinTitle)}</a>
+                ${metaLabel ? `<div class="pin-landing-meta">${escapeHtml(metaLabel)}</div>` : ''}
+                ${descriptionText ? `<p class="pin-landing-desc">${escapeHtml(descriptionText)}</p>` : ''}
+            </li>`;
+        })
         .filter(Boolean)
         .join('');
-    const regionOptions = (Array.isArray(regions) ? regions : [])
-        .map((region) => {
-            const regionLabel = typeof region?.label === 'string' && region.label.trim()
-                ? region.label.trim()
-                : '';
-            const regionSlug = slugifyText(region?.slug || regionLabel);
-            if (!regionLabel || !regionSlug) {
-                return '';
-            }
-            const countLabel = Number(region?.count) ? ` (${region.count})` : '';
-            return `<option value="${escapeHtml(regionSlug)}">${escapeHtml(regionLabel)}${countLabel}</option>`;
+    const safeRegionTree = Array.isArray(regionTree) ? regionTree : [];
+    const provinceOptions = safeRegionTree
+        .map((prov) => {
+            if (!prov || !prov.slug || !prov.label) return '';
+            const countLabel = Number(prov.count) ? ` (${prov.count})` : '';
+            return `<option value="${escapeHtml(prov.slug)}">${escapeHtml(prov.label)}${countLabel}</option>`;
         })
         .filter(Boolean)
         .join('');
@@ -2860,6 +3019,61 @@ function buildCategoryIndexHtml({
       font-size: 14px;
       text-align: center;
     }
+    .pin-landing-filter-reset-col {
+      min-width: 0;
+      flex: 0 0 auto;
+      justify-self: end;
+      max-width: 140px;
+    }
+    .pin-filter-reset {
+      border-radius: 12px;
+      border: 1px solid var(--app-panel-border);
+      background: var(--app-panel-bg);
+      color: var(--app-text);
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      backdrop-filter: var(--app-panel-blur);
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+    .pin-filter-reset:hover,
+    .pin-filter-reset:focus-visible {
+      transform: translateY(-1px);
+      background: rgba(59, 130, 246, 0.12);
+      border-color: rgba(59, 130, 246, 0.4);
+      outline: none;
+    }
+    .pin-landing-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .pin-page-btn {
+      border-radius: 12px;
+      border: 1px solid var(--app-panel-border);
+      background: var(--app-button-bg);
+      color: var(--app-button-text);
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+    .pin-page-btn:hover,
+    .pin-page-btn:focus-visible {
+      transform: translateY(-1px);
+      background: var(--app-button-hover);
+      border-color: rgba(59, 130, 246, 0.3);
+      outline: none;
+    }
+    .pin-page-info {
+      font-size: 13px;
+      color: var(--app-text-muted);
+    }
   </style>
   <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
 </head>
@@ -2891,27 +3105,37 @@ function buildCategoryIndexHtml({
       <section class="pin-landing-list-card">
         <div class="pin-landing-section-head">
           <h2 class="pin-landing-section-title">Cari pin</h2>
-          <p class="pin-landing-section-subtitle">Gunakan pencarian, wilayah, dan rentang tanggal untuk menyaring pin.</p>
+          <p class="pin-landing-section-subtitle">Gunakan pencarian, wilayah, dan tanggal untuk menyaring pin.</p>
         </div>
         <div class="pin-landing-filters" data-pin-filter>
           <div class="pin-landing-filter">
-            <label for="pin-filter-search">Search</label>
+            <label for="pin-filter-search">Cari</label>
             <input type="search" id="pin-filter-search" placeholder="Cari judul, kategori, atau kota" aria-label="Cari pin">
           </div>
           <div class="pin-landing-filter">
-            <label for="pin-filter-region">Region</label>
-            <select id="pin-filter-region" aria-label="Filter wilayah">
-              <option value="">Semua wilayah</option>
-              ${regionOptions}
+            <label for="pin-filter-province">Provinsi</label>
+            <select id="pin-filter-province" aria-label="Filter provinsi">
+              <option value="">Semua provinsi</option>
+              ${provinceOptions}
             </select>
           </div>
           <div class="pin-landing-filter">
-            <label for="pin-filter-start">Range tanggal</label>
+            <label for="pin-filter-city">Kota</label>
+            <select id="pin-filter-city" aria-label="Filter kota">
+              <option value="">Semua kota</option>
+            </select>
+          </div>
+          <div class="pin-landing-filter">
+            <label for="pin-filter-start">Pilih Tanggal</label>
             <div class="pin-landing-filter-range">
               <input type="date" id="pin-filter-start" aria-label="Tanggal mulai">
               <span>-</span>
               <input type="date" id="pin-filter-end" aria-label="Tanggal akhir">
             </div>
+          </div>
+          <div class="pin-landing-filter pin-landing-filter-reset-col">
+            <label>&nbsp;</label>
+            <button type="button" class="pin-filter-reset" id="pin-filter-reset" aria-label="Reset filter">Reset</button>
           </div>
         </div>
         <div class="pin-landing-filter-summary" id="pin-filter-summary"></div>
@@ -2919,8 +3143,9 @@ function buildCategoryIndexHtml({
           ${pinListHtml}
         </ul>
         <p class="pin-landing-empty" id="pin-filter-empty"${pinDisplayCount ? ' hidden' : ''}>Belum ada pin untuk ditampilkan.</p>
-        ${totalCount > pinDisplayCount ? `<p class="pin-landing-intro">Menampilkan ${pinDisplayCount} dari ${totalCount} pin.</p>` : ''}
+        <div class="pin-landing-pagination" id="pin-pagination"></div>
       </section>
+      <script>window.__regionTree = ${JSON.stringify(safeRegionTree)};</script>
     </div>
     <script>
       (function () {
@@ -2941,110 +3166,185 @@ function buildCategoryIndexHtml({
           });
         }
 
-        var filterContainer = document.querySelector('[data-pin-filter]');
-        if (!filterContainer) {
-          return;
-        }
+        var regionTree = window.__regionTree || [];
         var searchInput = document.getElementById('pin-filter-search');
-        var regionSelect = document.getElementById('pin-filter-region');
+        var provinceSelect = document.getElementById('pin-filter-province');
+        var citySelect = document.getElementById('pin-filter-city');
         var startInput = document.getElementById('pin-filter-start');
         var endInput = document.getElementById('pin-filter-end');
+        var resetBtn = document.getElementById('pin-filter-reset');
         var list = document.getElementById('pin-filter-list');
-        var items = list ? list.querySelectorAll('.pin-landing-item') : [];
         var emptyEl = document.getElementById('pin-filter-empty');
         var summaryEl = document.getElementById('pin-filter-summary');
+        var paginationEl = document.getElementById('pin-pagination');
+        var currentPage = 1;
+        var userLat = null;
+        var userLng = null;
+        var searchTimer = null;
+        var isLoading = false;
 
-        function normalize(value) {
-          return (value || '').toString().toLowerCase().trim();
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(function (pos) {
+            userLat = pos.coords.latitude;
+            userLng = pos.coords.longitude;
+            doSearch(1);
+          }, function () {});
         }
 
-        function parseDate(value) {
-          if (!value) {
-            return null;
-          }
-          var parts = value.split('-');
-          if (parts.length !== 3) {
-            return null;
-          }
-          var year = parseInt(parts[0], 10);
-          var month = parseInt(parts[1], 10);
-          var day = parseInt(parts[2], 10);
-          if (!year || !month || !day) {
-            return null;
-          }
-          return new Date(year, month - 1, day);
-        }
-
-        function matchesDate(itemStart, itemEnd, filterStart, filterEnd) {
-          if (!filterStart && !filterEnd) {
-            return true;
-          }
-          var pinStart = parseDate(itemStart);
-          var pinEnd = parseDate(itemEnd || itemStart);
-          if (!pinStart && !pinEnd) {
-            return false;
-          }
-          if (filterStart && pinEnd && pinEnd < filterStart) {
-            return false;
-          }
-          if (filterEnd && pinStart && pinStart > filterEnd) {
-            return false;
-          }
-          return true;
-        }
-
-        function applyFilters() {
-          var query = normalize(searchInput && searchInput.value);
-          var region = regionSelect ? regionSelect.value : '';
-          var startDate = parseDate(startInput && startInput.value);
-          var endDate = parseDate(endInput && endInput.value);
-          if (startDate && !endDate) {
-            endDate = startDate;
-          }
-          if (endDate && !startDate) {
-            startDate = endDate;
-          }
-          var visibleCount = 0;
-          for (var i = 0; i < items.length; i += 1) {
-            var item = items[i];
-            var searchText = normalize(item.getAttribute('data-search'));
-            var matchesSearch = !query || searchText.indexOf(query) !== -1;
-            var itemRegion = item.getAttribute('data-region') || '';
-            var matchesRegion = !region || itemRegion === region;
-            var itemStart = item.getAttribute('data-start') || '';
-            var itemEnd = item.getAttribute('data-end') || itemStart;
-            var matchesRange = matchesDate(itemStart, itemEnd, startDate, endDate);
-            var isVisible = matchesSearch && matchesRegion && matchesRange;
-            item.style.display = isVisible ? '' : 'none';
-            if (isVisible) {
-              visibleCount += 1;
+        function populateCities() {
+          var prov = provinceSelect ? provinceSelect.value : '';
+          if (!citySelect) return;
+          citySelect.innerHTML = '<option value="">Semua kota</option>';
+          if (!prov) return;
+          for (var i = 0; i < regionTree.length; i++) {
+            if (regionTree[i].slug === prov && regionTree[i].cities) {
+              for (var j = 0; j < regionTree[i].cities.length; j++) {
+                var c = regionTree[i].cities[j];
+                var opt = document.createElement('option');
+                opt.value = c.slug;
+                opt.textContent = c.label + (c.count ? ' (' + c.count + ')' : '');
+                citySelect.appendChild(opt);
+              }
+              break;
             }
           }
+        }
+
+        function escapeHtml(str) {
+          var div = document.createElement('div');
+          div.appendChild(document.createTextNode(str));
+          return div.innerHTML;
+        }
+
+        function renderPins(data) {
+          if (!list) return;
+          var pins = data.pins || [];
+          if (pins.length === 0) {
+            list.innerHTML = '';
+            if (emptyEl) emptyEl.hidden = false;
+            if (summaryEl) summaryEl.textContent = 'Tidak ada pin ditemukan.';
+            if (paginationEl) paginationEl.innerHTML = '';
+            return;
+          }
+          if (emptyEl) emptyEl.hidden = true;
+          var html = '';
+          for (var i = 0; i < pins.length; i++) {
+            var p = pins[i];
+            html += '<li class="pin-landing-item">';
+            html += '<a class="pin-landing-link" href="' + escapeHtml(p.url || '/pin/' + p._id) + '">' + escapeHtml(p.title || 'Pin tanpa judul') + '</a>';
+            if (p.meta) {
+              html += '<div class="pin-landing-meta">' + escapeHtml(p.meta) + '</div>';
+            }
+            if (p.description) {
+              html += '<p class="pin-landing-desc">' + escapeHtml(p.description) + '</p>';
+            }
+            html += '</li>';
+          }
+          list.innerHTML = html;
+
+          var total = data.total || 0;
+          var page = data.page || 1;
+          var totalPages = data.totalPages || 1;
+          var start = (page - 1) * 10 + 1;
+          var end = Math.min(page * 10, total);
           if (summaryEl) {
-            if (!items.length) {
-              summaryEl.textContent = 'Belum ada pin untuk ditampilkan.';
-            } else {
-              summaryEl.textContent = 'Menampilkan ' + visibleCount + ' dari ' + items.length + ' pin.';
-            }
+            summaryEl.textContent = 'Menampilkan ' + start + '-' + end + ' dari ' + total + ' pin.';
           }
-          if (emptyEl) {
-            emptyEl.hidden = visibleCount !== 0;
+          if (paginationEl) {
+            if (totalPages <= 1) {
+              paginationEl.innerHTML = '';
+            } else {
+              var pagHtml = '';
+              if (page > 1) {
+                pagHtml += '<button type="button" class="pin-page-btn" data-page="' + (page - 1) + '">&laquo; Sebelumnya</button>';
+              }
+              pagHtml += '<span class="pin-page-info">Halaman ' + page + ' dari ' + totalPages + '</span>';
+              if (page < totalPages) {
+                pagHtml += '<button type="button" class="pin-page-btn" data-page="' + (page + 1) + '">Berikutnya &raquo;</button>';
+              }
+              paginationEl.innerHTML = pagHtml;
+              var pagBtns = paginationEl.querySelectorAll('.pin-page-btn');
+              for (var b = 0; b < pagBtns.length; b++) {
+                pagBtns[b].addEventListener('click', function (e) {
+                  var pg = parseInt(e.currentTarget.getAttribute('data-page'), 10);
+                  if (pg) doSearch(pg);
+                });
+              }
+            }
           }
         }
 
-        if (searchInput) {
-          searchInput.addEventListener('input', applyFilters);
+        function doSearch(page) {
+          if (isLoading) return;
+          currentPage = page || 1;
+          var params = [];
+          params.push('page=' + currentPage);
+          params.push('limit=10');
+          var q = searchInput ? searchInput.value.trim() : '';
+          if (q) params.push('q=' + encodeURIComponent(q));
+          var prov = provinceSelect ? provinceSelect.value : '';
+          if (prov) params.push('province=' + encodeURIComponent(prov));
+          var city = citySelect ? citySelect.value : '';
+          if (city) params.push('city=' + encodeURIComponent(city));
+          var dateStart = startInput ? startInput.value : '';
+          var dateEnd = endInput ? endInput.value : '';
+          if (dateStart) params.push('dateStart=' + encodeURIComponent(dateStart));
+          if (dateEnd) params.push('dateEnd=' + encodeURIComponent(dateEnd));
+          if (userLat !== null && userLng !== null) {
+            params.push('lat=' + userLat);
+            params.push('lng=' + userLng);
+          }
+          isLoading = true;
+          if (summaryEl) summaryEl.textContent = 'Memuat...';
+          fetch('/api/pins/search?' + params.join('&'))
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+              isLoading = false;
+              renderPins(data);
+            })
+            .catch(function () {
+              isLoading = false;
+              if (summaryEl) summaryEl.textContent = 'Gagal memuat pin.';
+            });
         }
-        if (regionSelect) {
-          regionSelect.addEventListener('change', applyFilters);
+
+        if (provinceSelect) {
+          provinceSelect.addEventListener('change', function () {
+            populateCities();
+            doSearch(1);
+          });
+        }
+        if (citySelect) {
+          citySelect.addEventListener('change', function () {
+            doSearch(1);
+          });
+        }
+        if (searchInput) {
+          searchInput.addEventListener('input', function () {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () { doSearch(1); }, 300);
+          });
         }
         if (startInput) {
-          startInput.addEventListener('change', applyFilters);
+          startInput.addEventListener('change', function () {
+            doSearch(1);
+          });
         }
         if (endInput) {
-          endInput.addEventListener('change', applyFilters);
+          endInput.addEventListener('change', function () {
+            doSearch(1);
+          });
         }
-        applyFilters();
+        if (resetBtn) {
+          resetBtn.addEventListener('click', function () {
+            if (searchInput) searchInput.value = '';
+            if (provinceSelect) provinceSelect.value = '';
+            if (startInput) startInput.value = '';
+            if (endInput) endInput.value = '';
+            populateCities();
+            doSearch(1);
+          });
+        }
       })();
     </script>
   </body>
@@ -3055,16 +3355,21 @@ function buildCategoryLandingHtml({
     seo,
     baseUrl,
     categoryLabel,
+    provinceLabel,
     regionLabel,
     categorySlug,
+    provinceSlug,
     regionSlug,
     pins,
     totalCount,
-    regions
+    regions,
+    regionTree
 }) {
     const heading = regionLabel
-        ? `${categoryLabel} di ${regionLabel}`
-        : categoryLabel;
+        ? `${categoryLabel} di ${regionLabel}${provinceLabel ? `, ${provinceLabel}` : ''}`
+        : provinceLabel
+            ? `${categoryLabel} di ${provinceLabel}`
+            : categoryLabel;
     const pageTitle = truncateText(
         [heading, seo?.title || ''].filter(Boolean).join(' | '),
         70
@@ -3072,15 +3377,21 @@ function buildCategoryLandingHtml({
     const introText = `Temukan ${totalCount} pin ${heading} di AyaNaon. Klik salah satu pin untuk melihat detail.`;
     const metaDescription = truncateText(introText, 160);
     const canonicalPath = regionSlug
-        ? `/kategori/${categorySlug}/${regionSlug}`
-        : `/kategori/${categorySlug}`;
+        ? `/kategori/${categorySlug}${provinceSlug ? `/${provinceSlug}` : ''}/${regionSlug}`
+        : provinceSlug
+            ? `/kategori/${categorySlug}/${provinceSlug}`
+            : `/kategori/${categorySlug}`;
     const canonicalUrl = baseUrl ? `${baseUrl}${canonicalPath}` : '';
     const backHref = regionSlug
-        ? `/kategori/${categorySlug}`
-        : '/kategori';
+        ? (provinceSlug ? `/kategori/${categorySlug}/${provinceSlug}` : `/kategori/${categorySlug}`)
+        : provinceSlug
+            ? `/kategori/${categorySlug}`
+            : '/kategori';
     const backLabel = regionSlug
-        ? 'Kembali ke kategori'
-        : 'Kembali ke semua kategori';
+        ? (provinceSlug ? `Kembali ke ${provinceLabel || 'provinsi'}` : 'Kembali ke kategori')
+        : provinceSlug
+            ? 'Kembali ke kategori'
+            : 'Kembali ke semua kategori';
     const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
@@ -3090,19 +3401,18 @@ function buildCategoryLandingHtml({
         .map((pin) => buildPinLandingListItem(pin))
         .filter(Boolean)
         .join('');
-    const regionOptions = (Array.isArray(regions) ? regions : [])
-        .map((region) => {
-            const regionLabel = typeof region?.label === 'string' && region.label.trim()
-                ? region.label.trim()
-                : '';
-            const regionSlug = slugifyText(region?.slug || regionLabel);
-            if (!regionLabel || !regionSlug) {
-                return '';
-            }
-            const countLabel = Number(region?.count) ? ` (${region.count})` : '';
-            return `<option value="${escapeHtml(regionSlug)}">${escapeHtml(regionLabel)}${countLabel}</option>`;
-        })
-        .filter(Boolean)
+    const safeRegionTree = (Array.isArray(regionTree) ? regionTree : []).map(p => ({
+        label: String(p.label || ''),
+        slug: String(p.slug || ''),
+        count: Number(p.count) || 0,
+        cities: Array.isArray(p.cities) ? p.cities.map(c => ({
+            label: String(c.label || ''),
+            slug: String(c.slug || ''),
+            count: Number(c.count) || 0
+        })) : []
+    }));
+    const provinceOptions = safeRegionTree
+        .map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.label)}${p.count ? ` (${p.count})` : ''}</option>`)
         .join('');
     const structuredData = {
         '@context': 'https://schema.org',
@@ -3361,6 +3671,56 @@ function buildCategoryLandingHtml({
       font-size: 13px;
       color: var(--app-text-soft);
     }
+    .pin-landing-filter-reset-col {
+      min-width: 0;
+      flex: 0 0 auto;
+      justify-self: end;
+      max-width: 140px;
+    }
+    .pin-filter-reset {
+      border-radius: 12px;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-panel-bg);
+      color: var(--app-text);
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .pin-filter-reset:hover,
+    .pin-filter-reset:focus-visible {
+      background: var(--app-accent-strong);
+      color: #fff;
+      border-color: var(--app-accent-strong);
+    }
+    .pin-landing-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .pin-page-btn {
+      border-radius: 12px;
+      border: 1px solid var(--app-card-border);
+      background: var(--app-button-bg);
+      color: var(--app-text);
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .pin-page-btn:hover,
+    .pin-page-btn:focus-visible {
+      background: var(--app-accent-strong);
+      color: #fff;
+      border-color: var(--app-accent-strong);
+    }
+    .pin-page-info {
+      font-size: 12px;
+      color: var(--app-text-muted);
+    }
     .pin-landing-footer {
       margin-top: auto;
       text-align: center;
@@ -3391,25 +3751,35 @@ function buildCategoryLandingHtml({
         <h2 class="pin-landing-section-title">Daftar pin</h2>
         <p class="pin-landing-section-subtitle">Gunakan pencarian, wilayah, dan rentang tanggal untuk menyaring pin.</p>
       </div>
-      <div class="pin-landing-filters" data-pin-filter data-default-region="${escapeHtml(regionSlug || '')}">
+      <div class="pin-landing-filters" data-pin-filter>
         <div class="pin-landing-filter">
-          <label for="pin-filter-search">Search</label>
+          <label for="pin-filter-search">Cari</label>
           <input type="search" id="pin-filter-search" placeholder="Cari judul, deskripsi, atau kota" aria-label="Cari pin">
         </div>
         <div class="pin-landing-filter">
-          <label for="pin-filter-region">Region</label>
-          <select id="pin-filter-region" aria-label="Filter wilayah">
-            <option value="">Semua wilayah</option>
-            ${regionOptions}
+          <label for="pin-filter-province">Provinsi</label>
+          <select id="pin-filter-province" aria-label="Filter provinsi">
+            <option value="">Semua provinsi</option>
+            ${provinceOptions}
           </select>
         </div>
         <div class="pin-landing-filter">
-          <label for="pin-filter-start">Range tanggal</label>
+          <label for="pin-filter-city">Kota</label>
+          <select id="pin-filter-city" aria-label="Filter kota">
+            <option value="">Semua kota</option>
+          </select>
+        </div>
+        <div class="pin-landing-filter">
+          <label for="pin-filter-start">Pilih Tanggal</label>
           <div class="pin-landing-filter-range">
             <input type="date" id="pin-filter-start" aria-label="Tanggal mulai">
             <span>-</span>
             <input type="date" id="pin-filter-end" aria-label="Tanggal akhir">
           </div>
+        </div>
+        <div class="pin-landing-filter pin-landing-filter-reset-col">
+          <label>&nbsp;</label>
+          <button type="button" class="pin-filter-reset" id="pin-filter-reset" aria-label="Reset filter">Reset</button>
         </div>
       </div>
       <div class="pin-landing-filter-summary" id="pin-filter-summary"></div>
@@ -3417,120 +3787,194 @@ function buildCategoryLandingHtml({
         ${listHtml}
       </ul>
       <p class="pin-landing-empty" id="pin-filter-empty"${displayCount ? ' hidden' : ''}>Belum ada pin untuk kategori ini.</p>
-      ${totalCount > displayCount ? `<p class="pin-landing-intro">Menampilkan ${displayCount} dari ${totalCount} pin. Lihat peta AyaNaon untuk jelajah lebih lengkap.</p>` : ''}
+      <div class="pin-landing-pagination" id="pin-pagination"></div>
     </section>
     <footer class="pin-landing-footer">AyaNaon category page</footer>
   </div>
+  <script>window.__regionTree = ${JSON.stringify(safeRegionTree)};window.__categorySlug = ${JSON.stringify(categorySlug)};</script>
   <script>
     (function () {
-      var filterContainer = document.querySelector('[data-pin-filter]');
-      if (!filterContainer) {
-        return;
-      }
+      var regionTree = window.__regionTree || [];
+      var categorySlug = window.__categorySlug || '';
       var searchInput = document.getElementById('pin-filter-search');
-      var regionSelect = document.getElementById('pin-filter-region');
+      var provinceSelect = document.getElementById('pin-filter-province');
+      var citySelect = document.getElementById('pin-filter-city');
       var startInput = document.getElementById('pin-filter-start');
       var endInput = document.getElementById('pin-filter-end');
+      var resetBtn = document.getElementById('pin-filter-reset');
       var list = document.getElementById('pin-filter-list');
-      var items = list ? list.querySelectorAll('.pin-landing-item') : [];
       var emptyEl = document.getElementById('pin-filter-empty');
       var summaryEl = document.getElementById('pin-filter-summary');
+      var paginationEl = document.getElementById('pin-pagination');
+      var currentPage = 1;
+      var userLat = null;
+      var userLng = null;
+      var searchTimer = null;
+      var isLoading = false;
 
-      function normalize(value) {
-        return (value || '').toString().toLowerCase().trim();
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          userLat = pos.coords.latitude;
+          userLng = pos.coords.longitude;
+          doSearch(1);
+        }, function () {});
       }
 
-      function parseDate(value) {
-        if (!value) {
-          return null;
-        }
-        var parts = value.split('-');
-        if (parts.length !== 3) {
-          return null;
-        }
-        var year = parseInt(parts[0], 10);
-        var month = parseInt(parts[1], 10);
-        var day = parseInt(parts[2], 10);
-        if (!year || !month || !day) {
-          return null;
-        }
-        return new Date(year, month - 1, day);
-      }
-
-      function matchesDate(itemStart, itemEnd, filterStart, filterEnd) {
-        if (!filterStart && !filterEnd) {
-          return true;
-        }
-        var pinStart = parseDate(itemStart);
-        var pinEnd = parseDate(itemEnd || itemStart);
-        if (!pinStart && !pinEnd) {
-          return false;
-        }
-        if (filterStart && pinEnd && pinEnd < filterStart) {
-          return false;
-        }
-        if (filterEnd && pinStart && pinStart > filterEnd) {
-          return false;
-        }
-        return true;
-      }
-
-      function applyFilters() {
-        var query = normalize(searchInput && searchInput.value);
-        var region = regionSelect ? regionSelect.value : '';
-        var startDate = parseDate(startInput && startInput.value);
-        var endDate = parseDate(endInput && endInput.value);
-        if (startDate && !endDate) {
-          endDate = startDate;
-        }
-        if (endDate && !startDate) {
-          startDate = endDate;
-        }
-        var visibleCount = 0;
-        for (var i = 0; i < items.length; i += 1) {
-          var item = items[i];
-          var searchText = normalize(item.getAttribute('data-search'));
-          var matchesSearch = !query || searchText.indexOf(query) !== -1;
-          var itemRegion = item.getAttribute('data-region') || '';
-          var matchesRegion = !region || itemRegion === region;
-          var itemStart = item.getAttribute('data-start') || '';
-          var itemEnd = item.getAttribute('data-end') || itemStart;
-          var matchesRange = matchesDate(itemStart, itemEnd, startDate, endDate);
-          var isVisible = matchesSearch && matchesRegion && matchesRange;
-          item.style.display = isVisible ? '' : 'none';
-          if (isVisible) {
-            visibleCount += 1;
+      function populateCities() {
+        var prov = provinceSelect ? provinceSelect.value : '';
+        if (!citySelect) return;
+        citySelect.innerHTML = '<option value="">Semua kota</option>';
+        if (!prov) return;
+        for (var i = 0; i < regionTree.length; i++) {
+          if (regionTree[i].slug === prov && regionTree[i].cities) {
+            for (var j = 0; j < regionTree[i].cities.length; j++) {
+              var c = regionTree[i].cities[j];
+              var opt = document.createElement('option');
+              opt.value = c.slug;
+              opt.textContent = c.label + (c.count ? ' (' + c.count + ')' : '');
+              citySelect.appendChild(opt);
+            }
+            break;
           }
         }
+      }
+
+      function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
+      function renderPins(data) {
+        if (!list) return;
+        var pins = data.pins || [];
+        if (pins.length === 0) {
+          list.innerHTML = '';
+          if (emptyEl) emptyEl.hidden = false;
+          if (summaryEl) summaryEl.textContent = 'Tidak ada pin ditemukan.';
+          if (paginationEl) paginationEl.innerHTML = '';
+          return;
+        }
+        if (emptyEl) emptyEl.hidden = true;
+        var html = '';
+        for (var i = 0; i < pins.length; i++) {
+          var p = pins[i];
+          html += '<li class="pin-landing-item">';
+          html += '<a class="pin-landing-link" href="' + escapeHtml(p.url || '/pin/' + p._id) + '">' + escapeHtml(p.title || 'Pin tanpa judul') + '</a>';
+          if (p.meta) {
+            html += '<div class="pin-landing-meta">' + escapeHtml(p.meta) + '</div>';
+          }
+          if (p.description) {
+            html += '<p class="pin-landing-desc">' + escapeHtml(p.description) + '</p>';
+          }
+          html += '</li>';
+        }
+        list.innerHTML = html;
+
+        var total = data.total || 0;
+        var page = data.page || 1;
+        var totalPages = data.totalPages || 1;
+        var start = (page - 1) * 10 + 1;
+        var end = Math.min(page * 10, total);
         if (summaryEl) {
-          if (!items.length) {
-            summaryEl.textContent = 'Belum ada pin untuk ditampilkan.';
-          } else {
-            summaryEl.textContent = 'Menampilkan ' + visibleCount + ' dari ' + items.length + ' pin.';
-          }
+          summaryEl.textContent = 'Menampilkan ' + start + '-' + end + ' dari ' + total + ' pin.';
         }
-        if (emptyEl) {
-          emptyEl.hidden = visibleCount !== 0;
+        if (paginationEl) {
+          if (totalPages <= 1) {
+            paginationEl.innerHTML = '';
+          } else {
+            var pagHtml = '';
+            if (page > 1) {
+              pagHtml += '<button type="button" class="pin-page-btn" data-page="' + (page - 1) + '">&laquo; Sebelumnya</button>';
+            }
+            pagHtml += '<span class="pin-page-info">Halaman ' + page + ' dari ' + totalPages + '</span>';
+            if (page < totalPages) {
+              pagHtml += '<button type="button" class="pin-page-btn" data-page="' + (page + 1) + '">Berikutnya &raquo;</button>';
+            }
+            paginationEl.innerHTML = pagHtml;
+            var pagBtns = paginationEl.querySelectorAll('.pin-page-btn');
+            for (var b = 0; b < pagBtns.length; b++) {
+              pagBtns[b].addEventListener('click', function (e) {
+                var pg = parseInt(e.currentTarget.getAttribute('data-page'), 10);
+                if (pg) doSearch(pg);
+              });
+            }
+          }
         }
       }
 
-      var defaultRegion = filterContainer.getAttribute('data-default-region') || '';
-      if (regionSelect && defaultRegion) {
-        regionSelect.value = defaultRegion;
+      function doSearch(page) {
+        if (isLoading) return;
+        currentPage = page || 1;
+        var params = [];
+        params.push('page=' + currentPage);
+        params.push('limit=10');
+        if (categorySlug) params.push('category=' + encodeURIComponent(categorySlug));
+        var q = searchInput ? searchInput.value.trim() : '';
+        if (q) params.push('q=' + encodeURIComponent(q));
+        var prov = provinceSelect ? provinceSelect.value : '';
+        if (prov) params.push('province=' + encodeURIComponent(prov));
+        var city = citySelect ? citySelect.value : '';
+        if (city) params.push('city=' + encodeURIComponent(city));
+        var dateStart = startInput ? startInput.value : '';
+        var dateEnd = endInput ? endInput.value : '';
+        if (dateStart) params.push('dateStart=' + encodeURIComponent(dateStart));
+        if (dateEnd) params.push('dateEnd=' + encodeURIComponent(dateEnd));
+        if (userLat !== null && userLng !== null) {
+          params.push('lat=' + userLat);
+          params.push('lng=' + userLng);
+        }
+        isLoading = true;
+        if (summaryEl) summaryEl.textContent = 'Memuat...';
+        fetch('/api/pins/search?' + params.join('&'))
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            isLoading = false;
+            renderPins(data);
+          })
+          .catch(function () {
+            isLoading = false;
+            if (summaryEl) summaryEl.textContent = 'Gagal memuat pin.';
+          });
+      }
+
+      if (provinceSelect) {
+        provinceSelect.addEventListener('change', function () {
+          populateCities();
+          doSearch(1);
+        });
+      }
+      if (citySelect) {
+        citySelect.addEventListener('change', function () {
+          doSearch(1);
+        });
       }
       if (searchInput) {
-        searchInput.addEventListener('input', applyFilters);
-      }
-      if (regionSelect) {
-        regionSelect.addEventListener('change', applyFilters);
+        searchInput.addEventListener('input', function () {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(function () { doSearch(1); }, 300);
+        });
       }
       if (startInput) {
-        startInput.addEventListener('change', applyFilters);
+        startInput.addEventListener('change', function () {
+          doSearch(1);
+        });
       }
       if (endInput) {
-        endInput.addEventListener('change', applyFilters);
+        endInput.addEventListener('change', function () {
+          doSearch(1);
+        });
       }
-      applyFilters();
+      if (resetBtn) {
+        resetBtn.addEventListener('click', function () {
+          if (searchInput) searchInput.value = '';
+          if (provinceSelect) provinceSelect.value = '';
+          if (startInput) startInput.value = '';
+          if (endInput) endInput.value = '';
+          populateCities();
+          doSearch(1);
+        });
+      }
     })();
   </script>
 </body>
@@ -4397,6 +4841,29 @@ async function resolveCityFromCoords(lat, lng) {
     }
 }
 
+async function resolveProvinceCityFromCoords(lat, lng) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+    }
+    try {
+        const result = await reverseGeocodeProvinceCity(lat, lng);
+        if (!result) {
+            return null;
+        }
+        const province = normalizeLandingText(result.province);
+        const city = normalizeLandingText(result.city);
+        if (!city) {
+            // Fallback to old method for city
+            const fallbackCity = await resolveCityFromCoords(lat, lng);
+            return fallbackCity ? { province: province || '', city: fallbackCity } : null;
+        }
+        return { province: province || '', city };
+    } catch (error) {
+        console.error('Failed to resolve province/city from coordinates', error);
+        return null;
+    }
+}
+
 function getPinImageIdentifier(image) {
     if (!image) {
         return null;
@@ -4611,6 +5078,161 @@ router.get('/pins/count', async (req, res) => {
     res.json({ count: count });
 });
 
+router.get('/pins/search', async (req, res) => {
+    const db = await connectToDatabase();
+    const activeQuery = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const skip = (page - 1) * limit;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const categorySlugs = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+    const provinceSlugs = typeof req.query.province === 'string' ? req.query.province.trim() : '';
+    const citySlugs = typeof req.query.city === 'string' ? req.query.city.trim() : '';
+    const dateStart = typeof req.query.dateStart === 'string' ? req.query.dateStart.trim() : '';
+    const dateEnd = typeof req.query.dateEnd === 'string' ? req.query.dateEnd.trim() : '';
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
+
+    const filter = { ...activeQuery };
+
+    if (q) {
+        const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = { $regex: escaped, $options: 'i' };
+        filter.$and = [
+            { $or: [{ title: regex }, { description: regex }, { category: regex }, { city: regex }, { province: regex }] }
+        ];
+    }
+
+    if (categorySlugs) {
+        const allCategories = await db.collection('pins').distinct('category', activeQuery);
+        const matched = allCategories.filter(c => c && slugifyText(c) === categorySlugs);
+        if (matched.length > 0) {
+            filter.category = { $in: matched };
+        } else {
+            filter.category = '__no_match__';
+        }
+    }
+
+    if (provinceSlugs) {
+        const allPins = await db.collection('pins').distinct('province', activeQuery);
+        const matched = allPins.filter(p => p && slugifyText(p) === provinceSlugs);
+        if (matched.length > 0) {
+            filter.province = { $in: matched };
+        } else {
+            filter.province = '__no_match__';
+        }
+    }
+
+    if (citySlugs) {
+        const allCities = await db.collection('pins').distinct('city', activeQuery);
+        const matched = allCities.filter(c => c && slugifyText(c) === citySlugs);
+        if (matched.length > 0) {
+            filter.city = { $in: matched };
+        } else {
+            filter.city = '__no_match__';
+        }
+    }
+
+    if (dateStart || dateEnd) {
+        const todayStr = formatDateToYMD(new Date());
+        const rangeStart = dateStart || dateEnd;
+        const rangeEnd = dateEnd || dateStart;
+        const touchesToday = rangeStart <= todayStr && rangeEnd >= todayStr;
+        const dateConditions = [
+            {
+                'lifetime.type': 'date',
+                $or: [
+                    { 'lifetime.start': { $lte: rangeEnd }, 'lifetime.end': { $gte: rangeStart } },
+                    { 'lifetime.value': { $gte: rangeStart, $lte: rangeEnd } },
+                    { 'lifetime.start': { $gte: rangeStart, $lte: rangeEnd } },
+                    { 'lifetime.end': { $gte: rangeStart, $lte: rangeEnd } }
+                ]
+            }
+        ];
+        if (touchesToday) {
+            dateConditions.push({ 'lifetime.type': 'today' });
+        }
+        if (filter.$and) {
+            filter.$and.push({ $or: dateConditions });
+        } else {
+            filter.$and = [{ $or: dateConditions }];
+        }
+    }
+
+    const total = await db.collection('pins').countDocuments(filter);
+
+    const sortStage = { createdAt: -1 };
+
+    const pins = await db.collection('pins')
+        .find(filter)
+        .project({
+            _id: 1,
+            title: 1,
+            description: 1,
+            category: 1,
+            province: 1,
+            city: 1,
+            lifetime: 1,
+            createdAt: 1,
+            lat: 1,
+            lng: 1
+        })
+        .sort(sortStage)
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+
+    let sortedPins = pins;
+    if (hasGeo) {
+        const toRad = (d) => d * Math.PI / 180;
+        const haversine = (lat1, lng1, lat2, lng2) => {
+            const R = 6371;
+            const dLat = toRad(lat2 - lat1);
+            const dLng = toRad(lng2 - lng1);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
+        sortedPins = pins.map(p => {
+            const pLat = parseFloat(p.lat);
+            const pLng = parseFloat(p.lng);
+            const dist = (Number.isFinite(pLat) && Number.isFinite(pLng))
+                ? haversine(lat, lng, pLat, pLng)
+                : 99999;
+            return { ...p, _dist: dist };
+        }).sort((a, b) => a._dist - b._dist);
+        sortedPins.forEach(p => delete p._dist);
+    }
+
+    const resultPins = sortedPins.map(p => {
+        const pinCity = normalizeLandingText(p.city);
+        const pinCategory = normalizeLandingText(p.category);
+        const pinProvince = normalizeLandingText(p.province);
+        const pinWhen = formatPinWhenLabel(p.lifetime);
+        const metaParts = [];
+        if (pinCategory) metaParts.push(pinCategory);
+        if (pinCity) metaParts.push(pinCity);
+        if (pinWhen) metaParts.push(pinWhen);
+        return {
+            _id: p._id,
+            title: typeof p.title === 'string' ? p.title.trim() : 'Pin tanpa judul',
+            description: typeof p.description === 'string' ? truncateText(p.description.trim(), 140) : '',
+            category: pinCategory,
+            province: pinProvince,
+            city: pinCity,
+            meta: metaParts.join(' - '),
+            url: `/pin/${p._id}`
+        };
+    });
+
+    res.json({
+        pins: resultPins,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit) || 1
+    });
+});
+
 router.get('/pins/:id', async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -4823,13 +5445,14 @@ const handleCategoryIndexRequest = async (req, res) => {
 
 const handleCategoryLandingRequest = async (req, res) => {
     const categorySlug = slugifyText(req.params?.category || '');
+    const provinceSlug = slugifyText(req.params?.province || '');
     const regionSlug = slugifyText(req.params?.region || '');
     if (!categorySlug) {
         res.status(404).send('Not found');
         return;
     }
     try {
-        const data = await fetchCategoryLandingData(categorySlug, regionSlug);
+        const data = await fetchCategoryLandingData(categorySlug, provinceSlug, regionSlug);
         if (!data) {
             res.status(404).send('Not found');
             return;
@@ -4846,6 +5469,77 @@ const handleCategoryLandingRequest = async (req, res) => {
         res.send(html);
     } catch (error) {
         console.error('Failed to render category landing page', error);
+        res.status(500).send('Error');
+    }
+};
+
+const handleCategoryLegacyRedirect = async (req, res) => {
+    const categorySlug = slugifyText(req.params?.category || '');
+    const secondSegment = slugifyText(req.params?.region || '');
+    if (!categorySlug || !secondSegment) {
+        res.status(404).send('Not found');
+        return;
+    }
+    try {
+        const db = await connectToDatabase();
+        const activeQuery = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
+        // Check if the second segment is a province slug
+        const provinces = await db.collection('pins').distinct('province', activeQuery);
+        let isProvince = false;
+        for (const entry of provinces) {
+            const normalized = normalizeLandingText(entry);
+            if (normalized && slugifyText(normalized) === secondSegment) {
+                isProvince = true;
+                break;
+            }
+        }
+        if (isProvince) {
+            // Serve as province page: /kategori/:category/:province
+            const data = await fetchCategoryLandingData(categorySlug, secondSegment, '');
+            if (!data) {
+                res.status(404).send('Not found');
+                return;
+            }
+            const seo = await readSeoSettings();
+            const baseUrl = resolveSeoBaseUrl(seo, req);
+            const html = buildCategoryLandingHtml({ seo, baseUrl, ...data });
+            res.set('Content-Type', 'text/html; charset=utf-8');
+            res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+            res.send(html);
+            return;
+        }
+        // Not a province — treat as legacy city URL, try to find its province and redirect
+        const cityPins = await db.collection('pins')
+            .find({ ...activeQuery, province: { $exists: true, $ne: '' } })
+            .project({ province: 1, city: 1 })
+            .toArray();
+        let provinceSlug = '';
+        for (const p of cityPins) {
+            const cityLabel = normalizeLandingText(p.city);
+            if (slugifyText(cityLabel) === secondSegment) {
+                const provLabel = normalizeLandingText(p.province);
+                provinceSlug = slugifyText(provLabel);
+                break;
+            }
+        }
+        if (provinceSlug) {
+            res.redirect(301, `/kategori/${categorySlug}/${provinceSlug}/${secondSegment}`);
+        } else {
+            // Province not found yet (not backfilled), serve the page with province-less data
+            const data = await fetchCategoryLandingData(categorySlug, '', secondSegment);
+            if (!data) {
+                res.status(404).send('Not found');
+                return;
+            }
+            const seo = await readSeoSettings();
+            const baseUrl = resolveSeoBaseUrl(seo, req);
+            const html = buildCategoryLandingHtml({ seo, baseUrl, ...data });
+            res.set('Content-Type', 'text/html; charset=utf-8');
+            res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+            res.send(html);
+        }
+    } catch (error) {
+        console.error('Failed to handle legacy category redirect', error);
         res.status(500).send('Error');
     }
 };
@@ -5014,14 +5708,18 @@ router.post('/admin/pins/backfill-city', async (req, res) => {
                 continue;
             }
             try {
-                const resolvedCity = await resolveCityFromCoords(lat, lng);
-                if (!resolvedCity) {
+                const resolvedLocation = await resolveProvinceCityFromCoords(lat, lng);
+                if (!resolvedLocation || !resolvedLocation.city) {
                     summary.skipped += 1;
                     continue;
                 }
+                const setFields = { city: resolvedLocation.city };
+                if (resolvedLocation.province) {
+                    setFields.province = resolvedLocation.province;
+                }
                 const updateResult = await db.collection('pins').updateOne(
                     { _id: pin._id },
-                    { $set: { city: resolvedCity } }
+                    { $set: setFields }
                 );
                 if (updateResult.modifiedCount) {
                     summary.updated += 1;
@@ -5048,6 +5746,119 @@ router.post('/admin/pins/backfill-city', async (req, res) => {
     } catch (error) {
         console.error('Failed to backfill pin cities', error);
         res.status(500).json({ message: 'Tidak dapat melakukan backfill kota.' });
+    }
+});
+
+router.post('/admin/pins/backfill-provinces', async (req, res) => {
+    try {
+        const authResident = await authenticateResidentRequest(req, res, { optional: true });
+        if (!authResident || authResident.role !== 'admin') {
+            const admin = await authenticateRequest(req, res);
+            if (!admin) return;
+        }
+        const db = await connectToDatabase();
+        const limit = Math.min(Math.max(Number(req.query?.limit) || 50, 1), 500);
+        const dryRun = req.query?.dryRun === 'true';
+        const missingProvinceQuery = {
+            $or: [
+                { province: { $exists: false } },
+                { province: null },
+                { province: '' }
+            ],
+            lat: { $exists: true },
+            lng: { $exists: true }
+        };
+        const remainingBefore = await db.collection('pins').countDocuments(missingProvinceQuery);
+        if (dryRun) {
+            return res.json({
+                dryRun: true,
+                limit,
+                remaining: remainingBefore
+            });
+        }
+        const pins = await db.collection('pins')
+            .find(missingProvinceQuery)
+            .limit(limit)
+            .toArray();
+        const summary = {
+            processed: 0,
+            updated: 0,
+            skipped: 0,
+            errors: 0
+        };
+        // Build areas directory for fuzzy city-to-province lookup
+        const areas = await getAreasDirectory();
+        function findProvinceByCity(cityName) {
+            if (!cityName || !areas || !areas.length) return '';
+            const normCity = normalizeForAreaMatch(cityName);
+            if (!normCity) return '';
+            for (const area of areas) {
+                const provinceName = area.nameId || '';
+                if (!provinceName) continue;
+                for (const c of (area.cities || [])) {
+                    const cityAliases = (c.aliases || []).map(normalizeForAreaMatch);
+                    cityAliases.push(normalizeForAreaMatch(c.nameId), normalizeForAreaMatch(c.nameEn));
+                    const match = cityAliases.some(a => a && (a === normCity || normCity.includes(a) || a.includes(normCity)));
+                    if (match) return provinceName;
+                }
+            }
+            return '';
+        }
+        const sampleUpdatedIds = [];
+        for (const pin of pins) {
+            summary.processed += 1;
+            try {
+                let province = '';
+                // First try to resolve province from existing city via areas directory
+                const pinCity = typeof pin.city === 'string' ? pin.city.trim() : '';
+                if (pinCity) {
+                    province = findProvinceByCity(pinCity);
+                }
+                // Fallback to geocode if city lookup didn't find province
+                if (!province) {
+                    const lat = Number(pin?.lat);
+                    const lng = Number(pin?.lng);
+                    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                        const result = await reverseGeocodeProvinceCity(lat, lng);
+                        if (result && result.province) {
+                            province = result.province;
+                        }
+                    }
+                }
+                if (!province) {
+                    summary.skipped += 1;
+                    continue;
+                }
+                const setFields = { province };
+                const updateResult = await db.collection('pins').updateOne(
+                    { _id: pin._id },
+                    { $set: setFields }
+                );
+                if (updateResult.modifiedCount) {
+                    summary.updated += 1;
+                    if (sampleUpdatedIds.length < 20) {
+                        sampleUpdatedIds.push(pin._id.toString());
+                    }
+                } else {
+                    summary.skipped += 1;
+                }
+            } catch (error) {
+                summary.errors += 1;
+                console.error('Failed to backfill province for pin', pin?._id, error);
+            }
+        }
+        const remainingAfter = await db.collection('pins').countDocuments(missingProvinceQuery);
+        res.json({
+            dryRun: false,
+            limit,
+            remainingBefore,
+            remainingAfter,
+            ...summary,
+            sampleUpdatedIds
+        });
+    } catch (error) {
+        console.error('Failed to backfill pin provinces', error);
+        res.status(500).json({ message: 'Tidak dapat melakukan backfill provinsi.' });
     }
 });
 
@@ -5473,10 +6284,11 @@ router.post('/pins', async (req, res) => {
         }
         pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
 
-        // Get city from lat/lng (with OSM fallback)
-        const resolvedCity = await resolveCityFromCoords(lat, lng);
-        if (resolvedCity) {
-            pin.city = resolvedCity;
+        // Get province and city from lat/lng (with OSM fallback)
+        const resolvedLocation = await resolveProvinceCityFromCoords(lat, lng);
+        if (resolvedLocation) {
+            pin.province = resolvedLocation.province;
+            pin.city = resolvedLocation.city;
         }
 
         const result = await db.collection('pins').insertOne(pin);
@@ -5547,9 +6359,10 @@ router.put('/pins/:id', async (req, res) => {
     }
 
     if (latLngUpdated) {
-        const resolvedCity = await resolveCityFromCoords(parsedLat, parsedLng);
-        if (resolvedCity) {
-            updatedPin.city = resolvedCity;
+        const resolvedLocation = await resolveProvinceCityFromCoords(parsedLat, parsedLng);
+        if (resolvedLocation) {
+            updatedPin.province = resolvedLocation.province;
+            updatedPin.city = resolvedLocation.city;
         }
     }
 
@@ -6020,7 +6833,8 @@ app.get('/pin/:id', handlePinPageRequest);
 app.get('/kategori', handleCategoryIndexRequest);
 app.get('/kategori/', handleCategoryIndexRequest);
 app.get('/kategori/:category', handleCategoryLandingRequest);
-app.get('/kategori/:category/:region', handleCategoryLandingRequest);
+app.get('/kategori/:category/:province/:region', handleCategoryLandingRequest);
+app.get('/kategori/:category/:region', handleCategoryLegacyRedirect);
 
 app.use('/api', router);
 
