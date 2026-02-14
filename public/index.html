@@ -8,12 +8,12 @@
     <meta name="keywords" content="event, lari, konser, seminar, makanan, minuman, restoran legendaris, SPBU, SPKLU, aplikasi rekomendasi tempat, rekomendasi tempat makan, rekomendasi kuliner Indonesia, aplikasi kuliner Indonesia, tempat makan terdekat, rekomendasi cafe terdekat, rekomendasi restoran terdekat, tempat nongkrong terdekat, rekomendasi tempat nongkrong, aplikasi pencari tempat makan, kuliner legendaris Indonesia, makan">
     <meta name="robots" content="index,follow">
     <meta name="google-site-verification" content="NeZu1mzU6sFw3Zh8cbYsHJhjeCCY0gNEzyhwJ52WA1I">
-    <link rel="canonical" href="https://ayanaon.app/">
+    <link rel="canonical" href="https://www.ayanaon.app/">
     <meta property="og:site_name" content="AyaNaon | Cari Kegiatan Seru Di Sekitarmu!">
     <meta property="og:title" content="AyaNaon | Cari Kegiatan Seru Di Sekitarmu!">
     <meta property="og:description" content="Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://ayanaon.app/">
+    <meta property="og:url" content="https://www.ayanaon.app/">
     <meta property="og:image" content="icon-512-v2.png">
     <meta property="og:locale" content="id_ID">
     <meta name="twitter:card" content="summary">
@@ -30,8 +30,87 @@
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="style.css">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "AyaNaon",
+      "url": "https://www.ayanaon.app/",
+      "description": "Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik!",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://www.ayanaon.app/?search={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "Kategori Populer AyaNaon",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Cari Kegiatan Berdasarkan Kategori atau Wilayah",
+          "url": "https://www.ayanaon.app/kategori"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Konser Musik & Acara",
+          "url": "https://www.ayanaon.app/kategori/konser-musik-acara"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Olahraga & Aktivitas Hobi",
+          "url": "https://www.ayanaon.app/kategori/olahraga-aktivitas-hobi"
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
+          "name": "Promo & Diskon Makanan / Minuman",
+          "url": "https://www.ayanaon.app/kategori/promo-diskon-makanan-minuman"
+        },
+        {
+          "@type": "ListItem",
+          "position": 5,
+          "name": "Restoran Legendaris",
+          "url": "https://www.ayanaon.app/kategori/restoran-legendaris"
+        },
+        {
+          "@type": "ListItem",
+          "position": 6,
+          "name": "Rekomendasi Penginapan",
+          "url": "https://www.ayanaon.app/kategori/rekomendasi-penginapan"
+        },
+        {
+          "@type": "ListItem",
+          "position": 7,
+          "name": "Budaya & Hiburan",
+          "url": "https://www.ayanaon.app/kategori/budaya-hiburan"
+        },
+        {
+          "@type": "ListItem",
+          "position": 8,
+          "name": "Tempat Ikonik & Bersejarah",
+          "url": "https://www.ayanaon.app/kategori/tempat-ikonik-bersejarah"
+        }
+      ]
+    }
+    </script>
 </head>
 <body>
+    <!-- SEO-optimized description for search engines -->
+    <div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true">
+        <h1>AyaNaon - Cari Kegiatan Seru Di Sekitarmu</h1>
+        <p>Satu peta untuk cari ribuan acara olahraga, konser, edukasi, promo makanan sampai restoran legendaris ada disini, cuma dengan 1x klik! Temukan konser musik, olahraga, promo makanan, restoran legendaris, penginapan, budaya, dan tempat bersejarah di Indonesia.</p>
+    </div>
     <div id="maintenance-notice" class="maintenance-notice hidden" role="status" aria-live="assertive">
         <div class="maintenance-notice__icon">!</div>
         <div class="maintenance-notice__text">
@@ -97,9 +176,9 @@
             <input type="text" id="pin-location-search" placeholder="Cari lokasi atau alamat" aria-label="Cari lokasi atau alamat">
             <button type="button" id="pin-location-search-btn" aria-label="Cari lokasi">Search</button>
         </div>
-        <p class="pin-location-search-note">Tap peta untuk menjatuhkan pin, atau cari lokasi lalu konfirmasi titik tersebut.</p>
+        <p class="pin-location-search-note" data-nosnippet>Tap peta untuk menjatuhkan pin, atau cari lokasi lalu konfirmasi titik tersebut.</p>
     </div>
-    <nav id="bottom-nav" class="bottom-nav" aria-label="Primary">
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Primary" data-nosnippet>
         <button id="nav-home-btn" class="bottom-nav__btn" type="button" data-nav="home">
             <span class="bottom-nav__label">Home</span>
         </button>
@@ -120,7 +199,7 @@
                 </span>
                 <span class="bottom-nav__label">Menu</span>
             </button>
-            <div id="action-menu-content" class="action-menu-content hidden">
+            <div id="action-menu-content" class="action-menu-content hidden" data-nosnippet>
             <section class="action-menu-section">
                 <button id="install-app-btn" type="button" hidden>Install App</button>
                 <button id="update-app-btn" type="button" hidden>Update Tersedia</button>

@@ -96,6 +96,13 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.14
+- **Canonical URL Alignment:** Fixed canonical and og:url tags in homepage to match actual domain (www.ayanaon.app), resolving "Alternative page with proper canonical tag" issues in Google Search Console.
+- **Sitemap Cleanup:** Removed legacy redirect URLs from sitemap generation, now excluding category pages without province data to prevent "Page with redirect" indexing issues.
+- **HTTPS & WWW Redirects:** Added forced 301 redirects in netlify.toml for HTTP-to-HTTPS and non-www-to-www to ensure consistent URL structure across all entry points.
+- **Location-Specific Pin Titles:** Mass promotion pin pages now include city in title and description (e.g., "Title | City | AyaNaon") to differentiate duplicate content and improve geo-specific search relevance.
+- **Structured Data Enhancements:** Added JSON-LD WebSite schema with SearchAction and ItemList schema for controlled sitelinks, plus data-nosnippet attributes on UI elements to prevent instruction text from appearing in search snippets.
+
 ### What's New in v2.4.13
 - **Province-Level Category Cards:** Category cards on `/kategori` now display province-level areas instead of city-level for broader regional grouping.
 - **Server-Side Pin Search & Pagination:** The "Cari pin" section on both `/kategori` and `/kategori/<category>` pages now queries all active pins via a server-side API with paginated results (10 per page), replacing the previous client-side filtering of 200 pins.

@@ -2,6 +2,26 @@
   functions = "netlify/functions"
   publish = "public"
 
+# Force HTTPS
+[[redirects]]
+  from = "http://ayanaon.app/*"
+  to = "https://www.ayanaon.app/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "http://www.ayanaon.app/*"
+  to = "https://www.ayanaon.app/:splat"
+  status = 301
+  force = true
+
+# Redirect non-www to www
+[[redirects]]
+  from = "https://ayanaon.app/*"
+  to = "https://www.ayanaon.app/:splat"
+  status = 301
+  force = true
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"

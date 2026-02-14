@@ -1480,22 +1480,23 @@ function buildLandingEntriesFromPins(pins = [], baseUrl = '') {
     const addedProvincePaths = new Set();
     regionsByCategory.forEach((regionMap, categorySlug) => {
         regionMap.forEach(({ provinceSlug, regionSlug }) => {
-            // Add province-level entry if not already added
-            if (provinceSlug) {
-                const provincePath = `${baseUrl}/kategori/${categorySlug}/${provinceSlug}`;
-                if (!addedProvincePaths.has(provincePath)) {
-                    addedProvincePaths.add(provincePath);
-                    entries.push({
-                        loc: provincePath,
-                        lastmod,
-                        changefreq: 'weekly',
-                        priority: '0.55'
-                    });
-                }
+            // Only include URLs with province to avoid legacy redirect URLs
+            if (!provinceSlug) {
+                return;
             }
-            const path = provinceSlug
-                ? `${baseUrl}/kategori/${categorySlug}/${provinceSlug}/${regionSlug}`
-                : `${baseUrl}/kategori/${categorySlug}/${regionSlug}`;
+            // Add province-level entry if not already added
+            const provincePath = `${baseUrl}/kategori/${categorySlug}/${provinceSlug}`;
+            if (!addedProvincePaths.has(provincePath)) {
+                addedProvincePaths.add(provincePath);
+                entries.push({
+                    loc: provincePath,
+                    lastmod,
+                    changefreq: 'weekly',
+                    priority: '0.55'
+                });
+            }
+            // Add city-level entry with province
+            const path = `${baseUrl}/kategori/${categorySlug}/${provinceSlug}/${regionSlug}`;
             entries.push({
                 loc: path,
                 lastmod,
@@ -1901,8 +1902,20 @@ function getPinImageSource(image) {
 function buildPinPageHtml(pin, seo, baseUrl) {
     const title = String(pin?.title || 'Informasi Pin').trim();
     const description = String(pin?.description || '').trim();
-    const metaDescription = truncateText(description || seo?.description || '', 160);
-    const pageTitle = title ? `${title} | ${seo?.title || ''}`.trim() : (seo?.title || '');
+    const province = pin?.province ? String(pin.province).trim() : '';
+    const city = pin?.city ? String(pin.city).trim() : '';
+
+    // Include location in meta description to avoid duplicates for mass promotions
+    const locationSuffix = city && province ? ` di ${city}, ${province}` : city ? ` di ${city}` : province ? ` di ${province}` : '';
+    const descriptionWithLocation = description ? `${description}${locationSuffix}` : (seo?.description || '');
+    const metaDescription = truncateText(descriptionWithLocation, 160);
+
+    // Include location in page title to make mass promotions unique
+    const titleParts = [title];
+    if (city) titleParts.push(city);
+    if (seo?.title) titleParts.push(seo.title);
+    const pageTitle = titleParts.filter(Boolean).join(' | ');
+
     const pinId = pin?._id ? String(pin._id) : '';
     const canonicalUrl = baseUrl ? `${baseUrl}/pin/${pinId}` : '';
     const categoryIndexUrl = baseUrl ? `${baseUrl}/kategori` : '/kategori';
@@ -1913,8 +1926,6 @@ function buildPinPageHtml(pin, seo, baseUrl) {
     const ogImage = seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
     const twitterImage = seo?.twitterImage || ogImage;
     const whenLabel = formatPinWhenLabel(pin?.lifetime);
-    const province = pin?.province ? String(pin.province).trim() : '';
-    const city = pin?.city ? String(pin.city).trim() : '';
     const hasCoords = Number.isFinite(pin?.lat) && Number.isFinite(pin?.lng);
     const lat = hasCoords ? Number(pin.lat) : null;
     const lng = hasCoords ? Number(pin.lng) : null;
@@ -5399,7 +5410,7 @@ const handleRobotsRequest = async (req, res) => {
 const handlePinPageRequest = async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
-        res.status(404).send('Not found');
+        res.redirect(302, '/kategori');
         return;
     }
     try {
@@ -5409,7 +5420,7 @@ const handlePinPageRequest = async (req, res) => {
             $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }]
         });
         if (!pin) {
-            res.status(404).send('Not found');
+            res.redirect(302, '/kategori');
             return;
         }
         const seo = await readSeoSettings();
@@ -5454,6 +5465,11 @@ const handleCategoryLandingRequest = async (req, res) => {
     try {
         const data = await fetchCategoryLandingData(categorySlug, provinceSlug, regionSlug);
         if (!data) {
+            // Fallback to category-only page if province/region was specified
+            if (provinceSlug || regionSlug) {
+                res.redirect(302, `/kategori/${categorySlug}`);
+                return;
+            }
             res.status(404).send('Not found');
             return;
         }
