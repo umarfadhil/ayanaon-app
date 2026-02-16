@@ -3817,11 +3817,13 @@ function buildCategoryLandingHtml({
     </section>
     <footer class="pin-landing-footer">AyaNaon category page</footer>
   </div>
-  <script>window.__regionTree = ${JSON.stringify(safeRegionTree)};window.__categorySlug = ${JSON.stringify(categorySlug)};</script>
+  <script>window.__regionTree = ${JSON.stringify(safeRegionTree)};window.__categorySlug = ${JSON.stringify(categorySlug)};window.__provinceSlug = ${JSON.stringify(provinceSlug || '')};window.__regionSlug = ${JSON.stringify(regionSlug || '')};</script>
   <script>
     (function () {
       var regionTree = window.__regionTree || [];
       var categorySlug = window.__categorySlug || '';
+      var initialProvinceSlug = window.__provinceSlug || '';
+      var initialRegionSlug = window.__regionSlug || '';
       var searchInput = document.getElementById('pin-filter-search');
       var provinceSelect = document.getElementById('pin-filter-province');
       var citySelect = document.getElementById('pin-filter-city');
@@ -3838,12 +3840,31 @@ function buildCategoryLandingHtml({
       var searchTimer = null;
       var isLoading = false;
 
+      // Initialize filters from URL parameters
+      if (initialProvinceSlug && provinceSelect) {
+        provinceSelect.value = initialProvinceSlug;
+        populateCities();
+        if (initialRegionSlug && citySelect) {
+          citySelect.value = initialRegionSlug;
+        }
+      }
+
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(function (pos) {
           userLat = pos.coords.latitude;
           userLng = pos.coords.longitude;
           doSearch(1);
-        }, function () {});
+        }, function () {
+          // If geolocation fails but we have URL filters, still do initial search
+          if (initialProvinceSlug || initialRegionSlug) {
+            doSearch(1);
+          }
+        });
+      } else {
+        // If geolocation not available but we have URL filters, do initial search
+        if (initialProvinceSlug || initialRegionSlug) {
+          doSearch(1);
+        }
       }
 
       function populateCities() {

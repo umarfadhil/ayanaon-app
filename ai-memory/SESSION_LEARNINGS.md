@@ -97,3 +97,47 @@ Max 10 lines per task.
 - **Use a groupId pattern for bulk-created resources** to enable shared references (images, metadata)
 - **Haversine bounding-box pre-filter** (lat/lng ± delta) before exact distance check is efficient without a 2dsphere index
 - **Location-gated content** should be loaded separately from main data to avoid penalizing users without location
+
+## Mass Promo Pins Disappearing Bug (2026-02-16)
+
+### Issue: Mass promo pins load then vanish after regular pins sync
+- Console log sequence: "Nearby promos loaded {count: 2}" → "Pins synchronized {count: 3358}"
+- Promo pins visible briefly, then removed from map
+
+### Root Cause
+- `fetchPins()` sync loop (line ~8231) removes all markers not in `seenIds` set
+- `seenIds` only contains IDs from `/api/pins` response, which **excludes** mass promo pins (`massPromotion: { $ne: true }`)
+- Mass promo pins added by `fetchNearbyPromos()` were in `pinMarkersById` but not in `seenIds`, so sync deleted them
+
+### Fix
+- Added guard in sync loop: skip removal if `marker.pin.massPromotion` is truthy
+- `pinMarkersById.forEach` now preserves mass promo markers during regular pin sync
+
+### Learning
+- **When multiple endpoints contribute to a shared marker map, the sync/reconciliation logic must account for all sources**
+- Markers from secondary endpoints need a distinguishing flag to survive primary endpoint sync cycles
+
+## Category Landing Page Filters (2026-02-16)
+
+### Issue: Province/city filters not auto-applied from URL parameters
+- URL `/kategori/promo-diskon-makanan-minuman/jawa-barat/kota-bandung` showed all pins instead of filtering by province and city
+- Server-rendered HTML passed `provinceSlug` and `regionSlug` (city) to `buildCategoryLandingHtml()` but not to frontend script
+- Filter dropdowns rendered with correct options but no selected values
+- Initial search ran without province/city filters
+
+### Root Cause
+- Script only received `window.__regionTree` and `window.__categorySlug` (line 3820)
+- No initialization code to set filter values from URL parameters
+- `doSearch()` only triggered after geolocation, ignoring URL-based filters
+
+### Fix
+- Added `window.__provinceSlug` and `window.__regionSlug` to script globals (line 3820)
+- Initialize `provinceSelect.value = initialProvinceSlug` on page load
+- Call `populateCities()` to load city options for selected province
+- Set `citySelect.value = initialRegionSlug` after populating cities
+- Trigger `doSearch(1)` even if geolocation fails/unavailable when URL filters present
+
+### Learning
+- **Server-rendered pages with client-side filtering must pass URL parameters to frontend**
+- Initialize filter UI state from URL on page load before any search triggers
+- Don't rely solely on async geolocation for initial search when filters are in URL

@@ -111,6 +111,7 @@ let maintenanceNoticeMessageElement = null;
 let featureFlags = { gerobakOnline: true };
 let isGerobakOnlineEnabled = true;
 let isFetchingFeatureFlags = false;
+let liveSellersCountElement;
 
 function showPinLocationSearchBar(show = false) {
     if (!pinLocationSearchBarElement) {
@@ -8228,7 +8229,7 @@ async function initMap() {
                 }
             });
             pinMarkersById.forEach((marker, id) => {
-                if (!seenIds.has(id)) {
+                if (!seenIds.has(id) && !(marker.pin && marker.pin.massPromotion)) {
                     removePinMarker(marker);
                     pinMarkersById.delete(id);
                 }
