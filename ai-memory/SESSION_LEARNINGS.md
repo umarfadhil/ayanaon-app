@@ -80,3 +80,20 @@ Max 10 lines per task.
 - Hidden accessibility content (off-screen but semantic) helps Google understand page purpose
 - Meta description alone isn't enough - structured data + hidden semantic content reinforces it
 - Sitelinks require ItemList schema with proper URLs and names for each preferred link
+
+## Mass Promotion Optimization (2026-02-16)
+
+### Issue: Mass promo pins burden initial load and duplicate image storage
+- All pins loaded on page load, including mass promos that may be irrelevant to user's location
+- Each mass promo pin stored its own copy of base64 images, wasting MongoDB storage
+
+### Fix
+- **Flagging**: Mass promo pins now have `massPromotion: true` and `massPromotionGroupId` fields
+- **Shared images**: Only first pin in a group stores images; subsequent pins use `sharedImagesFromGroup` reference, resolved at read time via `resolveSharedImages()`
+- **Location-gated loading**: `GET /pins` excludes `massPromotion: true`; new `GET /pins/nearby-promos?lat=X&lng=Y` returns mass promos within 10km using Haversine bounding-box + exact distance filter
+- **Frontend**: `fetchNearbyPromos()` called when `userLocation` becomes available (both `getCurrentPosition` and `watchPosition` callbacks); uses `nearbyPromosLoaded` flag to avoid duplicate fetches
+
+### Learning
+- **Use a groupId pattern for bulk-created resources** to enable shared references (images, metadata)
+- **Haversine bounding-box pre-filter** (lat/lng ± delta) before exact distance check is efficient without a 2dsphere index
+- **Location-gated content** should be loaded separately from main data to avoid penalizing users without location

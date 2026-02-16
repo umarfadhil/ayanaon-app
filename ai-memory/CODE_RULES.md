@@ -19,6 +19,7 @@
 - Auth: JWT tokens verified inline per route (no middleware), `req.headers.authorization` Bearer token
 - Settings stored in `settings` collection with `{ key: string, value: any }` pattern
 - Photos stored as base64 data URIs in MongoDB documents directly
+- Mass promo pins share images via `sharedImagesFromGroup` referencing `massPromotionGroupId` — only the first pin in a group stores actual image data; resolved at read time by `resolveSharedImages()`
 - IP address used for anonymous voting and visitor tracking (`x-nf-client-connection-ip` header)
 
 ## Frontend Patterns

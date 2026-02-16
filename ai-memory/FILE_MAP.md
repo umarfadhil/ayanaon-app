@@ -43,7 +43,8 @@
 ## API Routes (all under `/api/`)
 
 ### Pins
-- `GET /pins` - list active pins
+- `GET /pins` - list active pins (excludes mass promo pins)
+- `GET /pins/nearby-promos?lat=X&lng=Y` - mass promo pins within 10km radius
 - `GET /pins/count` - active pin count
 - `GET /pins/search` - server-side search with pagination
 - `GET /pins/:id` - single pin

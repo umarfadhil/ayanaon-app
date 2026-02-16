@@ -7,7 +7,7 @@
 - **Warga** = registered residents who verify vendors and save pins
 - PWA (installable, service worker, offline-capable)
 - Live site: **ayanaon.app**
-- Current version: **v2.4.14**
+- Current version: **v2.4.15**
 
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
@@ -22,7 +22,7 @@
 - Category filtering, keyword search, date-range filtering
 - Gerobak Online: seller registration, live broadcasting, menu gallery, community verification
 - Warga system: resident profiles, avatars, status, location sharing, saved pins
-- Admin dashboard: manage pins, SEO, categories, tabs, brands, areas, mass promotions, analytics
+- Admin dashboard: manage pins, SEO, categories, tabs, brands, areas, mass promotions (flagged, location-gated, shared images), analytics
 - Light/dark theme
 - SEO: server-rendered pin detail pages, sitemap, robots.txt
 
@@ -33,7 +33,7 @@
 - `MONGODB_DASHBOARD_PASSWORD` - embedded MongoDB Charts password
 
 ## MongoDB Collections
-- `pins` - map pins (events, promos, etc.)
+- `pins` - map pins (events, promos, etc.). Mass promo pins have `massPromotion: true`, `massPromotionGroupId`, and may use `sharedImagesFromGroup` for shared images
 - `sellers` - Gerobak Online vendor accounts
 - `residents` - Warga (registered resident) accounts
 - `unique_ips` - anonymous visitor tracking

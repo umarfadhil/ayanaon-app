@@ -3846,19 +3846,19 @@
             return;
         }
 
+        const massPromotionGroupId = `mp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const payloadBase = {
             title,
             description,
-            category
+            category,
+            massPromotion: true,
+            massPromotionGroupId
         };
         if (link) {
             payloadBase.link = link;
         }
         if (lifetime) {
             payloadBase.lifetime = lifetime;
-        }
-        if (imagesPayload.length) {
-            payloadBase.images = imagesPayload;
         }
 
         const headers = {
@@ -3884,14 +3884,19 @@
                     els.massStatus.textContent = `Menambahkan ${index + 1} dari ${selectedPlaces.length}...`;
                 }
                 try {
+                    const pinPayload = {
+                        ...payloadBase,
+                        lat: place.lat,
+                        lng: place.lng
+                    };
+                    // Only send images on the first pin; backend shares via groupId
+                    if (index === 0 && imagesPayload.length) {
+                        pinPayload.images = imagesPayload;
+                    }
                     const response = await fetch('/api/pins', {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({
-                            ...payloadBase,
-                            lat: place.lat,
-                            lng: place.lng
-                        })
+                        body: JSON.stringify(pinPayload)
                     });
                     const data = await response.json().catch(() => ({}));
                     if (!response.ok) {

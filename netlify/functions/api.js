@@ -47,8 +47,23 @@ function isTruthy(value) {
 }
 
 function computeImageCount(doc) {
-    if (!doc || !Array.isArray(doc.images)) return 0;
+    if (!doc) return 0;
+    if (doc.sharedImageCount && typeof doc.sharedImageCount === 'number') return doc.sharedImageCount;
+    if (!Array.isArray(doc.images)) return 0;
     return doc.images.length;
+}
+
+async function resolveSharedImages(pin, db) {
+    if (!pin || !pin.sharedImagesFromGroup) return pin;
+    const source = await db.collection('pins').findOne(
+        { massPromotionGroupId: pin.sharedImagesFromGroup, images: { $exists: true, $ne: [] } },
+        { projection: { images: 1 } }
+    );
+    if (source && Array.isArray(source.images)) {
+        pin.images = source.images;
+        pin.imageCount = source.images.length;
+    }
+    return pin;
 }
 
 async function ensureIndexes(database) {
@@ -5044,7 +5059,10 @@ router.get('/pins', async (req, res) => {
     await recordIpAddress(ip);
 
     const { city } = req.query;
-    let query = { $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }] };
+    let query = {
+        $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }],
+        massPromotion: { $ne: true }
+    };
 
     if (city) {
         query.city = city;
@@ -5080,6 +5098,46 @@ router.get('/pins', async (req, res) => {
             { $project: { images: 0 } }
         ])
         .toArray();
+    res.json(pins);
+});
+
+router.get('/pins/nearby-promos', async (req, res) => {
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.json([]);
+    }
+    const radiusKm = 10;
+    const latDelta = radiusKm / 111.32;
+    const lngDelta = radiusKm / (111.32 * Math.cos(lat * Math.PI / 180));
+    const db = await connectToDatabase();
+    const query = {
+        $or: [{ expiresAt: { $gt: new Date() } }, { expiresAt: null }],
+        massPromotion: true,
+        lat: { $gte: lat - latDelta, $lte: lat + latDelta },
+        lng: { $gte: lng - lngDelta, $lte: lng + lngDelta }
+    };
+    const isLean = isTruthy(req.query.lean);
+    const pipeline = [
+        { $match: query },
+        { $addFields: { imageCount: { $size: { $ifNull: ['$images', []] } } } }
+    ];
+    if (isLean) {
+        pipeline.push({ $project: { images: 0 } });
+    }
+    let pins = await db.collection('pins').aggregate(pipeline).toArray();
+    // Haversine exact distance filter
+    pins = pins.filter(pin => {
+        const dLat = (pin.lat - lat) * Math.PI / 180;
+        const dLng = (pin.lng - lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * Math.PI / 180) * Math.cos(pin.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+        const dist = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return dist <= radiusKm;
+    });
+    // Fix imageCount for shared-image pins
+    pins.forEach(pin => {
+        if (pin.sharedImageCount) pin.imageCount = pin.sharedImageCount;
+    });
     res.json(pins);
 });
 
@@ -5250,9 +5308,12 @@ router.get('/pins/:id', async (req, res) => {
         return res.status(400).json({ message: 'Pin id tidak valid.' });
     }
     const db = await connectToDatabase();
-    const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
+    let pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
     if (!pin) {
         return res.status(404).json({ message: 'Pin not found.' });
+    }
+    if (pin.sharedImagesFromGroup) {
+        await resolveSharedImages(pin, db);
     }
     pin.imageCount = computeImageCount(pin);
     res.json(pin);
@@ -5422,6 +5483,9 @@ const handlePinPageRequest = async (req, res) => {
         if (!pin) {
             res.redirect(302, '/kategori');
             return;
+        }
+        if (pin.sharedImagesFromGroup) {
+            await resolveSharedImages(pin, db);
         }
         const seo = await readSeoSettings();
         const baseUrl = resolveSeoBaseUrl(seo, req);
@@ -6295,10 +6359,36 @@ router.post('/pins', async (req, res) => {
 
         pin.expiresAt = computeExpiresAtFromLifetime(pin.lifetime);
 
-        if (Array.isArray(pin.images) && pin.images.length) {
-            pin.images = normalizeIncomingPinImages([], pin.images);
+        // Mass promotion support
+        if (pin.massPromotion === true && typeof pin.massPromotionGroupId === 'string' && pin.massPromotionGroupId) {
+            pin.massPromotion = true;
+            pin.massPromotionGroupId = pin.massPromotionGroupId;
+            // Check if another pin in this group already has images
+            const existingGroupPin = await db.collection('pins').findOne(
+                { massPromotionGroupId: pin.massPromotionGroupId, images: { $exists: true, $ne: [] } },
+                { projection: { _id: 1, images: 1 } }
+            );
+            if (existingGroupPin) {
+                // Store reference instead of duplicating images
+                pin.sharedImagesFromGroup = pin.massPromotionGroupId;
+                pin.sharedImageCount = Array.isArray(existingGroupPin.images) ? existingGroupPin.images.length : 0;
+                pin.images = [];
+                pin.imageCount = pin.sharedImageCount;
+            } else {
+                // First pin in group — store images normally
+                if (Array.isArray(pin.images) && pin.images.length) {
+                    pin.images = normalizeIncomingPinImages([], pin.images);
+                }
+                pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
+            }
+        } else {
+            delete pin.massPromotion;
+            delete pin.massPromotionGroupId;
+            if (Array.isArray(pin.images) && pin.images.length) {
+                pin.images = normalizeIncomingPinImages([], pin.images);
+            }
+            pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
         }
-        pin.imageCount = Array.isArray(pin.images) ? pin.images.length : 0;
 
         // Get province and city from lat/lng (with OSM fallback)
         const resolvedLocation = await resolveProvinceCityFromCoords(lat, lng);

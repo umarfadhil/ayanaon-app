@@ -96,6 +96,12 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.4.15
+- **Mass Promotion Optimization:** Mass promotion pins are now flagged with `massPromotion: true` and grouped by `massPromotionGroupId` for efficient management and shared image storage (only the first pin in a group stores images; subsequent pins reference it via `sharedImagesFromGroup`).
+- **Location-Gated Mass Promos:** Mass promotion pins are excluded from the default `/api/pins` response; a new `/api/pins/nearby-promos?lat=X&lng=Y` endpoint returns mass promos within 10km radius using Haversine distance calculation, reducing initial page load burden for users outside promotion zones.
+- **Auto-Load Nearby Promos:** When users grant location permission, nearby mass promotion pins automatically load via `fetchNearbyPromos()`, ensuring they discover relevant promotions without impacting the core UI experience.
+- **Image Storage Reduction:** Mass promo batches now upload images only once (first pin) instead of duplicating base64 data across all locations, significantly reducing MongoDB storage consumption for bulk promotions.
+
 ### What's New in v2.4.14
 - **Canonical URL Alignment:** Fixed canonical and og:url tags in homepage to match actual domain (www.ayanaon.app), resolving "Alternative page with proper canonical tag" issues in Google Search Console.
 - **Sitemap Cleanup:** Removed legacy redirect URLs from sitemap generation, now excluding category pages without province data to prevent "Page with redirect" indexing issues.

@@ -8255,6 +8255,32 @@ async function initMap() {
     }
     refreshPins = fetchPins;
 
+    let nearbyPromosLoaded = false;
+
+    function fetchNearbyPromos() {
+        if (!userLocation || nearbyPromosLoaded) return Promise.resolve();
+        nearbyPromosLoaded = true;
+        const url = `/api/pins/nearby-promos?lat=${userLocation.lat}&lng=${userLocation.lng}&lean=1`;
+        DEBUG_LOGGER.log('Fetching nearby mass promotion pins');
+        return fetch(url)
+            .then(response => response.json())
+            .then(pins => {
+                const promoPins = Array.isArray(pins) ? pins : [];
+                promoPins.forEach(pin => {
+                    const pinId = normalizePinId(pin?._id || pin?.id);
+                    if (!pinId || pinMarkersById.has(pinId)) return;
+                    addPinToMap(pin);
+                });
+                markers = Array.from(pinMarkersById.values());
+                applyFilters();
+                DEBUG_LOGGER.log('Nearby promos loaded', { count: promoPins.length });
+            })
+            .catch(error => {
+                nearbyPromosLoaded = false;
+                console.error('Error fetching nearby promos:', error);
+            });
+    }
+
     async function submitPin(e) {
         e.preventDefault();
 
@@ -8463,6 +8489,7 @@ function handleLocationError(browserHasGeolocation) {
             handleResidentLocationUpdate();
             trackLocationUpdate(newLocation.lat, newLocation.lng);
             applyFilters();
+            fetchNearbyPromos();
         }, () => {
             handleLocationError(false);
             stopLocationWatch();
@@ -8501,6 +8528,7 @@ function handleLocationError(browserHasGeolocation) {
             handleLocationEnabled();
             handleResidentLocationUpdate();
             applyFilters();
+            fetchNearbyPromos();
         }, () => {
             handleLocationError(true);
         });
