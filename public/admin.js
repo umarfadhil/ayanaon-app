@@ -100,6 +100,15 @@
             list: [],
             loaded: false,
             isLoading: false
+        },
+        massGroups: {
+            groups: [],
+            loaded: false,
+            isLoading: false,
+            editingGroupId: null,
+            isSaving: false,
+            editExistingImages: [],
+            editAddedImages: []
         }
     };
 
@@ -108,6 +117,7 @@
     let miniMarker = null;
     let miniGeocoder = null;
     let googleMapsPromise = null;
+    let mapsApiKey = null;
     let massMap = null;
     let massPlacesService = null;
     let massGeocoder = null;
@@ -264,6 +274,26 @@
         els.massSourceBrands = document.getElementById('mass-source-brands');
         els.massBrandSelect = document.getElementById('mass-brand-select');
         els.massBrandRefreshBtn = document.getElementById('mass-brand-refresh-btn');
+        els.massGroupsList = document.getElementById('mass-groups-list');
+        els.massGroupsMessage = document.getElementById('mass-groups-message');
+        els.massGroupsRefreshBtn = document.getElementById('mass-groups-refresh-btn');
+        els.massGroupEditModal = document.getElementById('mass-group-edit-modal');
+        els.massGroupEditForm = document.getElementById('mass-group-edit-form');
+        els.massGroupEditId = document.getElementById('mass-group-edit-id');
+        els.massGroupEditTitleInput = document.getElementById('mass-group-edit-title-input');
+        els.massGroupEditDescription = document.getElementById('mass-group-edit-description');
+        els.massGroupEditCategory = document.getElementById('mass-group-edit-category');
+        els.massGroupEditLink = document.getElementById('mass-group-edit-link');
+        els.massGroupEditLifetime = document.getElementById('mass-group-edit-lifetime');
+        els.massGroupEditStart = document.getElementById('mass-group-edit-start');
+        els.massGroupEditEnd = document.getElementById('mass-group-edit-end');
+        els.massGroupEditMessage = document.getElementById('mass-group-edit-message');
+        els.massGroupEditClose = document.getElementById('mass-group-edit-close');
+        els.massGroupEditCancel = document.getElementById('mass-group-edit-cancel');
+        els.massGroupEditExistingImages = document.getElementById('mass-group-edit-existing-images');
+        els.massGroupEditNewImages = document.getElementById('mass-group-edit-new-images');
+        els.massGroupEditImageInput = document.getElementById('mass-group-edit-image-input');
+        els.massGroupEditPhotoRemaining = document.getElementById('mass-group-edit-photo-remaining');
 
         // Brands tab
         els.brandsContent = document.getElementById('admin-brands-pane');
@@ -1961,9 +1991,14 @@
                 if (!apiKey) {
                     throw new Error('API key Maps tidak tersedia.');
                 }
+                mapsApiKey = apiKey;
                 await new Promise((resolve, reject) => {
                     const existing = document.querySelector('script[data-admin-gmaps="true"]');
                     if (existing) {
+                        if (window.google && window.google.maps) {
+                            resolve();
+                            return;
+                        }
                         existing.addEventListener('load', resolve, { once: true });
                         existing.addEventListener('error', () => reject(new Error('Gagal memuat Maps')), { once: true });
                         return;
@@ -2529,6 +2564,9 @@
         if (nextTab === 'mass') {
             initMassMap();
             refreshMassMapView();
+            if (!state.massGroups.loaded) {
+                loadMassGroups();
+            }
         }
         if (nextTab === 'tabs') {
             resetTabVisibilityDraft();
@@ -3240,9 +3278,6 @@
                 streetViewControl: false
             });
             massInfoWindow = new gmaps.InfoWindow();
-            if (gmaps.places?.PlacesService) {
-                massPlacesService = new gmaps.places.PlacesService(massMap);
-            }
         } catch (error) {
             console.warn('Peta hasil mass gagal dimuat', error);
             showMassMessage('error', 'Peta hasil tidak dapat dimuat.');
@@ -3428,7 +3463,7 @@
         if (!trimmed) {
             return { term: '', location: '' };
         }
-        const match = /\s+di\s+(.+)$/i.exec(trimmed);
+        const match = /\s+(?:di|in)\s+(.+)$/i.exec(trimmed);
         if (match) {
             const location = match[1].trim();
             const term = trimmed.slice(0, match.index).trim();
@@ -3438,57 +3473,86 @@
     }
 
     function normalizePlaceResult(place) {
-        if (!place || !place.place_id) {
-            return null;
-        }
-        const location = place.geometry?.location;
-        if (!location || typeof location.lat !== 'function' || typeof location.lng !== 'function') {
-            return null;
-        }
+        // Supports Places REST API, new Places JS API Place objects, and legacy PlacesService results
+        const id = place?.id || place?.place_id;
+        if (!id) return null;
+        const loc = place.location || place.geometry?.location;
+        if (!loc) return null;
+        // REST API: { latitude, longitude }; JS API: LatLng object with .lat()/.lng()
+        const lat = typeof loc.lat === 'function' ? loc.lat() : (loc.latitude ?? loc.lat);
+        const lng = typeof loc.lng === 'function' ? loc.lng() : (loc.longitude ?? loc.lng);
+        if (lat == null || lng == null) return null;
+        // REST API: displayName is { text, languageCode }; JS API: string
+        const name = (typeof place.displayName === 'object' ? place.displayName?.text : place.displayName)
+            || place.name || '';
         return {
-            id: place.place_id,
-            name: place.name || '',
-            address: place.formatted_address || place.vicinity || '',
-            lat: location.lat(),
-            lng: location.lng()
+            id,
+            name,
+            address: place.formattedAddress || place.formatted_address || place.vicinity || '',
+            lat,
+            lng
         };
     }
 
     async function ensureMassPlacesService() {
         await initMassMap();
-        const gmaps = await ensureGoogleMaps();
-        if (!gmaps?.places?.PlacesService) {
-            throw new Error('Google Places API belum tersedia.');
-        }
-        if (!massPlacesService) {
-            massPlacesService = new gmaps.places.PlacesService(massMap || document.createElement('div'));
-        }
-        return massPlacesService;
+        await ensureGoogleMaps();
+        return null; // new Places API does not need a service instance
     }
 
-    function runPlacesTextSearch(service, request) {
-        return new Promise((resolve, reject) => {
-            const collected = [];
-            const handlePage = (results, status, pagination) => {
-                const okStatus = window.google?.maps?.places?.PlacesServiceStatus?.OK || 'OK';
-                const zeroStatus = window.google?.maps?.places?.PlacesServiceStatus?.ZERO_RESULTS || 'ZERO_RESULTS';
-                if (status !== okStatus && status !== zeroStatus) {
-                    reject(new Error('Pencarian tempat gagal.'));
-                    return;
-                }
-                if (Array.isArray(results)) {
-                    collected.push(...results);
-                }
-                if (pagination && pagination.hasNextPage) {
-                    setTimeout(() => {
-                        pagination.nextPage();
-                    }, 2000);
-                } else {
-                    resolve(collected);
-                }
+    async function runPlacesTextSearch(service, request) {
+        await ensureGoogleMaps(); // ensure mapsApiKey is populated
+        if (!mapsApiKey) throw new Error('API key Maps tidak tersedia.');
+
+        const MAX_TOTAL = 100;
+        const PAGE_SIZE = 20;
+        const collected = [];
+        let pageToken = null;
+
+        const buildBody = (token) => {
+            const body = {
+                textQuery: request.query,
+                maxResultCount: PAGE_SIZE,
+                languageCode: 'id',
+                regionCode: 'ID',
             };
-            service.textSearch(request, handlePage);
-        });
+            if (request.bounds) {
+                const bounds = request.bounds;
+                const sw = typeof bounds.getSouthWest === 'function' ? bounds.getSouthWest() : null;
+                const ne = typeof bounds.getNorthEast === 'function' ? bounds.getNorthEast() : null;
+                if (sw && ne) {
+                    body.locationRestriction = {
+                        rectangle: {
+                            low: { latitude: sw.lat(), longitude: sw.lng() },
+                            high: { latitude: ne.lat(), longitude: ne.lng() }
+                        }
+                    };
+                }
+            }
+            if (token) body.pageToken = token;
+            return body;
+        };
+
+        do {
+            const resp = await fetch('https://places.googleapis.com/v1/places:searchText', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Goog-Api-Key': mapsApiKey,
+                    'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,nextPageToken',
+                },
+                body: JSON.stringify(buildBody(pageToken)),
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err?.error?.message || 'Pencarian tempat gagal.');
+            }
+            const data = await resp.json();
+            if (Array.isArray(data.places)) collected.push(...data.places);
+            pageToken = data.nextPageToken || null;
+        } while (pageToken && collected.length < MAX_TOTAL);
+
+        return collected;
     }
 
     async function geocodeMassLocation(location) {
@@ -3818,6 +3882,371 @@
         }
         return null;
     }
+
+
+    // -- Mass Groups Management --
+
+    function showMassGroupsMessage(type, text) {
+        if (!els.massGroupsMessage) return;
+        els.massGroupsMessage.textContent = text;
+        els.massGroupsMessage.className = 'admin-message' + (type ? ' admin-message--' + type : '');
+    }
+
+    function showMassGroupEditMessage(type, text) {
+        if (!els.massGroupEditMessage) return;
+        els.massGroupEditMessage.textContent = text;
+        els.massGroupEditMessage.className = 'admin-message' + (type ? ' admin-message--' + type : '');
+    }
+
+    async function loadMassGroups() {
+        if (state.massGroups.isLoading) return;
+        state.massGroups.isLoading = true;
+        showMassGroupsMessage(null, '');
+        if (els.massGroupsList) {
+            els.massGroupsList.innerHTML = '<div class="pin-list-empty">Memuat...</div>';
+        }
+        try {
+            const token = getToken();
+            const headers = token ? { Authorization: 'Bearer ' + token } : {};
+            const response = await fetch('/api/admin/mass-promotions', { cache: 'no-store', headers });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.message || 'Gagal memuat data.');
+            }
+            const data = await response.json();
+            state.massGroups.groups = Array.isArray(data.groups) ? data.groups : [];
+            state.massGroups.loaded = true;
+            renderMassGroups();
+        } catch (error) {
+            showMassGroupsMessage('error', error.message || 'Gagal memuat grup mass promotions.');
+            if (els.massGroupsList) {
+                els.massGroupsList.innerHTML = '';
+            }
+        } finally {
+            state.massGroups.isLoading = false;
+        }
+    }
+
+    function renderMassGroups() {
+        if (!els.massGroupsList) return;
+        els.massGroupsList.innerHTML = '';
+        const groups = state.massGroups.groups;
+        if (!groups.length) {
+            const empty = document.createElement('div');
+            empty.className = 'pin-list-empty';
+            empty.textContent = 'Belum ada grup mass promotions.';
+            els.massGroupsList.appendChild(empty);
+            return;
+        }
+        groups.forEach(function (group) {
+            const card = document.createElement('div');
+            card.className = 'mass-group-card';
+
+            const info = document.createElement('div');
+            info.className = 'mass-group-info';
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'mass-group-title';
+            titleEl.textContent = group.title || '(Tanpa judul)';
+            info.appendChild(titleEl);
+
+            const meta = document.createElement('div');
+            meta.className = 'mass-group-meta';
+            const parts = [];
+            parts.push(group.pinCount + ' pin');
+            if (group.category) parts.push(group.category);
+            if (group.imageCount) parts.push(group.imageCount + ' foto');
+            if (group.createdAt) {
+                parts.push(new Date(group.createdAt).toLocaleDateString('id-ID'));
+            }
+            meta.textContent = parts.join(' · ');
+            info.appendChild(meta);
+            card.appendChild(info);
+
+            const actions = document.createElement('div');
+            actions.className = 'mass-group-actions';
+
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'ghost-btn chip-btn';
+            editBtn.textContent = 'Edit';
+            editBtn.addEventListener('click', function () { openMassGroupEditModal(group); });
+            actions.appendChild(editBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'ghost-btn chip-btn danger-btn';
+            deleteBtn.textContent = 'Hapus';
+            deleteBtn.addEventListener('click', function () { handleDeleteMassGroup(group); });
+            actions.appendChild(deleteBtn);
+
+            card.appendChild(actions);
+            els.massGroupsList.appendChild(card);
+        });
+    }
+
+    function populateMassGroupEditCategorySelect() {
+        if (!els.massGroupEditCategory) return;
+        const current = els.massGroupEditCategory.value;
+        els.massGroupEditCategory.innerHTML = '<option value="" disabled>Pilih kategori</option>';
+        getAvailableCategories().forEach(function (cat) {
+            const opt = document.createElement('option');
+            opt.value = cat;
+            opt.textContent = cat;
+            els.massGroupEditCategory.appendChild(opt);
+        });
+        if (current) els.massGroupEditCategory.value = current;
+    }
+
+    function openMassGroupEditModal(group) {
+        state.massGroups.editingGroupId = group.groupId;
+        state.massGroups.editExistingImages = [];
+        state.massGroups.editAddedImages = [];
+        if (els.massGroupEditId) els.massGroupEditId.value = group.groupId;
+        if (els.massGroupEditTitleInput) els.massGroupEditTitleInput.value = group.title || '';
+        if (els.massGroupEditDescription) els.massGroupEditDescription.value = group.description || '';
+        populateMassGroupEditCategorySelect();
+        if (els.massGroupEditCategory) els.massGroupEditCategory.value = group.category || '';
+        if (els.massGroupEditLink) els.massGroupEditLink.value = group.link || '';
+        const lt = group.lifetime;
+        const lifetimeType = (lt && lt.type) ? lt.type : '';
+        if (els.massGroupEditLifetime) els.massGroupEditLifetime.value = lifetimeType;
+        if (els.massGroupEditStart) els.massGroupEditStart.value = (lt && lt.start) ? lt.start : ((lt && lt.value) ? lt.value : '');
+        if (els.massGroupEditEnd) els.massGroupEditEnd.value = (lt && lt.end) ? lt.end : '';
+        renderMassGroupEditImages();
+        updateMassGroupEditRemainingSlots();
+        showMassGroupEditMessage(null, '');
+        if (els.massGroupEditModal) els.massGroupEditModal.classList.remove('hidden');
+        // Load existing images from owner pin
+        if (group.imageSourcePinId) {
+            loadMassGroupEditImages(group.imageSourcePinId);
+        }
+    }
+
+    function closeMassGroupEditModal() {
+        state.massGroups.editingGroupId = null;
+        state.massGroups.editExistingImages = [];
+        state.massGroups.editAddedImages = [];
+        if (els.massGroupEditImageInput) els.massGroupEditImageInput.value = '';
+        if (els.massGroupEditModal) els.massGroupEditModal.classList.add('hidden');
+        showMassGroupEditMessage(null, '');
+    }
+
+
+    async function loadMassGroupEditImages(pinId) {
+        try {
+            const token = getToken();
+            const headers = token ? { Authorization: 'Bearer ' + token } : {};
+            const response = await fetch('/api/pins/' + pinId, { cache: 'no-store', headers });
+            if (!response.ok) return;
+            const pin = await response.json();
+            if (!Array.isArray(pin.images)) return;
+            state.massGroups.editExistingImages = pin.images
+                .map(function (image, index) {
+                    const dataUrl = resolveImageDataUrl(image);
+                    if (!dataUrl) return null;
+                    const id = getImageIdentifier(image) || ('img-' + index);
+                    return { id: id, dataUrl: dataUrl, contentType: image.contentType || 'image/jpeg', size: Number(image.size || 0), originalName: image.originalName || image.name || '', removed: false };
+                })
+                .filter(Boolean);
+            renderMassGroupEditImages();
+            updateMassGroupEditRemainingSlots();
+        } catch (e) {
+            // silently ignore image load failures
+        }
+    }
+
+    function renderMassGroupEditImages() {
+        if (els.massGroupEditExistingImages) {
+            els.massGroupEditExistingImages.innerHTML = '';
+            state.massGroups.editExistingImages.forEach(function (image) {
+                const card = document.createElement('div');
+                card.className = 'image-card' + (image.removed ? ' is-removed' : '');
+                const img = document.createElement('img');
+                img.src = image.dataUrl;
+                img.alt = image.originalName || 'Foto pin';
+                card.appendChild(img);
+                const actions = document.createElement('div');
+                actions.className = 'image-actions';
+                const toggleBtn = document.createElement('button');
+                toggleBtn.type = 'button';
+                toggleBtn.textContent = image.removed ? 'Pulihkan' : 'Hapus';
+                toggleBtn.addEventListener('click', function () {
+                    image.removed = !image.removed;
+                    renderMassGroupEditImages();
+                    updateMassGroupEditRemainingSlots();
+                });
+                actions.appendChild(toggleBtn);
+                card.appendChild(actions);
+                const meta = document.createElement('div');
+                meta.className = 'image-meta';
+                meta.textContent = image.originalName || 'Foto tersimpan';
+                card.appendChild(meta);
+                els.massGroupEditExistingImages.appendChild(card);
+            });
+        }
+        if (els.massGroupEditNewImages) {
+            els.massGroupEditNewImages.innerHTML = '';
+            state.massGroups.editAddedImages.forEach(function (image, index) {
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                const img = document.createElement('img');
+                img.src = image.dataUrl;
+                img.alt = image.originalName || 'Foto baru';
+                card.appendChild(img);
+                const actions = document.createElement('div');
+                actions.className = 'image-actions';
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.textContent = 'Hapus';
+                removeBtn.addEventListener('click', function () {
+                    state.massGroups.editAddedImages.splice(index, 1);
+                    renderMassGroupEditImages();
+                    updateMassGroupEditRemainingSlots();
+                });
+                actions.appendChild(removeBtn);
+                card.appendChild(actions);
+                const meta = document.createElement('div');
+                meta.className = 'image-meta';
+                meta.textContent = image.originalName || 'Foto baru';
+                card.appendChild(meta);
+                els.massGroupEditNewImages.appendChild(card);
+            });
+        }
+    }
+
+    function updateMassGroupEditRemainingSlots() {
+        if (!els.massGroupEditPhotoRemaining) return;
+        const keptExisting = state.massGroups.editExistingImages.filter(function (img) { return !img.removed; }).length;
+        const remaining = Math.max(0, 3 - keptExisting - state.massGroups.editAddedImages.length);
+        els.massGroupEditPhotoRemaining.textContent = remaining + ' photos remaining';
+    }
+
+    async function handleMassGroupEditImageInput(event) {
+        const files = Array.from((event && event.target && event.target.files) || []);
+        if (els.massGroupEditImageInput) els.massGroupEditImageInput.value = '';
+        const keptExisting = state.massGroups.editExistingImages.filter(function (img) { return !img.removed; }).length;
+        let remainingSlots = Math.max(0, 3 - keptExisting - state.massGroups.editAddedImages.length);
+        if (!remainingSlots) {
+            showMassGroupEditMessage('error', 'Batas 3 foto per pin. Hapus foto yang tidak dipakai terlebih dulu.');
+            return;
+        }
+        const errors = [];
+        for (var i = 0; i < files.length; i++) {
+            if (remainingSlots <= 0) break;
+            const file = files[i];
+            if (!file.type || !file.type.toLowerCase().startsWith('image/')) {
+                errors.push('"' + file.name + '" bukan gambar.');
+                continue;
+            }
+            if (file.size > 4 * 1024 * 1024) {
+                errors.push('"' + file.name + '" lebih dari 4MB.');
+                continue;
+            }
+            try {
+                const dataUrl = await readFileAsDataUrl(file);
+                state.massGroups.editAddedImages.push({ dataUrl: dataUrl, contentType: file.type || 'image/jpeg', size: file.size || 0, originalName: file.name || '' });
+                remainingSlots -= 1;
+            } catch (e) {
+                errors.push('"' + file.name + '" tidak bisa dibaca.');
+            }
+        }
+        if (errors.length) {
+            showMassGroupEditMessage('error', errors.join(' '));
+        } else {
+            showMassGroupEditMessage(null, '');
+        }
+        renderMassGroupEditImages();
+        updateMassGroupEditRemainingSlots();
+    }
+
+    async function handleMassGroupEditSubmit(event) {
+        event.preventDefault();
+        if (state.massGroups.isSaving) return;
+        const groupId = els.massGroupEditId ? els.massGroupEditId.value : state.massGroups.editingGroupId;
+        if (!groupId) return;
+        const title = els.massGroupEditTitleInput ? els.massGroupEditTitleInput.value.trim() : '';
+        const description = els.massGroupEditDescription ? els.massGroupEditDescription.value.trim() : '';
+        const category = els.massGroupEditCategory ? els.massGroupEditCategory.value.trim() : '';
+        const link = els.massGroupEditLink ? els.massGroupEditLink.value.trim() : '';
+        if (!title || !description || !category) {
+            showMassGroupEditMessage('error', 'Judul, deskripsi, dan kategori wajib diisi.');
+            return;
+        }
+        const lifetimeType = els.massGroupEditLifetime ? els.massGroupEditLifetime.value : '';
+        const lifetime = buildLifetimePayload(
+            lifetimeType,
+            els.massGroupEditStart ? els.massGroupEditStart.value : '',
+            els.massGroupEditEnd ? els.massGroupEditEnd.value : ''
+        );
+        state.massGroups.isSaving = true;
+        showMassGroupEditMessage(null, '');
+        if (els.massGroupEditModal) {
+            const saveBtn = els.massGroupEditModal.querySelector('#mass-group-edit-save');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Menyimpan...'; }
+        }
+        try {
+            const token = getToken();
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers.Authorization = 'Bearer ' + token;
+            const payload = { title, description, category, link };
+            if (lifetime) payload.lifetime = lifetime;
+            // Build images payload: kept existing + newly added
+            const keptExisting = state.massGroups.editExistingImages
+                .filter(function (img) { return !img.removed; })
+                .map(function (img) { return { existingId: img.id, dataUrl: img.dataUrl, contentType: img.contentType, size: img.size, originalName: img.originalName }; })
+                .filter(function (item) { return item.dataUrl; });
+            const remainingSlots = Math.max(0, 3 - keptExisting.length);
+            const addedPayload = state.massGroups.editAddedImages
+                .slice(0, remainingSlots)
+                .map(function (img) { return { dataUrl: img.dataUrl, contentType: img.contentType, size: img.size, originalName: img.originalName }; });
+            payload.images = keptExisting.concat(addedPayload).slice(0, 3);
+            const response = await fetch('/api/admin/mass-promotions/' + encodeURIComponent(groupId), {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || 'Gagal menyimpan perubahan.');
+            closeMassGroupEditModal();
+            showMassGroupsMessage('success', 'Grup berhasil diperbarui.');
+            state.massGroups.loaded = false;
+            await loadMassGroups();
+        } catch (error) {
+            showMassGroupEditMessage('error', error.message || 'Gagal menyimpan perubahan.');
+        } finally {
+            state.massGroups.isSaving = false;
+            if (els.massGroupEditModal) {
+                const saveBtn = els.massGroupEditModal.querySelector('#mass-group-edit-save');
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Simpan Perubahan'; }
+            }
+        }
+    }
+
+    async function handleDeleteMassGroup(group) {
+        const confirmed = window.confirm(
+            'Hapus semua ' + group.pinCount + ' pin dari grup "' + (group.title || '(Tanpa judul)') + '"? Tindakan ini tidak dapat dibatalkan.'
+        );
+        if (!confirmed) return;
+        showMassGroupsMessage(null, '');
+        try {
+            const token = getToken();
+            const headers = token ? { Authorization: 'Bearer ' + token } : {};
+            const response = await fetch('/api/admin/mass-promotions/' + encodeURIComponent(group.groupId), {
+                method: 'DELETE',
+                headers
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || 'Gagal menghapus grup.');
+            showMassGroupsMessage('success', 'Grup berhasil dihapus (' + (data.deletedCount || 0) + ' pin dihapus).');
+            state.massGroups.loaded = false;
+            await loadMassGroups();
+            await loadPins();
+        } catch (error) {
+            showMassGroupsMessage('error', error.message || 'Gagal menghapus grup.');
+        }
+    }
+
 
     async function handleMassSubmit(event) {
         event.preventDefault();
@@ -4385,6 +4814,29 @@
                 loadMassBrands();
             });
         }
+        if (els.massGroupsRefreshBtn) {
+            els.massGroupsRefreshBtn.addEventListener('click', () => {
+                state.massGroups.loaded = false;
+                loadMassGroups();
+            });
+        }
+        if (els.massGroupEditForm) {
+            els.massGroupEditForm.addEventListener('submit', handleMassGroupEditSubmit);
+        }
+        if (els.massGroupEditImageInput) {
+            els.massGroupEditImageInput.addEventListener('change', handleMassGroupEditImageInput);
+        }
+        if (els.massGroupEditClose) {
+            els.massGroupEditClose.addEventListener('click', closeMassGroupEditModal);
+        }
+        if (els.massGroupEditCancel) {
+            els.massGroupEditCancel.addEventListener('click', closeMassGroupEditModal);
+        }
+        if (els.massGroupEditModal) {
+            els.massGroupEditModal.addEventListener('click', function (event) {
+                if (event.target === els.massGroupEditModal) closeMassGroupEditModal();
+            });
+        }
 
         // Brands tab events
         if (els.brandsSearchBtn) {
@@ -4938,14 +5390,8 @@
 
     async function ensureBrandsPlacesService() {
         await initBrandsMap();
-        var gmaps = await ensureGoogleMaps();
-        if (!gmaps || !gmaps.places || !gmaps.places.PlacesService) {
-            throw new Error('Google Places API belum tersedia.');
-        }
-        if (!brandsPlacesService) {
-            brandsPlacesService = new gmaps.places.PlacesService(brandsMap || document.createElement('div'));
-        }
-        return brandsPlacesService;
+        await ensureGoogleMaps();
+        return null; // new Places API does not need a service instance
     }
 
     function setBrandsSearchState(isSearching) {

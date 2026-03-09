@@ -48,15 +48,34 @@ function isTruthy(value) {
 
 function computeImageCount(doc) {
     if (!doc) return 0;
-    if (doc.sharedImageCount && typeof doc.sharedImageCount === 'number') return doc.sharedImageCount;
+    const sharedImageCount = Number(doc.sharedImageCount);
+    if (Number.isFinite(sharedImageCount) && sharedImageCount >= 0) return sharedImageCount;
     if (!Array.isArray(doc.images)) return 0;
     return doc.images.length;
 }
 
+function getSharedImageGroupId(doc) {
+    if (!doc) return null;
+    if (typeof doc.sharedImagesFromGroup === 'string' && doc.sharedImagesFromGroup.trim()) {
+        return doc.sharedImagesFromGroup.trim();
+    }
+    const groupId = typeof doc.massPromotionGroupId === 'string' ? doc.massPromotionGroupId.trim() : '';
+    if (!groupId || doc.massPromotion !== true) {
+        return null;
+    }
+    const hasInlineImages = Array.isArray(doc.images) && doc.images.length > 0;
+    const sharedImageCount = Number(doc.sharedImageCount);
+    if (!hasInlineImages && Number.isFinite(sharedImageCount) && sharedImageCount > 0) {
+        return groupId;
+    }
+    return null;
+}
+
 async function resolveSharedImages(pin, db) {
-    if (!pin || !pin.sharedImagesFromGroup) return pin;
+    const groupId = getSharedImageGroupId(pin);
+    if (!pin || !groupId) return pin;
     const source = await db.collection('pins').findOne(
-        { massPromotionGroupId: pin.sharedImagesFromGroup, images: { $exists: true, $ne: [] } },
+        { massPromotionGroupId: groupId, images: { $exists: true, $ne: [] } },
         { projection: { images: 1 } }
     );
     if (source && Array.isArray(source.images)) {
@@ -5155,9 +5174,12 @@ router.get('/pins/nearby-promos', async (req, res) => {
         const dist = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return dist <= radiusKm;
     });
-    // Fix imageCount for shared-image pins
+    // Resolve actual images for shared-image pins (non-lean mode)
+    if (!isLean) {
+        await Promise.all(pins.map(pin => getSharedImageGroupId(pin) ? resolveSharedImages(pin, db) : null));
+    }
     pins.forEach(pin => {
-        if (pin.sharedImageCount) pin.imageCount = pin.sharedImageCount;
+        pin.imageCount = computeImageCount(pin);
     });
     res.json(pins);
 });
@@ -5333,7 +5355,7 @@ router.get('/pins/:id', async (req, res) => {
     if (!pin) {
         return res.status(404).json({ message: 'Pin not found.' });
     }
-    if (pin.sharedImagesFromGroup) {
+    if (getSharedImageGroupId(pin)) {
         await resolveSharedImages(pin, db);
     }
     pin.imageCount = computeImageCount(pin);
@@ -5505,7 +5527,7 @@ const handlePinPageRequest = async (req, res) => {
             res.redirect(302, '/kategori');
             return;
         }
-        if (pin.sharedImagesFromGroup) {
+        if (getSharedImageGroupId(pin)) {
             await resolveSharedImages(pin, db);
         }
         const seo = await readSeoSettings();
@@ -5754,6 +5776,131 @@ router.delete('/admin/residents/:id', async (req, res) => {
         console.error('Failed to delete resident', error);
         res.status(500).json({ message: 'Tidak dapat menghapus warga.' });
     }
+});
+
+router.get('/admin/mass-promotions', async (req, res) => {
+    const authResident = await authenticateResidentRequest(req, res);
+    if (!authResident) return;
+    if (!canManagePinsResident(authResident)) {
+        return res.status(403).json({ message: 'Hanya admin atau pin manager yang dapat mengakses mass promotions.' });
+    }
+    const db = await connectToDatabase();
+    const pins = await db.collection('pins').find(
+        { massPromotion: true },
+        { projection: { _id: 1, title: 1, description: 1, category: 1, link: 1, lifetime: 1, expiresAt: 1, createdAt: 1, massPromotionGroupId: 1, sharedImagesFromGroup: 1, imageCount: 1, sharedImageCount: 1, lat: 1, lng: 1, city: 1, province: 1 } }
+    ).sort({ createdAt: -1 }).toArray();
+
+    // Group by massPromotionGroupId
+    const groupMap = new Map();
+    for (const pin of pins) {
+        const gid = pin.massPromotionGroupId || pin._id.toString();
+        if (!groupMap.has(gid)) {
+            groupMap.set(gid, {
+                groupId: gid,
+                title: pin.title,
+                description: pin.description,
+                category: pin.category,
+                link: pin.link || '',
+                lifetime: pin.lifetime || null,
+                expiresAt: pin.expiresAt || null,
+                createdAt: pin.createdAt || null,
+                imageCount: computeImageCount(pin),
+                imageSourcePinId: null,
+                pinCount: 0,
+                pins: []
+            });
+        }
+        const group = groupMap.get(gid);
+        group.pinCount += 1;
+        group.pins.push({ _id: pin._id, lat: pin.lat, lng: pin.lng, city: pin.city, province: pin.province });
+        if (!getSharedImageGroupId(pin) && !group.imageSourcePinId) {
+            group.imageSourcePinId = pin._id.toString();
+        }
+    }
+
+    res.json({ groups: Array.from(groupMap.values()) });
+});
+
+router.put('/admin/mass-promotions/:groupId', async (req, res) => {
+    const authResident = await authenticateResidentRequest(req, res);
+    if (!authResident) return;
+    if (!canManagePinsResident(authResident)) {
+        return res.status(403).json({ message: 'Hanya admin atau pin manager yang dapat mengedit mass promotions.' });
+    }
+    const { groupId } = req.params;
+    const { title, description, category, link, lifetime, images: incomingImages } = req.body || {};
+    const db = await connectToDatabase();
+    const updateFields = {};
+    if (typeof title !== 'undefined') updateFields.title = title;
+    if (typeof description !== 'undefined') updateFields.description = description;
+    if (typeof category !== 'undefined') updateFields.category = category;
+    if (typeof link !== 'undefined') updateFields.link = link;
+    if (typeof lifetime !== 'undefined') {
+        updateFields.lifetime = lifetime;
+        updateFields.expiresAt = computeExpiresAtFromLifetime(lifetime);
+    }
+
+    // Handle images: update owner pin, update sharedImageCount on all other pins
+    if (Array.isArray(incomingImages) || incomingImages === null) {
+        let ownerPin = await db.collection('pins').findOne(
+            { massPromotionGroupId: groupId, massPromotion: true, images: { $exists: true, $ne: [] } },
+            { projection: { _id: 1, images: 1 } }
+        );
+        if (!ownerPin) {
+            ownerPin = await db.collection('pins').findOne(
+                { massPromotionGroupId: groupId, massPromotion: true },
+                { sort: { createdAt: 1, _id: 1 }, projection: { _id: 1, images: 1 } }
+            );
+        }
+        if (ownerPin) {
+            const newImages = incomingImages === null ? [] : normalizeIncomingPinImages(ownerPin.images || [], incomingImages);
+            const newImageCount = newImages.length;
+            const siblingSetFields = { ...updateFields, imageCount: 0 };
+            const siblingUnsetFields = { images: '' };
+            if (newImageCount > 0) {
+                siblingSetFields.sharedImagesFromGroup = groupId;
+                siblingSetFields.sharedImageCount = newImageCount;
+            } else {
+                siblingUnsetFields.sharedImagesFromGroup = '';
+                siblingUnsetFields.sharedImageCount = '';
+            }
+            await db.collection('pins').updateOne(
+                { _id: ownerPin._id },
+                {
+                    $set: { ...updateFields, images: newImages, imageCount: newImageCount },
+                    $unset: { sharedImagesFromGroup: '', sharedImageCount: '' }
+                }
+            );
+            await db.collection('pins').updateMany(
+                { massPromotionGroupId: groupId, massPromotion: true, _id: { $ne: ownerPin._id } },
+                { $set: siblingSetFields, $unset: siblingUnsetFields }
+            );
+            return res.json({ ok: true });
+        }
+    }
+
+    if (!Object.keys(updateFields).length) {
+        return res.status(400).json({ message: 'Tidak ada perubahan untuk disimpan.' });
+    }
+    const result = await db.collection('pins').updateMany(
+        { massPromotionGroupId: groupId, massPromotion: true },
+        { $set: updateFields }
+    );
+    res.json({ ok: true, modifiedCount: result.modifiedCount });
+});
+
+router.delete('/admin/mass-promotions/:groupId', async (req, res) => {
+    const authResident = await authenticateResidentRequest(req, res);
+    if (!authResident) return;
+    if (!canManagePinsResident(authResident)) {
+        return res.status(403).json({ message: 'Hanya admin atau pin manager yang dapat menghapus mass promotions.' });
+    }
+    const { groupId } = req.params;
+    const db = await connectToDatabase();
+    const result = await db.collection('pins').deleteMany(
+        { massPromotionGroupId: groupId, massPromotion: true }
+    );
+    res.json({ ok: true, deletedCount: result.deletedCount });
 });
 
 router.post('/admin/pins/backfill-city', async (req, res) => {

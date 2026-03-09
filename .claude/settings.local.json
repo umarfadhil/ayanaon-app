@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -c:*)"
+      "Bash(node -c:*)",
+      "mcp__claude_ai_Supabase__search_docs",
+      "WebFetch(domain:developers.google.com)"
     ]
   }
 }

@@ -45,9 +45,11 @@
 ### Pins
 - `GET /pins` - list active pins (excludes mass promo pins)
 - `GET /pins/nearby-promos?lat=X&lng=Y` - mass promo pins within 10km radius
+- `GET /pins/nearby-promos` must derive `imageCount` from shared-image metadata and only resolve actual shared images when not in lean mode
 - `GET /pins/count` - active pin count
 - `GET /pins/search` - server-side search with pagination
 - `GET /pins/:id` - single pin
+- `GET /pins/:id` resolves mass-promo shared images from the owner pin before returning detail data
 - `POST /pins` - create pin
 - `PUT /pins/:id` - update pin
 - `DELETE /pins/:id` - delete pin
@@ -69,6 +71,8 @@
 ### Admin
 - `GET /admin/residents` | `PUT /:id/role` | `DELETE /:id`
 - `POST /admin/pins/backfill-city` | `backfill-provinces`
+- `GET /admin/mass-promotions` - list mass promo groups; `PUT /:groupId` - bulk-edit group; `DELETE /:groupId` - bulk-delete group
+- `PUT /admin/mass-promotions/:groupId` must update owner images and stamp shared-image reference fields on every non-owner pin in the group
 - `CRUD /admin/brands` | `DELETE /admin/brands/:id/locations/:placeId`
 - `CRUD /admin/areas` | `POST /admin/areas/seed`
 

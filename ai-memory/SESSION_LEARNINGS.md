@@ -141,3 +141,159 @@ Max 10 lines per task.
 - **Server-rendered pages with client-side filtering must pass URL parameters to frontend**
 - Initialize filter UI state from URL on page load before any search triggers
 - Don't rely solely on async geolocation for initial search when filters are in URL
+
+## Admin Brands Search Hanging (2026-03-03)
+
+### Issue: Searching places in Manage Brands returned nothing with no feedback
+- `handleBrandsSearch` called `ensureBrandsPlacesService()` → `initBrandsMap()` → `ensureGoogleMaps()`
+- `ensureGoogleMaps` promise hung silently — no error shown, button stuck in "Searching..."
+
+### Root Cause
+- `ensureGoogleMaps` (line ~1964) checks for existing `<script data-admin-gmaps="true">` in DOM
+- If found, it attaches a `load` event listener — but if the script already fired `load` (already loaded), the event never fires again
+- This happens when: Maps loaded OK once → `googleMapsPromise` reset to null (on prior error) → retry finds existing script but can't resolve
+- Promise hangs indefinitely → `setBrandsSearchState(false)` never called → UI frozen
+
+### Fix
+- In the `existing` script branch, check `window.google?.maps` first; if already loaded, call `resolve()` immediately
+- Added 3-line guard before attaching stale `load` listener
+
+### Learning
+- **When re-attaching load listeners to potentially-already-loaded scripts, always check if the resource is already available before listening**
+- Pattern: `if (window.google?.maps) { resolve(); return; }` before `existing.addEventListener('load', resolve)`
+- `googleMapsPromise = null` reset on error causes retry to hit the `existing` branch if the script tag persists in DOM
+
+## Admin Brands Search — English "in" Not Recognized as Location Separator (2026-03-03)
+
+### Issue: "Sushi Yay in Jakarta" returned no location-scoped results
+- `parseMassSearchQuery` only matched ` di ` (Indonesian) as the location separator
+- English "in" was unrecognized, so the full query was passed without geocoding the location
+- Without location bounds, Places API returned unscoped results (or ZERO_RESULTS for obscure brands)
+- Placeholder showed `KFC di Jakarta` hinting only Indonesian format
+
+### Fix
+- Changed regex from `/\s+di\s+/i` to `/\s+(?:di|in)\s+/i` in `parseMassSearchQuery`
+- Updated hint text in `admin.html` to show both: "di Kota" or "in City"
+
+### Learning
+- **Support both language keywords in bilingual admin UIs** — admins may type queries in English or Indonesian
+- `parseMassSearchQuery` is shared with Mass Promotions — the fix benefits both features
+
+## Admin Places Search — Legacy PlacesService.textSearch Deprecated (2026-03-03)
+
+### Issue: "Pencarian tempat gagal." — status was neither OK nor ZERO_RESULTS
+- `runPlacesTextSearch` used legacy `PlacesService.textSearch()` callback API
+- Google Maps JS API (default/weekly channel) now routes to new Places API architecture
+- Legacy `textSearch` returns `REQUEST_DENIED` on keys/channels that have migrated to new API
+- Error was surfaced correctly but with an opaque message (status not included)
+
+### Fix
+- Replaced `runPlacesTextSearch` with async function using new `google.maps.places.Place.searchByText()`
+- New API: Promise-based, requires explicit `fields` array (`id`, `displayName`, `formattedAddress`, `location`)
+- Falls back to legacy callback API if `Place.searchByText` is not available
+- Updated `normalizePlaceResult` to handle both old (`place_id`, `geometry.location`, `name`, `formatted_address`) and new (`id`, `location`, `displayName`, `formattedAddress`) Place shapes
+- Removed `PlacesService` instantiation from `ensureMassPlacesService`, `ensureBrandsPlacesService`, `initMassMap` — new API needs no service instance
+
+### Learning
+- **Google Maps Places API has two generations**: legacy `PlacesService` (callback, deprecated) and new `Place` class (Promise-based, current)
+- `Place.searchByText({ textQuery, fields, region, locationRestriction })` is the correct current API
+- Always include explicit `fields` in new Places API — omitting them returns nothing
+- `locationRestriction` replaces `bounds` for the new API; `region` is a 2-letter ISO code (uppercase `'ID'`)
+- New Place objects: `.id` (not `.place_id`), `.displayName` (not `.name`), `.formattedAddress` (not `.formatted_address`), `.location` (not `.geometry.location`)
+
+## Admin Places Search — Max 20 Results Limit (2026-03-03)
+
+### Issue: Places search capped at 20 results regardless of query
+- `Place.searchByText` JS API hard-caps at 20 results per call
+- JS API does not return `nextPageToken` in the response (known missing feature as of 2024-2025)
+- Legacy `PlacesService.textSearch` also returned 20 per page via callback pagination
+
+### Fix
+- Replaced JS SDK call with **Places REST API** (`POST https://places.googleapis.com/v1/places:searchText`)
+- REST API supports `pageToken`/`nextPageToken` pagination; max 20 per page, up to 100 total (5 pages)
+- Uses `mapsApiKey` (module-level var, populated in `ensureGoogleMaps`) via `X-Goog-Api-Key` header
+- Field mask via `X-Goog-FieldMask` header: `places.id,places.displayName,places.formattedAddress,places.location,nextPageToken`
+- `locationRestriction.rectangle` built from geocoded bounds (SW/NE corners)
+
+### REST API response shape differences vs JS API
+- `place.id` → full resource name `"places/ChIJ..."` (used as-is, still unique)
+- `place.displayName` → `{ text: "...", languageCode: "..." }` object (not string)
+- `place.location` → `{ latitude, longitude }` (not LatLng with `.lat()`/`.lng()` functions)
+- `normalizePlaceResult` updated to handle all three shapes: REST, new JS API, legacy JS API
+
+## Mass Promotions — Edit/Delete Groups (2026-03-09)
+
+### Feature: Admin can edit or delete posted mass promotion groups
+- Added manage-groups UI section below the create form in Mass Promotions tab
+- Groups are fetched from new backend endpoint, grouped by massPromotionGroupId
+- Edit updates all pins in a group at once (title, description, category, link, lifetime)
+- Delete removes all pins in a group with a confirmation dialog
+
+### Backend (api.js)
+- GET /admin/mass-promotions: lists all mass promo pins grouped by groupId; auth: canManagePins
+- PUT /admin/mass-promotions/:groupId: bulk-updates all pins via updateMany; auth: canManagePins
+- DELETE /admin/mass-promotions/:groupId: bulk-deletes all pins via deleteMany; auth: canManagePins
+
+### Frontend
+- state.massGroups: { groups, loaded, isLoading, editingGroupId, isSaving }
+- loadMassGroups() called on first Mass tab open via setActiveTab guard (!state.massGroups.loaded)
+- Modal-based edit form with same lifetime/date fields; reuses buildLifetimePayload()
+- renderMassGroups() renders group cards with Edit and Hapus (delete) buttons
+- CSS: .mass-group-card, .modal-overlay, .modal-box, .danger-btn added to admin.css
+- New element caching in cacheElements(), new event bindings in bindEvents()
+
+## Mass Promo Image Sync â€” Missing sharedImagesFromGroup Backfill (2026-03-09)
+
+### Issue: Mass promo popup still showed no images after nearby-promos fix
+- Live MongoDB data for group `mp_1772958904929_wfju7u` had `sharedImageCount: 2` on 69 sibling pins but no `sharedImagesFromGroup`
+- This happened when a group was created first and images were added later via `PUT /admin/mass-promotions/:groupId`: the owner pin got `images`, but sibling pins only got `sharedImageCount`
+- Result: `GET /pins/:id` and server-rendered `/pin/:id` skipped `resolveSharedImages()` because they only checked `sharedImagesFromGroup`
+
+### Fix
+- Added `getSharedImageGroupId()` in `netlify/functions/api.js` to treat legacy mass-promo docs with `sharedImageCount > 0` and no inline images as shared-image pins using `massPromotionGroupId`
+- Updated `GET /pins/:id`, `/pin/:id`, `/pins/nearby-promos`, and `GET /admin/mass-promotions` to use the shared-image fallback instead of relying only on `sharedImagesFromGroup`
+- Updated `PUT /admin/mass-promotions/:groupId` to find the true owner pin by stored images first, unset shared-image fields on the owner, and stamp `sharedImagesFromGroup` + `sharedImageCount` on all sibling pins when images exist
+- Repaired live MongoDB data for the affected group: 69 sibling pins were backfilled with `sharedImagesFromGroup`, and the broken-pin count dropped to 0
+
+### Learning
+- updateMany with { massPromotionGroupId: groupId } is the pattern for group bulk-edits
+- Modal overlay: position fixed; inset 0; click-outside-to-close via event target check
+- Images NOT editable per group (shared via sharedImagesFromGroup reference); only metadata updateable
+
+## Mass Group Edit — Image Update (2026-03-09)
+
+### Feature: Edit modal can now add/remove images for a mass promotion group
+- Images are shared across the group via sharedImagesFromGroup referencing the owner pin
+- Only the owner pin (without sharedImagesFromGroup) stores actual image data
+- GET /admin/mass-promotions now returns imageSourcePinId (owner pin _id) per group
+- PUT /admin/mass-promotions/:groupId accepts images array; finds owner pin, calls normalizeIncomingPinImages, updates owner images + sharedImageCount on all other pins
+
+### Frontend
+- state.massGroups.editExistingImages, editAddedImages: image arrays for modal
+- loadMassGroupEditImages(pinId): fetches full pin via GET /api/pins/:id, populates editExistingImages
+- renderMassGroupEditImages(): renders existing (with toggle-remove) + new images in modal
+- handleMassGroupEditImageInput(): reads files, appends to editAddedImages (same 3-photo/4MB limits)
+- On submit: builds images payload from kept existing + new, includes in PUT body
+
+### Learning
+- Fetching full pin images on modal open (lazy fetch) avoids sending base64 in list responses
+- resolveImageDataUrl + getImageIdentifier reused from main pin editor pattern
+- Owner pin identified by absence of sharedImagesFromGroup field
+
+## Mass Promo Image Sync — resolveSharedImages Not Called in List Endpoint (2026-03-09)
+
+### Issue: Updated mass promo images not loading in frontend after PUT
+- Root cause: GET /pins/nearby-promos never called resolveSharedImages() after fetching
+- Non-owner pins have sharedImagesFromGroup set and store no actual images; they rely on runtime resolution from the owner pin
+- After a PUT, the owner pin's images array was correctly updated in MongoDB, but /nearby-promos returned empty images: [] for all shared pins
+- resolveSharedImages() existed and worked, but was only called in GET /pins/:id and server-rendered pin page — not in the list endpoint
+
+### Fix
+- Added resolveSharedImages() call in /pins/nearby-promos (~line 5158) for non-lean requests only
+- Skipped when ?lean=true since images are projected out anyway
+
+### Learning
+- resolveSharedImages() must be called in every endpoint that returns mass promo pins with image data
+- `sharedImageCount` alone is not enough for shared-image read paths; use `massPromotionGroupId` fallback when legacy docs are missing `sharedImagesFromGroup`
+- Group image writes must update both the owner pin and every sibling pin's shared-image reference metadata, or popup hydration will silently fail later
+- Lean mode strips images — always guard with !isLean to avoid useless DB lookups

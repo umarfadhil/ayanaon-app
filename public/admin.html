@@ -383,6 +383,92 @@
                     </section>
                 </div>
             </section>
+
+                <section class="admin-mass-groups">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Manage Mass Promotions</h2>
+                            <p class="panel-sub">Edit or remove mass promotion pins that already posted.</p>
+                        </div>
+                        <div class="panel-actions">
+                            <button type="button" class="ghost-btn chip-btn" id="mass-groups-refresh-btn">Refresh</button>
+                        </div>
+                    </div>
+                    <div id="mass-groups-message" class="admin-message" role="status" aria-live="polite"></div>
+                    <div id="mass-groups-list" class="mass-groups-list" aria-label="Daftar grup mass promotions"></div>
+                </section>
+
+                <!-- Edit Group Modal -->
+                <div id="mass-group-edit-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mass-group-edit-title">
+                    <div class="modal-box">
+                        <div class="modal-header">
+                            <h3 id="mass-group-edit-title">Edit Grup Mass Promotion</h3>
+                            <button type="button" class="modal-close-btn" id="mass-group-edit-close" aria-label="Tutup">&times;</button>
+                        </div>
+                        <div id="mass-group-edit-message" class="admin-message" role="status" aria-live="polite"></div>
+                        <form id="mass-group-edit-form" class="pin-form" novalidate>
+                            <input type="hidden" id="mass-group-edit-id">
+                            <div class="form-row">
+                                <label for="mass-group-edit-title-input">Title</label>
+                                <input type="text" id="mass-group-edit-title-input" required placeholder="Pin title">
+                            </div>
+                            <div class="form-row">
+                                <label for="mass-group-edit-description">Description</label>
+                                <textarea id="mass-group-edit-description" required rows="3" placeholder="Short description"></textarea>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-row">
+                                    <label for="mass-group-edit-category">Category</label>
+                                    <select id="mass-group-edit-category" required>
+                                        <option value="" disabled selected>Pilih kategori</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <label for="mass-group-edit-link">Link (optional)</label>
+                                    <input type="url" id="mass-group-edit-link" placeholder="https://">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <label for="mass-group-edit-lifetime">Lifetime</label>
+                                <select id="mass-group-edit-lifetime">
+                                    <option value="">Leave as is</option>
+                                    <option value="today">Only today</option>
+                                    <option value="date">Select date</option>
+                                </select>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-row">
+                                    <label for="mass-group-edit-start">Start Date</label>
+                                    <input type="text" id="mass-group-edit-start" placeholder="dd/mm/yyyy">
+                                </div>
+                                <div class="form-row">
+                                    <label for="mass-group-edit-end">End Date</label>
+                                    <input type="text" id="mass-group-edit-end" placeholder="dd/mm/yyyy">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <label>Pin Photos</label>
+                                <div class="image-hint">Maximum 3 photos, 4MB per photo. Applies to all pins in this group.</div>
+                                <div id="mass-group-edit-existing-images" class="image-list" aria-live="polite"></div>
+                                <div id="mass-group-edit-new-images" class="image-list" aria-live="polite"></div>
+                                <div class="upload-actions-row">
+                                    <div class="upload-row">
+                                        <label class="upload-btn">
+                                            <input type="file" id="mass-group-edit-image-input" accept="image/*" multiple>
+                                            <span>Add Photos</span>
+                                        </label>
+                                        <span class="upload-remaining" id="mass-group-edit-photo-remaining"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" class="ghost-btn" id="mass-group-edit-cancel">Batal</button>
+                                <button type="submit" class="primary-btn" id="mass-group-edit-save">Simpan Perubahan</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
         </div>
 
         <div id="admin-users-pane" class="admin-tab-content hidden" data-admin-only="true">
@@ -721,7 +807,7 @@
                             <div class="panel-header">
                                 <div>
                                     <h2>Search Places</h2>
-                                    <p class="panel-sub">Cari lokasi brand. Tambahkan "di Kota/Provinsi" untuk batasi area.</p>
+                                    <p class="panel-sub">Cari lokasi brand. Tambahkan "di Kota" atau "in City" untuk batasi area.</p>
                                 </div>
                             </div>
                             <div class="mass-search-row">

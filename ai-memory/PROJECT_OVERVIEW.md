@@ -34,6 +34,7 @@
 
 ## MongoDB Collections
 - `pins` - map pins (events, promos, etc.). Mass promo pins have `massPromotion: true`, `massPromotionGroupId`, and may use `sharedImagesFromGroup` for shared images
+- In mass promo groups, only one owner pin should store `images`; sibling pins should carry `sharedImagesFromGroup` plus `sharedImageCount`
 - `sellers` - Gerobak Online vendor accounts
 - `residents` - Warga (registered resident) accounts
 - `unique_ips` - anonymous visitor tracking
