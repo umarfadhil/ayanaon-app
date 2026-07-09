@@ -376,3 +376,16 @@ Max 10 lines per task.
 ### Learning
 - The availability endpoint origin comes from each merchant's stored orderUrl — local-only testing needs BOTH `AYAKASIR_PUBLIC_ORIGIN` (petalytix) and `AYAKASIR_ORDER_URL_PREFIX` (ayanaon) pointed at the local dev origin, then a re-sync; otherwise local /toko pages poll the prod endpoint
 - **v6 fix**: `focusMapOnSearchResults` (search submit) counted only pins + live sellers → merchant-only matches raised the "Pencarian tidak ditemukan" alert despite visible markers/list rows. Now includes `visibleMerchantEntries` in the empty check, `merchantCandidates` in nearest-result panning, and opens the merchant popup when a merchant is nearest. Rule: every surface consuming search visibility (filterMarkers, list panel, focus-on-results) must handle all THREE layers — pins, live sellers, merchants
+
+## Netlify deploy failure — phantom .claude worktree submodules (2026-07-10)
+
+### Issue
+`git clone` on Netlify failed with "No url found for submodule path '.claude/worktrees/admiring-mcnulty' in .gitmodules". Ten Claude session worktrees under `.claude/worktrees/*` each contain a `.git` file, so `git add .` recorded them as gitlinks (mode 160000) with NO `.gitmodules` entries — Netlify's submodule checkout then hard-fails.
+
+### Fix
+- `git update-index --force-remove` on all 10 gitlinks + `.claude/settings.local.json` (plain `git rm --cached` failed in the sandbox: the worktree `.git` files hold Windows `gitdir:` paths that break git there, and a stale `.git/index.lock` had to be force-deleted)
+- Deleted the worktree dirs + `git worktree prune` + deleted the 10 local `claude/*` branches (all pointed at old HEAD, no unique work)
+- `.claude/` added to `.gitignore` in BOTH repos (petalytix also had `.claude/settings.local.json` tracked — untracked preventively; its worktrees would break Vercel the same way)
+
+### Learning
+- NEVER let `.claude/` into git: worktrees inside the repo = phantom submodules = broken deploy clones. The staged deletions ride the next commit — commit + push, then Netlify's clone succeeds

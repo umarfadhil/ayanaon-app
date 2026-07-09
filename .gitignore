@@ -3,3 +3,5 @@ node_modules
 # Local Netlify folder
 .netlify
 .vscode/mcp.json
+# Claude session artifacts (worktrees got committed as phantom submodules and broke Netlify's clone)
+.claude/
