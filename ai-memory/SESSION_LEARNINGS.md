@@ -297,3 +297,82 @@ Max 10 lines per task.
 - `sharedImageCount` alone is not enough for shared-image read paths; use `massPromotionGroupId` fallback when legacy docs are missing `sharedImagesFromGroup`
 - Group image writes must update both the owner pin and every sibling pin's shared-image reference metadata, or popup hydration will silently fail later
 - Lean mode strips images — always guard with !isLean to avoid useless DB lookups
+
+## AyaKasir Merchants Integration — backend (2026-07-09)
+
+### What was built (api.js "Merchants" section, ~line 5690)
+- New `merchants` collection (indexes: slug unique, tenantId unique, status+updatedAt): tenant stores pushed server-to-server from the AyaKasir portal
+- Partner API (Bearer `AYAKASIR_PARTNER_SECRET`, timingSafeEqual, 503 when env unset): `PUT /api/partners/ayakasir/stores` (upsert by tenantId; slug generated once on create, NEVER regenerated on update — SEO permanence) and `DELETE /api/partners/ayakasir/stores/:tenantId` (soft-hide default, `?purge=1` hard delete)
+- Payload fully re-sanitized server-side; `orderUrl` must start with `AYAKASIR_ORDER_URL_PREFIX` (default `https://ayakasir.petalytix.id/`); lat/lng required (map pin); photos/menuHighlights/openingHours capped
+- Public reads: `GET /api/merchants` (lean, active-only, for future map layer), `GET /api/merchants/:slug`
+- SSR SEO page `GET /toko/:slug` (router + app-level like `/pin/:id`; `_redirects` `/toko/*` rule added): self-contained `.toko-*` styles, FoodEstablishment JSON-LD (geo, openingHoursSpecification, menu → orderUrl), canonical, "Pesan Online" CTA; hidden/missing → 302 `/`
+- Sitemap now includes active `/toko/:slug` (weekly, 0.8); every merchant write busts `sitemapCache`
+
+### Learning
+- Writing api.js via the sandbox mount right after file-tool edits truncated the file (stale mount view read back = data loss); recovered from `git show HEAD:` + re-splice. Never bash read-modify-write a file freshly edited by file tools
+
+## AyaKasir Merchants Integration — frontend map layer (2026-07-09, same day, later)
+
+### What was built (app.js, self-contained block before getSellerAuthHeaders ~line 3146)
+- `fetchMerchants()` — called once from initMap (after startLiveSellerRefreshLoop); GET /api/merchants → AdvancedMarkerElement markers (reuses `LiveSellerMarkerCtor`; white circle/blue border, first photo or store emoji via String.fromCodePoint)
+- InfoWindow popup built with DOM textContent (injection-safe): name, category · city, buttons Pesan Online (orderUrl, _blank) / Halaman Toko (`/toko/:slug`) / WhatsApp
+- `?toko=<slug>` deep link (`focusMerchantFromUrl`): pan + zoom ≥16 + open popup after fetch — matches the `mapFocusUrl` the SSR toko page links to
+- All styles inline on elements — zero style.css changes; layer is independent of pin category filters and clustering (v1)
+
+### Learning
+- AyaKasir-side push implemented same day in the petalytix repo (see petalytix/ai-memory SESSION_LEARNINGS 2026-07-09 evening): migration + `ayanaon-partner.ts` + Settings UI + lifecycle auto-unlist. Deploy order: ayanaon first (with `AYAKASIR_PARTNER_SECRET`), then petalytix
+- Frontend candidates for later: cluster merchants when count grows, a "Toko/UMKM" filter chip, periodic refresh (currently fetch-once per page load)
+
+## Merchants v2 — popup redesign + WA cart ordering on /toko (2026-07-09, night)
+
+### Owner-requested UX changes (both files)
+- Data: merchants gain `logoUrl` (separate from `photos`, pushed by AyaKasir from the receipt logo) and per-highlight `category`; `GET /api/merchants` now also returns `logoUrl` + `menuHighlights` ($slice 3) and no longer returns orderUrl
+- app.js popup rebuilt: logo (logoUrl→photo fallback) + name/category·city header with EXPLICIT dark colors (#17233b/#44506b — previously inherited theme color washed out on the light InfoWindow), ≤3 menu rows (thumb/name/price), single "Kunjungi Toko" CTA (Pesan Online + WhatsApp buttons removed); `ensureMerchantMapClickCloser()` adds a map click listener (once, from fetchMerchants) so the popup collapses on any map tap like regular pins
+- /toko/:slug page: logo top-right of the main card (`.toko-card-head` flex + `.toko-logo`); gallery section REMOVED; menu now grouped by category (`.toko-menu__group/__category`) with per-item photo/name/price; "Pesan Online" CTA REMOVED (QR flow is for physical visitors); NEW WhatsApp cart — qty steppers per item (only when store has WA) + "Pesan via WhatsApp" CTA that builds a pre-filled wa.me message (items, per-line totals, Total) via inline `waScript`
+- JSON-LD: `menu` (orderUrl) dropped; `image` = [logoUrl, ...photos]
+
+### Learning
+- The `waScript` client code lives inside a JS template literal → it must contain NO backticks or dollar-brace; quotes + string concatenation only; `'\\n'` in api.js source emits `'\n'` into the served script
+- Old merchant docs (pre-v2) lack logoUrl/category — all readers fall back gracefully (photo fallback, "Menu" group)
+
+## Merchants v3 — popup polish + toko theme toggle (2026-07-09, late night)
+
+### Changes
+- Popup (app.js): InfoWindow created with `{ headerDisabled: true }` → Google's close button/header removed (map-click closer is the only dismiss); menu name/price rows replaced by a 3-photo preview strip (72px, from `merchant.photos` with `menuHighlights[].photoUrl` fallback)
+- `GET /api/merchants`: `photos: {$slice:3}` (was 1) + `photos` array in the response (kept `photo` first-item for compat)
+- /toko/:slug theme: whole style block converted to CSS custom properties on `body.toko-page` with a `body.toko-dark` override set (incl. `color-scheme`); "Gelap/Terang" `.toko-ghost` button in the header; `themeScript` placed immediately after `<body>` open (applies stored/prefers-color-scheme theme before paint — no flash), persists to `localStorage('toko-theme')`
+- Store `category` comes from the AyaKasir push payload — petalytix currently hardcodes "Kuliner" (ayanaon defaults to 'Kuliner' when absent); making it owner-selectable is a petalytix-side follow-up
+
+### Learning
+- `headerDisabled` needs Maps JS ≥3.56 — the app loads via importLibrary (weekly channel), so it's available; unknown options are ignored harmlessly on older channels
+- petalytix same-night counterpart: `products.sort_order` migration + Kantor menu-page ↑/↓ reordering feed the order used by `/toko` menu grouping (via ordered `menuHighlights`) — ayanaon needed no changes for that
+
+## Merchants v4 — full menu, layout passthrough, tenant category (2026-07-09, final)
+
+### Changes (api.js)
+- `menuHighlights` caps raised 12→100 (sanitizer + /toko page): the store page now mirrors the FULL AyaKasir order-page menu, not a highlights sample (root cause of "Kopi only showed Caramel Macchiato")
+- New sanitized `menuLayout` field (`LIST|GRID|ACCORDION`, default LIST, `MERCHANT_MENU_LAYOUTS`) pushed from the tenant's AyaKasir "Tampilan menu pelanggan"; /toko renders per layout — GRID = `.toko-menu__list--grid` photo cards, ACCORDION = native `<details>/<summary>` per category (first `open`), LIST unchanged. Item classes identical in all layouts so the WA-cart script needs no changes
+- `category` now arrives owner-picked from AyaKasir (still free text ≤60, still defaults 'Kuliner')
+
+### Learning
+- Old merchant docs need one re-push from AyaKasir to gain menuLayout/full menu — readers default gracefully meanwhile
+
+## Merchants v5 — availability, logo square pin, merchant search (2026-07-09)
+
+### Changes
+- `menuHighlights[].available` accepted from AyaKasir (default true; push-time BOM stock snapshot); /toko renders sold-out items with `.toko-menu__item--out` (greyed + grayscale thumb) + "Habis" badge + NO stepper, so the WA cart skips them automatically (`if (!countEl) return`)
+- Map marker (app.js `createMerchantMarkerElement`): rounded SQUARE (borderRadius 8px, was 50%) showing the tenant LOGO (`merchant.logoUrl`) — never a menu photo; store-emoji fallback
+- Map search now matches merchants: partner PUT builds `merchants.searchText` (lowercased blob: name/category/address/city/province + every menu item name + item categories, ≤4000 chars) via `buildMerchantSearchText`; lean `GET /api/merchants` projects it; app.js entries carry `searchText` (client `buildMerchantSearchBlob` fallback for pre-v5 docs) and `filterMarkers` filters merchant markers with the same `currentSearchTokens` every-token-includes logic as live sellers (category checkboxes/date filters intentionally don't apply; hidden in SAVED view)
+
+### Learning
+- Merchant docs pushed before v5 lack searchText/available — client fallback blob covers search (from the 3 sliced highlights only), and availability defaults to available; one AyaKasir re-sync fixes both
+
+## Merchants v6 — LIVE availability + tenants in the results list (2026-07-09)
+
+### Changes
+- /toko live availability: SSR derives `body[data-avail-endpoint]` from the stored orderUrl → `{origin}/api/ayakasir/online-order/availability?token=…` (new CORS API on the AyaKasir side, 30s edge cache); badge (`.toko-soldout[hidden]`) + stepper (`disabled`) now ALWAYS rendered so `availScript` can toggle both ways; polls on load + 60s interval + visibilitychange, hides rows when the tenant hides out-of-stock, zeroes sold-out cart lines and calls `window.tokoRefreshCart` (exposed by waScript)
+- Search results list (`updatePinListPanel`): when a search matches merchants, a "Toko / UMKM" section renders ABOVE pins (≤10, distance-sorted, logo/emoji + name + category·city·distance, row click = `focusMerchantEntry` pan+popup, "Kunjungi" link → /toko/:slug); empty-state + summary (`… + N toko`) account for merchants so a merchant-only match no longer shows "no results"; merchant entries now track `isVisible` in `filterMarkers`; `focusMerchantFromUrl` refactored onto shared `focusMerchantEntry`
+
+### Learning
+- The availability endpoint origin comes from each merchant's stored orderUrl — local-only testing needs BOTH `AYAKASIR_PUBLIC_ORIGIN` (petalytix) and `AYAKASIR_ORDER_URL_PREFIX` (ayanaon) pointed at the local dev origin, then a re-sync; otherwise local /toko pages poll the prod endpoint
+- **v6 fix**: `focusMapOnSearchResults` (search submit) counted only pins + live sellers → merchant-only matches raised the "Pencarian tidak ditemukan" alert despite visible markers/list rows. Now includes `visibleMerchantEntries` in the empty check, `merchantCandidates` in nearest-result panning, and opens the merchant popup when a merchant is nearest. Rule: every surface consuming search visibility (filterMarkers, list panel, focus-on-results) must handle all THREE layers — pins, live sellers, merchants

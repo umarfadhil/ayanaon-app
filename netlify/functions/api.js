@@ -98,6 +98,9 @@ async function ensureIndexes(database) {
         await database.collection('analytics_events').createIndex({ lat: 1, lng: 1 });
         await database.collection('brands').createIndex({ name: 1 });
         await database.collection('areas').createIndex({ nameId: 1 });
+        await database.collection('merchants').createIndex({ slug: 1 }, { unique: true });
+        await database.collection('merchants').createIndex({ tenantId: 1 }, { unique: true });
+        await database.collection('merchants').createIndex({ status: 1, updatedAt: -1 });
         indexesEnsured = true;
     } catch (error) {
         console.error('Failed to ensure indexes', error);
@@ -5486,7 +5489,16 @@ const handleSitemapRequest = async (req, res) => {
             }))
             : [];
         const landingEntries = buildLandingEntriesFromPins(pins, baseUrl);
-        const entries = pinEntries.concat(landingEntries);
+        const merchants = await fetchActiveMerchantsForSitemap();
+        const merchantEntries = baseUrl
+            ? merchants.map((merchant) => ({
+                loc: `${baseUrl}/toko/${merchant.slug}`,
+                lastmod: formatSitemapDate(merchant.updatedAt || merchant.createdAt),
+                changefreq: 'weekly',
+                priority: '0.8'
+            }))
+            : [];
+        const entries = pinEntries.concat(landingEntries, merchantEntries);
         const xml = buildSitemapXml(baseUrl, entries);
         sitemapCache = {
             baseUrl,
@@ -5666,6 +5678,967 @@ const handleCategoryLegacyRedirect = async (req, res) => {
         res.status(500).send('Error');
     }
 };
+
+// ---------------------------------------------------------------------------
+// Merchants — AyaKasir "Pesanan Online" partner integration
+// Tenant stores pushed from the AyaKasir portal (server-to-server, secret-
+// gated) appear as a map layer and as server-rendered SEO pages /toko/:slug.
+// ---------------------------------------------------------------------------
+
+const nodeCrypto = require('crypto');
+
+const MERCHANT_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const MERCHANT_MENU_LAYOUTS = ['LIST', 'GRID', 'ACCORDION'];
+const MERCHANT_DAY_LABELS_ID = {
+    mon: 'Senin', tue: 'Selasa', wed: 'Rabu', thu: 'Kamis', fri: 'Jumat', sat: 'Sabtu', sun: 'Minggu'
+};
+const MERCHANT_DAY_SCHEMA = {
+    mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday'
+};
+
+function getAyakasirOrderUrlPrefix() {
+    return process.env.AYAKASIR_ORDER_URL_PREFIX || 'https://ayakasir.petalytix.id/';
+}
+
+function isAuthorizedPartnerRequest(req) {
+    const secret = process.env.AYAKASIR_PARTNER_SECRET || '';
+    if (!secret) return false;
+    const header = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token) return false;
+    const provided = Buffer.from(token);
+    const expected = Buffer.from(secret);
+    if (provided.length !== expected.length) return false;
+    try {
+        return nodeCrypto.timingSafeEqual(provided, expected);
+    } catch (_) {
+        return false;
+    }
+}
+
+function bustSitemapCache() {
+    sitemapCache = { baseUrl: '', xml: '', expiresAt: 0 };
+}
+
+function cleanMerchantText(value, maxLength) {
+    if (typeof value !== 'string') return '';
+    return value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function cleanMerchantMultilineText(value, maxLength) {
+    if (typeof value !== 'string') return '';
+    return value.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, ' ').trim().slice(0, maxLength);
+}
+
+function cleanMerchantHttpsUrl(value, maxLength = 500) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > maxLength) return '';
+    try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'https:') return '';
+        return parsed.toString();
+    } catch (_) {
+        return '';
+    }
+}
+
+function cleanMerchantWhatsapp(value) {
+    if (typeof value !== 'string') return '';
+    let digits = value.replace(/\D/g, '');
+    if (digits.startsWith('0')) digits = `62${digits.slice(1)}`;
+    if (digits.length < 9 || digits.length > 16) return '';
+    return digits;
+}
+
+function cleanMerchantOpeningHours(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const out = [];
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object') continue;
+        const day = typeof entry.day === 'string' ? entry.day.toLowerCase().trim() : '';
+        if (!MERCHANT_DAY_KEYS.includes(day) || seen.has(day)) continue;
+        const open = typeof entry.open === 'string' ? entry.open.trim() : '';
+        const close = typeof entry.close === 'string' ? entry.close.trim() : '';
+        if (!timePattern.test(open) || !timePattern.test(close)) continue;
+        seen.add(day);
+        out.push({ day, open, close });
+    }
+    return out;
+}
+
+function cleanMerchantMenuHighlights(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object') continue;
+        const name = cleanMerchantText(entry.name, 120);
+        if (!name) continue;
+        const priceNumber = Number(entry.price);
+        const price = Number.isFinite(priceNumber) && priceNumber >= 0 && priceNumber <= 100000000
+            ? Math.round(priceNumber)
+            : null;
+        const photoUrl = cleanMerchantHttpsUrl(entry.photoUrl);
+        const category = cleanMerchantText(entry.category, 60);
+        out.push({
+            name,
+            price,
+            photoUrl: photoUrl || null,
+            category: category || null,
+            // Push-time stock snapshot from AyaKasir (default: available).
+            available: entry.available !== false
+        });
+        // Full menu parity with the AyaKasir order page (not just highlights).
+        if (out.length >= 100) break;
+    }
+    return out;
+}
+
+function sanitizeMerchantPayload(body) {
+    const payload = body && typeof body === 'object' ? body : {};
+    const tenantId = cleanMerchantText(payload.tenantId, 64);
+    if (!tenantId) return { error: 'tenantId wajib diisi.' };
+    const name = cleanMerchantText(payload.name, 120);
+    if (!name || name.length < 2) return { error: 'name wajib diisi (min. 2 karakter).' };
+    const lat = Number(payload.lat);
+    const lng = Number(payload.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return { error: 'lat/lng wajib berupa koordinat yang valid.' };
+    }
+    const orderUrl = cleanMerchantHttpsUrl(payload.orderUrl, 300);
+    if (!orderUrl || !orderUrl.startsWith(getAyakasirOrderUrlPrefix())) {
+        return { error: 'orderUrl wajib berupa tautan Pesanan Online AyaKasir yang valid.' };
+    }
+    const status = payload.status === 'hidden' ? 'hidden' : 'active';
+    const photos = Array.isArray(payload.photos)
+        ? payload.photos.map((photo) => cleanMerchantHttpsUrl(photo)).filter(Boolean).slice(0, 6)
+        : [];
+    return {
+        data: {
+            tenantId,
+            name,
+            description: cleanMerchantMultilineText(payload.description, 2000),
+            category: cleanMerchantText(payload.category, 60) || 'Kuliner',
+            address: cleanMerchantText(payload.address, 300),
+            city: cleanMerchantText(payload.city, 120),
+            province: cleanMerchantText(payload.province, 120),
+            whatsapp: cleanMerchantWhatsapp(payload.whatsapp),
+            lat,
+            lng,
+            orderUrl,
+            logoUrl: cleanMerchantHttpsUrl(payload.logoUrl) || null,
+            menuLayout: MERCHANT_MENU_LAYOUTS.includes(payload.menuLayout) ? payload.menuLayout : 'LIST',
+            photos,
+            menuHighlights: cleanMerchantMenuHighlights(payload.menuHighlights),
+            openingHours: cleanMerchantOpeningHours(payload.openingHours),
+            status
+        }
+    };
+}
+
+/** Lowercased search blob (name/category/area/menu names) for client-side map search. */
+function buildMerchantSearchText(data) {
+    const parts = [data.name, data.category, data.address, data.city, data.province];
+    (data.menuHighlights || []).forEach((item) => {
+        if (item && item.name) parts.push(item.name);
+        if (item && item.category) parts.push(item.category);
+    });
+    return parts
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 4000);
+}
+
+async function generateUniqueMerchantSlug(db, requestedSlug, name, city) {
+    const base = slugifyText(requestedSlug) || slugifyText([name, city].filter(Boolean).join(' ')) || 'toko';
+    let candidate = base.slice(0, 96);
+    let counter = 2;
+    // Bounded probe: slugs are rare enough that a few lookups suffice.
+    while (await db.collection('merchants').findOne({ slug: candidate }, { projection: { _id: 1 } })) {
+        candidate = `${base.slice(0, 90)}-${counter}`;
+        counter += 1;
+        if (counter > 50) {
+            candidate = `${base.slice(0, 80)}-${Date.now().toString(36)}`;
+            break;
+        }
+    }
+    return candidate;
+}
+
+function presentMerchant(doc, baseUrl) {
+    if (!doc) return null;
+    return {
+        id: doc._id ? doc._id.toString() : '',
+        slug: doc.slug || '',
+        url: baseUrl && doc.slug ? `${baseUrl}/toko/${doc.slug}` : (doc.slug ? `/toko/${doc.slug}` : ''),
+        tenantId: doc.tenantId || '',
+        name: doc.name || '',
+        description: doc.description || '',
+        category: doc.category || '',
+        address: doc.address || '',
+        city: doc.city || '',
+        province: doc.province || '',
+        whatsapp: doc.whatsapp || '',
+        lat: Number.isFinite(doc.lat) ? doc.lat : null,
+        lng: Number.isFinite(doc.lng) ? doc.lng : null,
+        orderUrl: doc.orderUrl || '',
+        logoUrl: doc.logoUrl || null,
+        menuLayout: MERCHANT_MENU_LAYOUTS.includes(doc.menuLayout) ? doc.menuLayout : 'LIST',
+        photos: Array.isArray(doc.photos) ? doc.photos : [],
+        menuHighlights: Array.isArray(doc.menuHighlights) ? doc.menuHighlights : [],
+        openingHours: Array.isArray(doc.openingHours) ? doc.openingHours : [],
+        status: doc.status || 'hidden',
+        source: doc.source || '',
+        createdAt: doc.createdAt || null,
+        updatedAt: doc.updatedAt || null
+    };
+}
+
+async function fetchActiveMerchantsForSitemap() {
+    try {
+        const db = await connectToDatabase();
+        return await db.collection('merchants')
+            .find({ status: 'active' })
+            .project({ slug: 1, createdAt: 1, updatedAt: 1 })
+            .toArray();
+    } catch (error) {
+        console.error('Failed to fetch merchants for sitemap', error);
+        return [];
+    }
+}
+
+router.put('/partners/ayakasir/stores', async (req, res) => {
+    if (!process.env.AYAKASIR_PARTNER_SECRET) {
+        return res.status(503).json({ message: 'Integrasi AyaKasir belum diaktifkan.' });
+    }
+    if (!isAuthorizedPartnerRequest(req)) {
+        return res.status(401).json({ message: 'Tidak diizinkan.' });
+    }
+    const sanitized = sanitizeMerchantPayload(req.body);
+    if (sanitized.error) {
+        return res.status(400).json({ message: sanitized.error });
+    }
+    sanitized.data.searchText = buildMerchantSearchText(sanitized.data);
+    try {
+        const db = await connectToDatabase();
+        const merchants = db.collection('merchants');
+        const now = new Date();
+        const existing = await merchants.findOne({ tenantId: sanitized.data.tenantId });
+        let doc;
+        if (existing) {
+            // Slug is permanent once created (SEO): never regenerated on update.
+            const update = { ...sanitized.data, slug: existing.slug, source: 'ayakasir', updatedAt: now };
+            delete update.tenantId;
+            const result = await merchants.findOneAndUpdate(
+                { _id: existing._id },
+                { $set: update },
+                { returnDocument: 'after' }
+            );
+            doc = result && result.value ? result.value : result;
+        } else {
+            const slug = await generateUniqueMerchantSlug(
+                db,
+                typeof req.body?.slug === 'string' ? req.body.slug : '',
+                sanitized.data.name,
+                sanitized.data.city
+            );
+            const insertDoc = { ...sanitized.data, slug, source: 'ayakasir', createdAt: now, updatedAt: now };
+            const insertResult = await merchants.insertOne(insertDoc);
+            doc = { _id: insertResult.insertedId, ...insertDoc };
+        }
+        bustSitemapCache();
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        res.json({ merchant: presentMerchant(doc, baseUrl), created: !existing });
+    } catch (error) {
+        console.error('Failed to upsert AyaKasir merchant', error);
+        res.status(500).json({ message: 'Gagal menyimpan data toko.' });
+    }
+});
+
+router.delete('/partners/ayakasir/stores/:tenantId', async (req, res) => {
+    if (!process.env.AYAKASIR_PARTNER_SECRET) {
+        return res.status(503).json({ message: 'Integrasi AyaKasir belum diaktifkan.' });
+    }
+    if (!isAuthorizedPartnerRequest(req)) {
+        return res.status(401).json({ message: 'Tidak diizinkan.' });
+    }
+    const tenantId = cleanMerchantText(req.params.tenantId, 64);
+    if (!tenantId) {
+        return res.status(400).json({ message: 'tenantId tidak valid.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const merchants = db.collection('merchants');
+        const purge = isTruthy(req.query.purge);
+        if (purge) {
+            const result = await merchants.deleteOne({ tenantId });
+            bustSitemapCache();
+            return res.json({ deleted: result.deletedCount > 0, hidden: false });
+        }
+        // Default: soft-hide (slug stays reserved so a re-enable keeps its URL).
+        const result = await merchants.updateOne(
+            { tenantId },
+            { $set: { status: 'hidden', updatedAt: new Date() } }
+        );
+        bustSitemapCache();
+        res.json({ deleted: false, hidden: result.matchedCount > 0 });
+    } catch (error) {
+        console.error('Failed to delete AyaKasir merchant', error);
+        res.status(500).json({ message: 'Gagal menghapus data toko.' });
+    }
+});
+
+router.get('/merchants', async (req, res) => {
+    try {
+        const db = await connectToDatabase();
+        const docs = await db.collection('merchants')
+            .find({ status: 'active' })
+            .project({
+                slug: 1, name: 1, category: 1, city: 1, province: 1,
+                lat: 1, lng: 1, logoUrl: 1, photos: { $slice: 3 },
+                menuHighlights: { $slice: 3 }, whatsapp: 1, searchText: 1, updatedAt: 1
+            })
+            .sort({ updatedAt: -1 })
+            .limit(500)
+            .toArray();
+        const merchants = docs.map((doc) => ({
+            id: doc._id ? doc._id.toString() : '',
+            slug: doc.slug || '',
+            name: doc.name || '',
+            category: doc.category || '',
+            city: doc.city || '',
+            province: doc.province || '',
+            lat: Number.isFinite(doc.lat) ? doc.lat : null,
+            lng: Number.isFinite(doc.lng) ? doc.lng : null,
+            logoUrl: doc.logoUrl || null,
+            photo: Array.isArray(doc.photos) && doc.photos.length ? doc.photos[0] : null,
+            photos: Array.isArray(doc.photos) ? doc.photos : [],
+            menuHighlights: Array.isArray(doc.menuHighlights) ? doc.menuHighlights : [],
+            whatsapp: doc.whatsapp || '',
+            searchText: doc.searchText || ''
+        }));
+        res.json({ merchants });
+    } catch (error) {
+        console.error('Failed to list merchants', error);
+        res.status(500).json({ message: 'Tidak dapat memuat daftar toko.' });
+    }
+});
+
+router.get('/merchants/:slug', async (req, res) => {
+    const slug = slugifyText(req.params.slug || '');
+    if (!slug) {
+        return res.status(400).json({ message: 'Slug tidak valid.' });
+    }
+    try {
+        const db = await connectToDatabase();
+        const doc = await db.collection('merchants').findOne({ slug, status: 'active' });
+        if (!doc) {
+            return res.status(404).json({ message: 'Toko tidak ditemukan.' });
+        }
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        res.json({ merchant: presentMerchant(doc, baseUrl) });
+    } catch (error) {
+        console.error('Failed to fetch merchant', error);
+        res.status(500).json({ message: 'Tidak dapat memuat data toko.' });
+    }
+});
+
+function formatMerchantPrice(value) {
+    if (!Number.isFinite(value)) return '';
+    return `Rp${Number(value).toLocaleString('id-ID')}`;
+}
+
+function buildMerchantPageHtml(merchant, seo, baseUrl) {
+    const name = String(merchant?.name || 'Toko').trim();
+    const description = String(merchant?.description || '').trim();
+    const category = String(merchant?.category || '').trim();
+    const address = String(merchant?.address || '').trim();
+    const city = String(merchant?.city || '').trim();
+    const province = String(merchant?.province || '').trim();
+    const slug = String(merchant?.slug || '').trim();
+    const locationSuffix = city && province ? ` di ${city}, ${province}` : city ? ` di ${city}` : province ? ` di ${province}` : '';
+    const metaDescription = truncateText(
+        description
+            ? `${description}${locationSuffix}`
+            : `Pesan online dari ${name}${locationSuffix}. Lihat menu dan lokasi di AyaNaon.`,
+        160
+    );
+    const titleParts = [name];
+    if (city) titleParts.push(city);
+    titleParts.push('Pesan Online');
+    if (seo?.title) titleParts.push(seo.title);
+    const pageTitle = titleParts.filter(Boolean).join(' | ');
+    const canonicalUrl = baseUrl && slug ? `${baseUrl}/toko/${slug}` : '';
+    const mapFocusUrl = baseUrl ? `${baseUrl}/?toko=${encodeURIComponent(slug)}` : '';
+    const robots = `${seo?.robotsIndex !== false ? 'index' : 'noindex'},${seo?.robotsFollow !== false ? 'follow' : 'nofollow'}`;
+    const hasCoords = Number.isFinite(merchant?.lat) && Number.isFinite(merchant?.lng);
+    const lat = hasCoords ? Number(merchant.lat) : null;
+    const lng = hasCoords ? Number(merchant.lng) : null;
+    const directionsUrl = hasCoords
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`
+        : '';
+    const mapEmbedUrl = hasCoords
+        ? `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}&z=16&output=embed`
+        : '';
+    const whatsapp = typeof merchant?.whatsapp === 'string' ? merchant.whatsapp : '';
+    const logoUrl = typeof merchant?.logoUrl === 'string' && merchant.logoUrl.startsWith('https://') ? merchant.logoUrl : '';
+    // Live availability endpoint on the AyaKasir side, derived from the stored
+    // order URL ({origin}/{locale}/order/{token}); empty when unparsable.
+    let availabilityEndpoint = '';
+    if (typeof merchant?.orderUrl === 'string' && merchant.orderUrl) {
+        try {
+            const parsedOrderUrl = new URL(merchant.orderUrl);
+            const segments = parsedOrderUrl.pathname.split('/').filter(Boolean);
+            const orderToken = segments.length >= 3 && segments[1] === 'order' ? segments[2] : '';
+            if (orderToken) {
+                availabilityEndpoint = `${parsedOrderUrl.origin}/api/ayakasir/online-order/availability?token=${encodeURIComponent(orderToken)}`;
+            }
+        } catch (error) {
+            availabilityEndpoint = '';
+        }
+    }
+    const photos = Array.isArray(merchant?.photos) ? merchant.photos.slice(0, 6) : [];
+    const menuHighlights = Array.isArray(merchant?.menuHighlights) ? merchant.menuHighlights.slice(0, 100) : [];
+    const menuLayout = MERCHANT_MENU_LAYOUTS.includes(merchant?.menuLayout) ? merchant.menuLayout : 'LIST';
+    const openingHours = Array.isArray(merchant?.openingHours) ? merchant.openingHours : [];
+    const createdAt = merchant?.createdAt ? new Date(merchant.createdAt) : null;
+    const updatedAt = merchant?.updatedAt ? new Date(merchant.updatedAt) : null;
+    const ogImage = logoUrl || photos[0] || seo?.ogImage || (baseUrl ? `${baseUrl}/icon-512-v2.png` : '');
+
+    const structuredData = {
+        '@context': 'https://schema.org',
+        '@type': 'FoodEstablishment',
+        name,
+        description: description || metaDescription,
+        url: canonicalUrl || undefined,
+        image: (logoUrl || photos.length) ? [logoUrl, ...photos].filter(Boolean) : undefined,
+        servesCuisine: category || undefined,
+        telephone: whatsapp ? `+${whatsapp}` : undefined,
+        address: {
+            '@type': 'PostalAddress',
+            streetAddress: address || undefined,
+            addressLocality: city || undefined,
+            addressRegion: province || undefined,
+            addressCountry: 'ID'
+        },
+        datePublished: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined,
+        dateModified: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt.toISOString() : undefined
+    };
+    if (hasCoords) {
+        structuredData.geo = { '@type': 'GeoCoordinates', latitude: lat, longitude: lng };
+    }
+    if (openingHours.length) {
+        structuredData.openingHoursSpecification = openingHours.map((entry) => ({
+            '@type': 'OpeningHoursSpecification',
+            dayOfWeek: MERCHANT_DAY_SCHEMA[entry.day],
+            opens: entry.open,
+            closes: entry.close
+        }));
+    }
+    const structuredDataJson = JSON.stringify(structuredData).replace(/</g, '\\u003c');
+
+    const chips = [
+        category ? `<span class="toko-chip">${escapeHtml(category)}</span>` : '',
+        city ? `<span class="toko-chip">${escapeHtml(city)}</span>` : ''
+    ].filter(Boolean).join('');
+    const descriptionHtml = description
+        ? escapeHtml(description).replace(/\n/g, '<br>')
+        : escapeHtml(metaDescription);
+    // Menu grouped by category; each item shows photo (when available), name,
+    // price, and — when the store has WhatsApp — a qty stepper feeding the
+    // "Pesan via WhatsApp" pre-filled order message.
+    const canOrderViaWa = Boolean(whatsapp);
+    const menuByCategory = new Map();
+    menuHighlights.forEach((item) => {
+        if (!item || !item.name) return;
+        const key = typeof item.category === 'string' && item.category.trim() ? item.category.trim() : 'Menu';
+        if (!menuByCategory.has(key)) menuByCategory.set(key, []);
+        menuByCategory.get(key).push(item);
+    });
+    const buildMenuItemHtml = (item) => {
+        const price = Number.isFinite(item.price) ? item.price : 0;
+        const priceLabel = formatMerchantPrice(price);
+        // Availability: SSR uses the push-time snapshot; the live poll script
+        // (availScript) then re-syncs against the AyaKasir order page, so the
+        // badge + stepper are ALWAYS rendered and toggled via [hidden]/disabled.
+        const isAvailable = item.available !== false;
+        const thumb = item.photoUrl && String(item.photoUrl).startsWith('https://')
+            ? `<img class="toko-menu__thumb" src="${escapeHtml(item.photoUrl)}" alt="${escapeHtml(item.name)}" loading="lazy">`
+            : '';
+        const stepper = canOrderViaWa
+            ? `<div class="toko-menu__qty">
+                <button type="button" class="toko-menu__step" data-step="-1"${isAvailable ? '' : ' disabled'} aria-label="Kurangi ${escapeHtml(item.name)}">&minus;</button>
+                <span class="toko-menu__count">0</span>
+                <button type="button" class="toko-menu__step" data-step="1"${isAvailable ? '' : ' disabled'} aria-label="Tambah ${escapeHtml(item.name)}">+</button>
+            </div>`
+            : '';
+        const soldOutBadge = `<span class="toko-soldout"${isAvailable ? ' hidden' : ''}>Habis</span>`;
+        return `<li class="toko-menu__item${isAvailable ? '' : ' toko-menu__item--out'}" data-name="${escapeHtml(item.name)}" data-price="${price}">
+            ${thumb}
+            <div class="toko-menu__info">
+                <span class="toko-menu__name">${escapeHtml(item.name)}</span>
+                ${priceLabel ? `<span class="toko-menu__price">${escapeHtml(priceLabel)}</span>` : ''}
+            </div>
+            ${soldOutBadge}
+            ${stepper}
+        </li>`;
+    };
+    // Layout follows the tenant's "Tampilan menu pelanggan" (online_menu_layout):
+    // LIST = rows per category, GRID = photo cards, ACCORDION = collapsible
+    // categories (first open). Item markup/classes are identical so the WA cart
+    // script works in every layout.
+    const menuListClass = menuLayout === 'GRID' ? 'toko-menu__list toko-menu__list--grid' : 'toko-menu__list';
+    const buildMenuGroupHtml = ([categoryName, items], index) => (
+        menuLayout === 'ACCORDION'
+            ? `<details class="toko-menu__group toko-menu__acc"${index === 0 ? ' open' : ''}>
+                <summary class="toko-menu__category toko-menu__acc-summary">${escapeHtml(categoryName)}</summary>
+                <ul class="${menuListClass}">${items.map(buildMenuItemHtml).join('')}</ul>
+            </details>`
+            : `<div class="toko-menu__group">
+                <h3 class="toko-menu__category">${escapeHtml(categoryName)}</h3>
+                <ul class="${menuListClass}">${items.map(buildMenuItemHtml).join('')}</ul>
+            </div>`
+    );
+    const menuHtml = menuByCategory.size
+        ? `<section class="toko-menu">
+            <h2>Menu</h2>
+            ${Array.from(menuByCategory.entries()).map(buildMenuGroupHtml).join('')}
+        </section>`
+        : '';
+    const hoursHtml = openingHours.length
+        ? `<div class="toko-meta__item">
+            <div class="toko-meta__label">Jam Buka</div>
+            <div class="toko-meta__value">${openingHours.map((entry) => (
+                `${escapeHtml(MERCHANT_DAY_LABELS_ID[entry.day] || entry.day)} ${escapeHtml(entry.open)}–${escapeHtml(entry.close)}`
+            )).join('<br>')}</div>
+        </div>`
+        : '';
+    const metaItems = [
+        address ? `<div class="toko-meta__item"><div class="toko-meta__label">Alamat</div><div class="toko-meta__value">${escapeHtml(address)}</div></div>` : '',
+        city || province ? `<div class="toko-meta__item"><div class="toko-meta__label">Wilayah</div><div class="toko-meta__value">${escapeHtml([city, province].filter(Boolean).join(', '))}</div></div>` : '',
+        hoursHtml
+    ].filter(Boolean).join('');
+    const mapHtml = mapEmbedUrl
+        ? `<div class="toko-map">
+            <div class="toko-meta__label">Lokasi</div>
+            <div class="toko-map__frame"><iframe src="${escapeHtml(mapEmbedUrl)}" title="${escapeHtml(`Peta lokasi ${name}`)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe></div>
+        </div>`
+        : '';
+    // No "Pesan Online" (AyaKasir QR) button here — that flow is for physical
+    // visitors scanning at the store. Online visitors order via WhatsApp: pick
+    // menu items with the steppers, then the CTA opens a pre-filled wa.me chat.
+    const actionsHtml = `<div class="toko-actions">
+        ${canOrderViaWa ? `<a id="toko-wa-order" class="toko-action toko-action--cta toko-action--disabled" href="#" data-wa="${escapeHtml(whatsapp)}" data-store="${escapeHtml(name)}" target="_blank" rel="noopener">Pesan via WhatsApp</a>
+        <p id="toko-wa-hint" class="toko-wa-hint">Pilih menu di atas untuk memesan via WhatsApp.</p>` : ''}
+        <div class="toko-actions-row">
+            ${directionsUrl ? `<a class="toko-action toko-action--secondary" href="${escapeHtml(directionsUrl)}" target="_blank" rel="noopener">Arahkan</a>` : ''}
+            ${mapFocusUrl ? `<a class="toko-action toko-action--secondary" href="${escapeHtml(mapFocusUrl)}">Lihat di Peta</a>` : ''}
+        </div>
+    </div>`;
+
+    // Client-side WhatsApp cart: qty steppers feed a pre-filled wa.me message.
+    // NOTE: no backticks or dollar-brace inside — the script body lives in a
+    // template literal, so client code uses quotes + concatenation only.
+    const waScript = canOrderViaWa
+        ? `<script>
+(function () {
+    var waButton = document.getElementById('toko-wa-order');
+    if (!waButton) return;
+    var waNumber = waButton.getAttribute('data-wa') || '';
+    var storeName = waButton.getAttribute('data-store') || 'Toko';
+    var hint = document.getElementById('toko-wa-hint');
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.toko-menu__item'));
+    function formatPrice(value) {
+        return 'Rp' + Number(value || 0).toLocaleString('id-ID');
+    }
+    function selection() {
+        var items = [];
+        rows.forEach(function (row) {
+            var countEl = row.querySelector('.toko-menu__count');
+            var qty = countEl ? parseInt(countEl.textContent, 10) || 0 : 0;
+            if (qty > 0) {
+                items.push({
+                    name: row.getAttribute('data-name') || '',
+                    price: Number(row.getAttribute('data-price')) || 0,
+                    qty: qty
+                });
+            }
+        });
+        return items;
+    }
+    function refresh() {
+        var items = selection();
+        var count = items.reduce(function (sum, item) { return sum + item.qty; }, 0);
+        if (count > 0) {
+            waButton.classList.remove('toko-action--disabled');
+            waButton.textContent = 'Pesan via WhatsApp (' + count + ' item)';
+            if (hint) hint.style.display = 'none';
+        } else {
+            waButton.classList.add('toko-action--disabled');
+            waButton.textContent = 'Pesan via WhatsApp';
+            if (hint) hint.style.display = '';
+        }
+    }
+    rows.forEach(function (row) {
+        var countEl = row.querySelector('.toko-menu__count');
+        if (!countEl) return;
+        Array.prototype.forEach.call(row.querySelectorAll('.toko-menu__step'), function (button) {
+            button.addEventListener('click', function () {
+                var step = Number(button.getAttribute('data-step')) || 0;
+                var next = Math.max(0, (parseInt(countEl.textContent, 10) || 0) + step);
+                countEl.textContent = String(next);
+                refresh();
+            });
+        });
+    });
+    waButton.addEventListener('click', function (event) {
+        var items = selection();
+        if (items.length === 0) {
+            event.preventDefault();
+            return;
+        }
+        var total = 0;
+        var lines = ['Halo ' + storeName + ', saya mau pesan:'];
+        items.forEach(function (item) {
+            var lineTotal = item.price * item.qty;
+            total += lineTotal;
+            lines.push('- ' + item.qty + 'x ' + item.name + (item.price > 0 ? ' (' + formatPrice(lineTotal) + ')' : ''));
+        });
+        if (total > 0) lines.push('Total: ' + formatPrice(total));
+        waButton.href = 'https://wa.me/' + waNumber + '?text=' + encodeURIComponent(lines.join('\\n'));
+    });
+    refresh();
+    window.tokoRefreshCart = refresh;
+})();
+</script>`
+        : '';
+
+    // Theme toggle: runs immediately after <body> opens (no flash), binds the
+    // header button on DOMContentLoaded, persists choice in localStorage.
+    // Same template-literal rule as waScript: no backticks / dollar-brace.
+    const themeScript = `<script>
+(function () {
+    var dark = false;
+    try {
+        var stored = localStorage.getItem('toko-theme');
+        dark = stored === 'dark' || (!stored && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } catch (e) {}
+    function apply() {
+        if (dark) { document.body.classList.add('toko-dark'); } else { document.body.classList.remove('toko-dark'); }
+        var toggle = document.getElementById('toko-theme-toggle');
+        if (toggle) { toggle.textContent = dark ? 'Terang' : 'Gelap'; }
+    }
+    apply();
+    document.addEventListener('DOMContentLoaded', function () {
+        apply();
+        var toggle = document.getElementById('toko-theme-toggle');
+        if (toggle) {
+            toggle.addEventListener('click', function () {
+                dark = !dark;
+                try { localStorage.setItem('toko-theme', dark ? 'dark' : 'light'); } catch (e) {}
+                apply();
+            });
+        }
+    });
+})();
+</script>`;
+
+    // Live availability: polls the AyaKasir order-page availability API (30s
+    // edge-cached there) so sold-out state stays in sync with the order page.
+    // Toggles badge/[hidden], stepper disabled, --out class; zeroes carts of
+    // items that just sold out and re-runs the WA cart refresh.
+    const availScript = availabilityEndpoint
+        ? `<script>
+(function () {
+    var endpoint = document.body.getAttribute('data-avail-endpoint');
+    if (!endpoint) return;
+    function applyAvailability(unavailableNames, hideWhenOut) {
+        var outSet = {};
+        unavailableNames.forEach(function (name) { outSet[name] = true; });
+        var rows = document.querySelectorAll('.toko-menu__item');
+        var changed = false;
+        Array.prototype.forEach.call(rows, function (row) {
+            var name = row.getAttribute('data-name') || '';
+            var isOut = outSet[name] === true;
+            row.classList.toggle('toko-menu__item--out', isOut);
+            var badge = row.querySelector('.toko-soldout');
+            if (badge) { badge.hidden = !isOut; }
+            Array.prototype.forEach.call(row.querySelectorAll('.toko-menu__step'), function (button) {
+                button.disabled = isOut;
+            });
+            if (isOut) {
+                var countEl = row.querySelector('.toko-menu__count');
+                if (countEl && countEl.textContent !== '0') {
+                    countEl.textContent = '0';
+                    changed = true;
+                }
+            }
+            row.style.display = (isOut && hideWhenOut) ? 'none' : '';
+        });
+        if (typeof window.tokoRefreshCart === 'function') {
+            window.tokoRefreshCart();
+        }
+    }
+    function poll() {
+        fetch(endpoint, { cache: 'no-store' })
+            .then(function (response) { return response.ok ? response.json() : null; })
+            .then(function (data) {
+                if (data && data.ok && Array.isArray(data.unavailable)) {
+                    applyAvailability(data.unavailable, data.hideOutOfStock === true);
+                }
+            })
+            .catch(function () {});
+    }
+    poll();
+    setInterval(poll, 60000);
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) poll();
+    });
+})();
+</script>`
+        : '';
+
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(pageTitle)}</title>
+  <meta name="description" content="${escapeHtml(metaDescription)}">
+  <meta name="robots" content="${robots}">
+  ${seo?.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(seo.googleSiteVerification)}">` : ''}
+  ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ''}
+  <meta property="og:type" content="business.business">
+  <meta property="og:title" content="${escapeHtml(pageTitle)}">
+  <meta property="og:description" content="${escapeHtml(metaDescription)}">
+  ${canonicalUrl ? `<meta property="og:url" content="${canonicalUrl}">` : ''}
+  ${ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">` : ''}
+  <meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}">
+  <meta name="twitter:title" content="${escapeHtml(pageTitle)}">
+  <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
+  ${ogImage ? `<meta name="twitter:image" content="${escapeHtml(ogImage)}">` : ''}
+  <link rel="icon" href="/favicon-v2.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-192-v2.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192-v2.png">
+  <script type="application/ld+json">${structuredDataJson}</script>
+  <style>
+    * { box-sizing: border-box; }
+    body.toko-page {
+      --t-bg: #f4f6fb;
+      --t-card: #ffffff;
+      --t-text: #17233b;
+      --t-text2: #2a3552;
+      --t-body: #3d4a66;
+      --t-muted: #7383a5;
+      --t-border: #e1e7f5;
+      --t-chip-bg: #eef2fd;
+      --t-accent: #3557c7;
+      --t-link: #3557c7;
+      --t-btn-border: #ccd6f0;
+      color-scheme: light;
+      margin: 0;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--t-bg);
+      color: var(--t-text);
+      overflow-y: auto;
+    }
+    body.toko-page.toko-dark {
+      --t-bg: #0f1524;
+      --t-card: #1a2334;
+      --t-text: #edf1fb;
+      --t-text2: #d6ddf0;
+      --t-body: #b8c2da;
+      --t-muted: #8d99b8;
+      --t-border: #2c3852;
+      --t-chip-bg: #243050;
+      --t-accent: #4a67d6;
+      --t-link: #9db1ff;
+      --t-btn-border: #3a4a70;
+      color-scheme: dark;
+    }
+    .toko-shell { max-width: 960px; margin: 0 auto; padding: 16px; }
+    .toko-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 8px 0 16px;
+    }
+    .toko-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .toko-brand {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-weight: 700; color: var(--t-text); text-decoration: none; font-size: 18px;
+    }
+    .toko-brand img { width: 28px; height: 28px; }
+    .toko-ghost {
+      color: var(--t-link); text-decoration: none; font-size: 14px; font-weight: 600;
+      padding: 6px 12px; border: 1px solid var(--t-btn-border); border-radius: 999px;
+      background: var(--t-card); cursor: pointer; font-family: inherit;
+    }
+    .toko-main { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .toko-main { grid-template-columns: 1fr; } }
+    .toko-card {
+      background: var(--t-card); border-radius: 16px; padding: 20px;
+      box-shadow: 0 8px 24px rgba(23, 35, 59, 0.08);
+    }
+    .toko-eyebrow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .toko-chip {
+      display: inline-block; padding: 4px 12px; border-radius: 999px;
+      background: var(--t-chip-bg); color: var(--t-link); font-size: 13px; font-weight: 600;
+    }
+    .toko-title { margin: 0 0 10px; font-size: 28px; line-height: 1.2; color: var(--t-text); }
+    .toko-description { color: var(--t-body); line-height: 1.6; font-size: 15px; }
+    .toko-card-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    }
+    .toko-logo {
+      width: 64px; height: 64px; border-radius: 14px; object-fit: cover;
+      border: 1px solid var(--t-border); background: var(--t-card); flex: 0 0 auto;
+    }
+    .toko-menu { margin-top: 20px; }
+    .toko-menu h2 { font-size: 17px; margin: 0 0 10px; color: var(--t-text); }
+    .toko-menu__group { margin-bottom: 14px; }
+    .toko-menu__category {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--t-muted); font-weight: 700; margin: 0 0 6px;
+    }
+    .toko-menu ul { list-style: none; margin: 0; padding: 0; }
+    .toko-menu__item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px dashed var(--t-border); font-size: 15px;
+    }
+    .toko-menu__item:last-child { border-bottom: none; }
+    .toko-menu__list--grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+    }
+    .toko-menu__list--grid .toko-menu__item {
+      flex-direction: column; align-items: stretch; gap: 8px;
+      border: 1px solid var(--t-border); border-radius: 12px; padding: 10px;
+    }
+    .toko-menu__list--grid .toko-menu__item:last-child { border-bottom: 1px solid var(--t-border); }
+    .toko-menu__list--grid .toko-menu__thumb {
+      width: 100%; height: auto; aspect-ratio: 1 / 1;
+    }
+    .toko-menu__list--grid .toko-menu__qty { justify-content: center; }
+    .toko-menu__acc { border-bottom: 1px solid var(--t-border); padding-bottom: 8px; }
+    .toko-menu__acc-summary { cursor: pointer; padding: 6px 0; user-select: none; }
+    .toko-menu__acc-summary::marker { color: var(--t-link); }
+    .toko-menu__item--out { opacity: 0.55; }
+    .toko-menu__item--out .toko-menu__thumb { filter: grayscale(1); }
+    .toko-soldout {
+      font-size: 11px; font-weight: 700; color: #c2453d; background: rgba(194, 69, 61, 0.14);
+      padding: 2px 8px; border-radius: 999px; white-space: nowrap; flex: 0 0 auto;
+    }
+    .toko-menu__thumb {
+      width: 48px; height: 48px; border-radius: 10px; object-fit: cover; flex: 0 0 auto;
+    }
+    .toko-menu__info { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .toko-menu__name { color: var(--t-text); font-weight: 600; }
+    .toko-menu__price { color: var(--t-body); font-size: 14px; white-space: nowrap; }
+    .toko-menu__qty { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .toko-menu__step {
+      width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--t-btn-border);
+      background: var(--t-card); color: var(--t-link); font-size: 16px; font-weight: 700;
+      cursor: pointer; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .toko-menu__count { min-width: 18px; text-align: center; font-weight: 700; color: var(--t-text); }
+    .toko-wa-hint { color: var(--t-muted); font-size: 12.5px; margin: 0; }
+    .toko-action--disabled { opacity: 0.55; pointer-events: auto; cursor: not-allowed; }
+    .toko-meta__item { margin-bottom: 14px; }
+    .toko-meta__label {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--t-muted); font-weight: 700; margin-bottom: 4px;
+    }
+    .toko-meta__value { font-size: 14px; color: var(--t-text2); line-height: 1.5; }
+    .toko-map { margin: 6px 0 16px; }
+    .toko-map__frame { border-radius: 12px; overflow: hidden; margin-top: 6px; }
+    .toko-map__frame iframe { width: 100%; height: 220px; border: 0; display: block; }
+    .toko-actions { display: flex; flex-direction: column; gap: 10px; }
+    .toko-actions-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .toko-action {
+      display: inline-flex; align-items: center; justify-content: center;
+      text-decoration: none; font-weight: 700; border-radius: 12px; font-size: 15px;
+    }
+    .toko-action--cta {
+      background: var(--t-accent); color: #fff; padding: 13px 18px; width: 100%;
+      box-shadow: 0 6px 16px rgba(53, 87, 199, 0.35);
+    }
+    .toko-action--secondary {
+      background: var(--t-card); color: var(--t-link); border: 1px solid var(--t-btn-border);
+      padding: 9px 14px; flex: 1 1 auto; font-size: 14px;
+    }
+    .toko-footer { text-align: center; color: var(--t-muted); font-size: 13px; padding: 24px 0 16px; }
+  </style>
+</head>
+<body class="toko-page"${availabilityEndpoint ? ` data-avail-endpoint="${escapeHtml(availabilityEndpoint)}"` : ''}>
+  ${themeScript}
+  <div class="toko-shell">
+    <header class="toko-header">
+      <a class="toko-brand" href="${baseUrl ? escapeHtml(baseUrl) : '/'}">
+        <img src="/icon-192-v2.png" alt="AyaNaon">
+        <span>AyaNaon</span>
+      </a>
+      <div class="toko-header-actions">
+        ${mapFocusUrl ? `<a class="toko-ghost" href="${escapeHtml(mapFocusUrl)}">Lihat di Peta</a>` : ''}
+        <button id="toko-theme-toggle" class="toko-ghost" type="button" aria-label="Ganti tema">Gelap</button>
+      </div>
+    </header>
+    <main class="toko-main">
+      <section class="toko-card">
+        <div class="toko-card-head">
+          <div>
+            <div class="toko-eyebrow">${chips}</div>
+            <h1 class="toko-title">${escapeHtml(name)}</h1>
+          </div>
+          ${logoUrl ? `<img class="toko-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(`Logo ${name}`)}" loading="lazy">` : ''}
+        </div>
+        <div class="toko-description">${descriptionHtml}</div>
+        ${menuHtml}
+      </section>
+      <aside class="toko-card">
+        ${metaItems}
+        ${mapHtml}
+        ${actionsHtml}
+      </aside>
+    </main>
+    <footer class="toko-footer">AyaNaon.app powered by Petalytix</footer>
+  </div>
+  ${waScript}
+  ${availScript}
+</body>
+</html>`;
+}
+
+const handleMerchantPageRequest = async (req, res) => {
+    const slug = slugifyText(req.params.slug || '');
+    if (!slug) {
+        res.redirect(302, '/');
+        return;
+    }
+    try {
+        const db = await connectToDatabase();
+        const merchant = await db.collection('merchants').findOne({ slug, status: 'active' });
+        if (!merchant) {
+            res.redirect(302, '/');
+            return;
+        }
+        const seo = await readSeoSettings();
+        const baseUrl = resolveSeoBaseUrl(seo, req);
+        const html = buildMerchantPageHtml(merchant, seo, baseUrl);
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        res.set('Cache-Control', 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400');
+        res.send(html);
+    } catch (error) {
+        console.error('Failed to render merchant page', error);
+        res.status(500).send('Error');
+    }
+};
+
+router.get('/toko/:slug', handleMerchantPageRequest);
 
 router.get('/seo/sitemap', handleSitemapRequest);
 
@@ -7104,6 +8077,7 @@ router.delete('/admin/areas/:id', async (req, res) => {
 app.get('/sitemap.xml', handleSitemapRequest);
 app.get('/robots.txt', handleRobotsRequest);
 app.get('/pin/:id', handlePinPageRequest);
+app.get('/toko/:slug', handleMerchantPageRequest);
 app.get('/kategori', handleCategoryIndexRequest);
 app.get('/kategori/', handleCategoryIndexRequest);
 app.get('/kategori/:category', handleCategoryLandingRequest);

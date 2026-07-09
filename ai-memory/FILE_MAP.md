@@ -6,11 +6,12 @@
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
-- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~6800+ lines)
+- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~7750+ lines)
   - Express router mounted at `/api/*` via Netlify redirect
   - MongoDB connection + index setup
   - All REST endpoints (see API Routes below)
-  - Server-rendered HTML for `/pin/:id`, sitemap, robots.txt
+  - Server-rendered HTML for `/pin/:id`, `/toko/:slug`, sitemap, robots.txt
+  - "Merchants" section (~line 5690): AyaKasir partner integration (secret-gated push API + merchant SSR page)
 
 ## Frontend (`public/`)
 
@@ -87,6 +88,14 @@
 - `GET /analytics/summary` | `top-pins` | `top-referrers` | `top-cities` | `heatmap` | `timeseries`
 - `GET /analytics/dashboard-password`
 
+### Merchants (AyaKasir partner integration)
+- `PUT /partners/ayakasir/stores` - upsert tenant store (Bearer `AYAKASIR_PARTNER_SECRET`; upsert key `tenantId`; slug immutable after create; builds `searchText` blob; sanitizes `logoUrl`/`menuLayout`/per-item `category`+`available`; menu cap 100)
+- `DELETE /partners/ayakasir/stores/:tenantId` - soft-hide (default) or `?purge=1` hard delete
+- `GET /merchants` - lean active list for the map layer (logoUrl, photos $slice 3, menuHighlights $slice 3, searchText)
+- `GET /merchants/:slug` - full merchant detail
+- `GET /toko/:slug` - server-rendered merchant SEO page (also app-level route + `/toko/*` `_redirects` rule): FoodEstablishment JSON-LD, logo top-right, full menu grouped by category in the tenant's LIST/GRID/ACCORDION layout, WA-cart ordering (`waScript`), light/dark theme (`themeScript`, localStorage), live availability polling (`availScript` → AyaKasir `GET /api/ayakasir/online-order/availability?token=…`, endpoint derived from orderUrl into `body[data-avail-endpoint]`)
+- app.js merchants layer: `fetchMerchants` (once, from initMap), `createMerchantMarkerEntry`/`createMerchantMarkerElement` (rounded-square logo pin), `buildMerchantPopupNode` (headerDisabled InfoWindow: logo/name/meta + photo strip + "Kunjungi Toko"), `ensureMerchantMapClickCloser`, `focusMerchantEntry`/`focusMerchantFromUrl` (`?toko=` deep link), `buildMerchantSearchBlob` fallback; search visibility handled in `filterMarkers`, the results-list "Toko / UMKM" section in `updatePinListPanel`, and `focusMapOnSearchResults` candidates
+
 ### SEO (server-rendered)
-- `GET /seo/sitemap` | `robots`
+- `GET /seo/sitemap` | `robots` (sitemap includes active `/toko/:slug` entries; cache busted on merchant writes)
 - `GET /pin/:id` - server-rendered pin detail page

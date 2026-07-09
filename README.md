@@ -36,6 +36,13 @@ AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in 
 ### Gerobak Online
 - **Gerobak Online Mode:** Vendors can broadcast a live location, showcase a full profile with optional WhatsApp contact, collect "Verified by Warga" badges from customer votes, and manage their storefront directly on the map (edit details, control phone privacy, upload a menu gallery).
 
+### Toko / UMKM (AyaKasir Integration)
+- **Store Listings from AyaKasir:** Tenants of the AyaKasir POS can publish their store to AyaNaon with one toggle — their listing is pushed server-to-server (secret-gated partner API) and appears as a rounded-square logo pin on the map.
+- **SEO Store Pages:** Every listed store gets a server-rendered, Google-indexable page at `/toko/<slug>` (sitemap-listed, permanent slug) showing the logo, description, category, full categorized menu with photos and prices, opening hours, a map embed, and a light/dark theme toggle.
+- **Order via WhatsApp:** Visitors pick menu quantities with steppers and send a pre-filled WhatsApp order message; sold-out items grey out live by polling the AyaKasir availability API (60s), staying in sync with the tenant's own ordering page.
+- **Menu Layouts:** The store page follows the layout the tenant chose in AyaKasir (List / Grid / Accordion) and the tenant's own category & item ordering.
+- **Searchable:** Map search matches stores by name, category, city, and every menu item name — matching stores appear both on the map and in a "Toko / UMKM" section of the search results list.
+
 ## How It Works (Under the Hood)
 
 AyaNaon-app is a modern web application built with:
@@ -95,6 +102,13 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 ## Release Notes
 
 Release updates are listed from the most recent version to the earliest.
+
+### What's New in v2.4.16
+- **Toko / UMKM Layer (AyaKasir Integration):** New `merchants` collection fed by a secret-gated partner API (`PUT/DELETE /api/partners/ayakasir/stores`, Bearer `AYAKASIR_PARTNER_SECRET`) lets AyaKasir POS tenants publish their stores to AyaNaon. Stores render as rounded-square logo pins with a compact popup (logo, name, category · city, menu photo previews, "Kunjungi Toko") that closes on any map tap.
+- **SEO Store Pages (`/toko/<slug>`):** Server-rendered, sitemap-listed store pages with FoodEstablishment JSON-LD, the tenant's full categorized menu (List/Grid/Accordion layout passthrough, photos, prices), opening hours, map embed, and a persisted light/dark theme toggle.
+- **WhatsApp Ordering with Live Availability:** Visitors build an order with per-item steppers and send it as a pre-filled WhatsApp message; the page polls the AyaKasir availability API (60s + on tab focus) so sold-out items grey out, lose steppers, and drop from carts in near-real time.
+- **Merchant Search:** Map search now matches stores by name, category, city, and every menu item name via a server-built search blob; matching stores appear on the map, in a new "Toko / UMKM" section of the results list, and are included when panning to the nearest search result (fixing a false "Pencarian tidak ditemukan" alert for merchant-only matches).
+- **Deep Links:** `/?toko=<slug>` pans to a store and opens its popup; `/toko` pages link back to it.
 
 ### What's New in v2.4.15
 - **Mass Promotion Optimization:** Mass promotion pins are now flagged with `massPromotion: true` and grouped by `massPromotionGroupId` for efficient management and shared image storage (only the first pin in a group stores images; subsequent pins reference it via `sharedImagesFromGroup`).

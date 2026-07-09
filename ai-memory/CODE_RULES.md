@@ -22,6 +22,9 @@
 - Mass promo image reads must tolerate legacy docs where `sharedImageCount` exists but `sharedImagesFromGroup` is missing; fallback to `massPromotionGroupId` before calling `resolveSharedImages()`
 - Mass promo pins share images via `sharedImagesFromGroup` referencing `massPromotionGroupId` — only the first pin in a group stores actual image data; resolved at read time by `resolveSharedImages()`
 - IP address used for anonymous voting and visitor tracking (`x-nf-client-connection-ip` header)
+- Merchant writes come ONLY from the AyaKasir partner API (Bearer `AYAKASIR_PARTNER_SECRET`, timing-safe compare); every payload field is re-sanitized server-side and `slug` is immutable after create (SEO permanence). Every merchant write must bust `sitemapCache`
+- Inline client scripts emitted from server-rendered pages (`waScript`/`themeScript`/`availScript` in the toko page) live inside JS template literals — they must contain NO backticks and NO dollar-brace; use quotes + string concatenation, and `\\n` in api.js source to emit `\n` escapes
+- Search visibility spans THREE layers: pins, live sellers, merchants. Any feature consuming search results (`filterMarkers`, `updatePinListPanel`, `focusMapOnSearchResults`) must handle all three or merchant-only matches break
 
 ## Frontend Patterns
 - Global variables at top of `app.js` for all state

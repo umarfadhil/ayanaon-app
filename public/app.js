@@ -3143,6 +3143,301 @@ function startLiveSellerRefreshLoop() {
     }, LIVE_SELLER_REFRESH_INTERVAL_MS);
 }
 
+// ---------------------------------------------------------------------------
+// Merchants layer ("Toko / UMKM" — AyaKasir tenant stores)
+// Static markers fed by GET /api/merchants; detail page at /toko/:slug.
+// ---------------------------------------------------------------------------
+
+let merchantMarkers = [];
+let activeMerchantInfoWindow = null;
+let hasFetchedMerchants = false;
+
+function createMerchantMarkerElement(merchant = {}) {
+    // Rounded SQUARE pin showing the tenant's LOGO (never a menu photo);
+    // store-emoji fallback when the tenant has no logo.
+    const element = document.createElement('div');
+    element.className = 'merchant-marker';
+    element.style.width = '36px';
+    element.style.height = '36px';
+    element.style.borderRadius = '8px';
+    element.style.background = '#ffffff';
+    element.style.border = '2px solid #3557c7';
+    element.style.boxShadow = '0 2px 8px rgba(23, 35, 59, 0.35)';
+    element.style.display = 'flex';
+    element.style.alignItems = 'center';
+    element.style.justifyContent = 'center';
+    element.style.overflow = 'hidden';
+    if (merchant.logoUrl) {
+        const logoElement = document.createElement('img');
+        logoElement.src = merchant.logoUrl;
+        logoElement.alt = `Logo ${merchant.name || 'Toko'}`;
+        logoElement.loading = 'lazy';
+        logoElement.style.width = '100%';
+        logoElement.style.height = '100%';
+        logoElement.style.objectFit = 'cover';
+        element.appendChild(logoElement);
+    } else {
+        const iconElement = document.createElement('span');
+        iconElement.textContent = String.fromCodePoint(0x1F3EA);
+        iconElement.style.fontSize = '18px';
+        iconElement.setAttribute('aria-hidden', 'true');
+        element.appendChild(iconElement);
+    }
+    return element;
+}
+
+function buildMerchantSearchBlob(merchant = {}) {
+    const parts = [merchant.name, merchant.category, merchant.city, merchant.province];
+    if (Array.isArray(merchant.menuHighlights)) {
+        merchant.menuHighlights.forEach((item) => {
+            if (item && item.name) parts.push(item.name);
+        });
+    }
+    return parts
+        .filter(Boolean)
+        .map(normalizeSearchText)
+        .join(' ');
+}
+
+function buildMerchantPopupNode(merchant = {}) {
+    // Compact, high-contrast popup: logo + name/category/city header, up to 3
+    // menu items with photo + price, and a single "Kunjungi Toko" CTA.
+    const container = document.createElement('div');
+    container.style.maxWidth = '250px';
+    container.style.fontFamily = 'inherit';
+    container.style.color = '#17233b';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.gap = '10px';
+    header.style.marginBottom = '8px';
+
+    const logoSrc = merchant.logoUrl || merchant.photo || '';
+    if (logoSrc) {
+        const logoElement = document.createElement('img');
+        logoElement.src = logoSrc;
+        logoElement.alt = `Logo ${merchant.name || 'Toko'}`;
+        logoElement.loading = 'lazy';
+        logoElement.style.width = '42px';
+        logoElement.style.height = '42px';
+        logoElement.style.borderRadius = '10px';
+        logoElement.style.objectFit = 'cover';
+        logoElement.style.flex = '0 0 auto';
+        logoElement.style.border = '1px solid #e1e7f5';
+        header.appendChild(logoElement);
+    }
+
+    const headText = document.createElement('div');
+    headText.style.minWidth = '0';
+
+    const nameElement = document.createElement('div');
+    nameElement.textContent = merchant.name || 'Toko';
+    nameElement.style.fontWeight = '700';
+    nameElement.style.fontSize = '15px';
+    nameElement.style.color = '#17233b';
+    nameElement.style.lineHeight = '1.25';
+    headText.appendChild(nameElement);
+
+    const metaParts = [merchant.category, merchant.city].filter(Boolean);
+    if (metaParts.length) {
+        const metaElement = document.createElement('div');
+        metaElement.textContent = metaParts.join(' · ');
+        metaElement.style.fontSize = '12.5px';
+        metaElement.style.fontWeight = '600';
+        metaElement.style.color = '#44506b';
+        metaElement.style.marginTop = '2px';
+        headText.appendChild(metaElement);
+    }
+    header.appendChild(headText);
+    container.appendChild(header);
+
+    // Preview strip: up to 3 menu photos (photos array first, then highlight
+    // photoUrls as fallback for older cached responses).
+    const previewPhotos = [];
+    const pushPreview = (src) => {
+        if (typeof src === 'string' && src && previewPhotos.length < 3 && !previewPhotos.includes(src)) {
+            previewPhotos.push(src);
+        }
+    };
+    if (Array.isArray(merchant.photos)) {
+        merchant.photos.forEach(pushPreview);
+    }
+    if (Array.isArray(merchant.menuHighlights)) {
+        merchant.menuHighlights.forEach((item) => pushPreview(item && item.photoUrl));
+    }
+    if (previewPhotos.length) {
+        const strip = document.createElement('div');
+        strip.style.display = 'flex';
+        strip.style.gap = '6px';
+        strip.style.marginTop = '2px';
+        previewPhotos.forEach((src, index) => {
+            const photoElement = document.createElement('img');
+            photoElement.src = src;
+            photoElement.alt = `Menu ${merchant.name || 'Toko'} ${index + 1}`;
+            photoElement.loading = 'lazy';
+            photoElement.style.width = '72px';
+            photoElement.style.height = '72px';
+            photoElement.style.borderRadius = '10px';
+            photoElement.style.objectFit = 'cover';
+            photoElement.style.flex = '0 0 auto';
+            strip.appendChild(photoElement);
+        });
+        container.appendChild(strip);
+    }
+
+    if (merchant.slug) {
+        const visitLink = document.createElement('a');
+        visitLink.textContent = 'Kunjungi Toko';
+        visitLink.href = `/toko/${encodeURIComponent(merchant.slug)}`;
+        visitLink.style.display = 'block';
+        visitLink.style.textAlign = 'center';
+        visitLink.style.marginTop = '8px';
+        visitLink.style.padding = '9px 12px';
+        visitLink.style.borderRadius = '10px';
+        visitLink.style.background = '#3557c7';
+        visitLink.style.color = '#ffffff';
+        visitLink.style.fontSize = '14px';
+        visitLink.style.fontWeight = '700';
+        visitLink.style.textDecoration = 'none';
+        container.appendChild(visitLink);
+    }
+    return container;
+}
+
+function removeMerchantMarker(entry) {
+    if (!entry) return;
+    if (entry.listener && typeof entry.listener.remove === 'function') {
+        entry.listener.remove();
+    }
+    if (entry.infoWindow) {
+        entry.infoWindow.close();
+        if (activeMerchantInfoWindow === entry.infoWindow) {
+            activeMerchantInfoWindow = null;
+        }
+    }
+    if (entry.marker) {
+        entry.marker.map = null;
+    }
+}
+
+function createMerchantMarkerEntry(merchant) {
+    if (!map || !LiveSellerMarkerCtor) {
+        return null;
+    }
+    const lat = Number(merchant?.lat);
+    const lng = Number(merchant?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+    }
+    const marker = new LiveSellerMarkerCtor({
+        map,
+        position: { lat, lng },
+        content: createMerchantMarkerElement(merchant),
+        title: merchant?.name || 'Toko'
+    });
+    // headerDisabled removes the InfoWindow header (incl. the close button) —
+    // the popup closes via the map-click listener instead.
+    const infoWindow = new google.maps.InfoWindow({ headerDisabled: true });
+    infoWindow.setContent(buildMerchantPopupNode(merchant));
+    const entry = {
+        slug: merchant?.slug || '',
+        marker,
+        infoWindow,
+        merchant,
+        listener: null,
+        isVisible: true,
+        // Server-built blob (covers ALL menu names); client blob as fallback.
+        searchText: typeof merchant?.searchText === 'string' && merchant.searchText
+            ? merchant.searchText
+            : buildMerchantSearchBlob(merchant)
+    };
+    entry.listener = marker.addListener('gmp-click', () => {
+        if (activeMerchantInfoWindow && activeMerchantInfoWindow !== infoWindow) {
+            activeMerchantInfoWindow.close();
+        }
+        infoWindow.open({ map, anchor: marker });
+        activeMerchantInfoWindow = infoWindow;
+    });
+    infoWindow.addListener('closeclick', () => {
+        if (activeMerchantInfoWindow === infoWindow) {
+            activeMerchantInfoWindow = null;
+        }
+    });
+    return entry;
+}
+
+function focusMerchantEntry(entry) {
+    if (!entry || !entry.marker || !map) {
+        return;
+    }
+    const position = entry.marker.position;
+    if (position) {
+        map.panTo(position);
+        map.setZoom(Math.max(map.getZoom() || 0, 16));
+    }
+    if (activeMerchantInfoWindow && activeMerchantInfoWindow !== entry.infoWindow) {
+        activeMerchantInfoWindow.close();
+    }
+    entry.infoWindow.open({ map, anchor: entry.marker });
+    activeMerchantInfoWindow = entry.infoWindow;
+}
+
+function focusMerchantFromUrl() {
+    if (typeof window === 'undefined' || !window.location || !map) {
+        return;
+    }
+    const params = new URLSearchParams(window.location.search || '');
+    const slug = (params.get('toko') || '').trim().toLowerCase();
+    if (!slug) {
+        return;
+    }
+    const entry = merchantMarkers.find((item) => item && item.slug === slug);
+    if (entry) {
+        focusMerchantEntry(entry);
+    }
+}
+
+let merchantMapClickCloserAdded = false;
+
+// Like regular pins, the merchant popup collapses when the user taps/clicks
+// anywhere else on the map.
+function ensureMerchantMapClickCloser() {
+    if (merchantMapClickCloserAdded || !map) {
+        return;
+    }
+    merchantMapClickCloserAdded = true;
+    map.addListener('click', () => {
+        if (activeMerchantInfoWindow) {
+            activeMerchantInfoWindow.close();
+            activeMerchantInfoWindow = null;
+        }
+    });
+}
+
+async function fetchMerchants() {
+    if (!map || hasFetchedMerchants) {
+        return;
+    }
+    hasFetchedMerchants = true;
+    ensureMerchantMapClickCloser();
+    try {
+        const response = await fetch('/api/merchants');
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.message || 'Gagal memuat daftar toko.');
+        }
+        const merchants = Array.isArray(payload?.merchants) ? payload.merchants : [];
+        merchantMarkers.forEach(removeMerchantMarker);
+        merchantMarkers = merchants
+            .map((merchant) => createMerchantMarkerEntry(merchant))
+            .filter(Boolean);
+        focusMerchantFromUrl();
+    } catch (error) {
+        DEBUG_LOGGER.log('Merchant fetch failed', error);
+    }
+}
+
 function getSellerAuthHeaders() {
     if (typeof window.SellerSession === 'undefined' || typeof SellerSession.getToken !== 'function') {
         return null;
@@ -4324,15 +4619,34 @@ function updatePinListPanel(context = {}) {
     const totalVisible = visiblePins.length;
     const resultsToRender = visiblePins.slice(0, 30);
 
+    // Merchants ("Toko/UMKM") join the results list when the visitor searches:
+    // matching tenants (name/category/city/menu blob) are listed above pins.
+    const visibleMerchants = (!isSavedView && hasSearchQuery)
+        ? merchantMarkers
+            .filter((entry) => entry && entry.isVisible !== false && entry.marker)
+            .map((entry) => {
+                const position = toLatLngLiteral(entry.marker.position);
+                const distanceKm = referencePosition && position
+                    ? calculateDistanceKm(referencePosition, position)
+                    : Number.POSITIVE_INFINITY;
+                return { entry, merchant: entry.merchant || {}, distanceKm };
+            })
+            .sort((a, b) => a.distanceKm - b.distanceKm)
+            .slice(0, 10)
+        : [];
+
     if (pinListSummaryElement) {
-        if (!totalVisible) {
+        const merchantSuffix = visibleMerchants.length
+            ? ` + ${visibleMerchants.length} toko`
+            : '';
+        if (!totalVisible && !visibleMerchants.length) {
             pinListSummaryElement.textContent = isSavedView
                 ? 'No saved pins yet.'
                 : 'No pins match the filters.';
         } else if (isSavedView) {
             pinListSummaryElement.textContent = `${resultsToRender.length} saved pins`;
         } else if (hasSearchQuery) {
-            pinListSummaryElement.textContent = `${resultsToRender.length} of ${totalVisible} search results`;
+            pinListSummaryElement.textContent = `${resultsToRender.length} of ${totalVisible} search results${merchantSuffix}`;
         } else if (referencePosition) {
             pinListSummaryElement.textContent = `${resultsToRender.length} nearest pins sorted by distance`;
         } else {
@@ -4345,7 +4659,100 @@ function updatePinListPanel(context = {}) {
         pinListEmptyElement.textContent = isSavedView
             ? 'Belum ada pin tersimpan.'
             : 'Belum ada pin untuk ditampilkan.';
-        pinListEmptyElement.classList.toggle('hidden', totalVisible > 0);
+        pinListEmptyElement.classList.toggle('hidden', totalVisible > 0 || visibleMerchants.length > 0);
+    }
+
+    if (visibleMerchants.length) {
+        const merchantFragment = document.createDocumentFragment();
+        const sectionLabel = document.createElement('div');
+        sectionLabel.textContent = `Toko / UMKM (${visibleMerchants.length})`;
+        sectionLabel.style.fontSize = '11px';
+        sectionLabel.style.fontWeight = '700';
+        sectionLabel.style.textTransform = 'uppercase';
+        sectionLabel.style.letterSpacing = '0.05em';
+        sectionLabel.style.opacity = '0.7';
+        sectionLabel.style.margin = '4px 2px 6px';
+        merchantFragment.appendChild(sectionLabel);
+
+        visibleMerchants.forEach(({ entry, merchant, distanceKm }) => {
+            const item = document.createElement('div');
+            item.className = 'pin-list-item';
+            item.setAttribute('role', 'listitem');
+            item.tabIndex = 0;
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '10px';
+
+            if (merchant.logoUrl) {
+                const logoElement = document.createElement('img');
+                logoElement.src = merchant.logoUrl;
+                logoElement.alt = `Logo ${merchant.name || 'Toko'}`;
+                logoElement.loading = 'lazy';
+                logoElement.style.width = '36px';
+                logoElement.style.height = '36px';
+                logoElement.style.borderRadius = '8px';
+                logoElement.style.objectFit = 'cover';
+                logoElement.style.flex = '0 0 auto';
+                item.appendChild(logoElement);
+            } else {
+                const iconElement = document.createElement('span');
+                iconElement.textContent = String.fromCodePoint(0x1F3EA);
+                iconElement.style.fontSize = '20px';
+                iconElement.style.flex = '0 0 auto';
+                iconElement.setAttribute('aria-hidden', 'true');
+                item.appendChild(iconElement);
+            }
+
+            const info = document.createElement('div');
+            info.style.flex = '1 1 auto';
+            info.style.minWidth = '0';
+
+            const titleElement = document.createElement('div');
+            titleElement.className = 'pin-list-item__title';
+            titleElement.textContent = merchant.name || 'Toko';
+            info.appendChild(titleElement);
+
+            const metaParts = [merchant.category, merchant.city].filter(Boolean);
+            if (hasUserLocation && Number.isFinite(distanceKm)) {
+                metaParts.push(formatDistanceText(distanceKm));
+            }
+            if (metaParts.length) {
+                const metaElement = document.createElement('div');
+                metaElement.textContent = metaParts.join(' · ');
+                metaElement.style.fontSize = '12px';
+                metaElement.style.opacity = '0.75';
+                metaElement.style.overflow = 'hidden';
+                metaElement.style.textOverflow = 'ellipsis';
+                metaElement.style.whiteSpace = 'nowrap';
+                info.appendChild(metaElement);
+            }
+            item.appendChild(info);
+
+            if (entry.slug) {
+                const visitLink = document.createElement('a');
+                visitLink.textContent = 'Kunjungi';
+                visitLink.href = `/toko/${encodeURIComponent(entry.slug)}`;
+                visitLink.style.flex = '0 0 auto';
+                visitLink.style.fontSize = '13px';
+                visitLink.style.fontWeight = '700';
+                visitLink.style.textDecoration = 'none';
+                visitLink.style.color = '#3557c7';
+                visitLink.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                });
+                item.appendChild(visitLink);
+            }
+
+            item.addEventListener('click', () => focusMerchantEntry(entry));
+            item.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    focusMerchantEntry(entry);
+                }
+            });
+            merchantFragment.appendChild(item);
+        });
+        pinListItemsContainer.appendChild(merchantFragment);
     }
 
     if (!resultsToRender.length) {
@@ -7446,6 +7853,43 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         lastLiveSellerSearchResults = visibleLiveSellerEntries;
 
+        // Merchants ("Toko/UMKM") join the keyword search: the blob covers store
+        // name, category, city/province, and every menu item name. Category
+        // checkboxes/date filters don't apply (merchants are permanent listings).
+        merchantMarkers.forEach((entry) => {
+            if (!entry || !entry.marker) {
+                return;
+            }
+            const hideMerchant = () => {
+                if (entry.marker.map) {
+                    entry.marker.map = null;
+                }
+                if (entry.infoWindow && typeof entry.infoWindow.close === 'function') {
+                    entry.infoWindow.close();
+                    if (activeMerchantInfoWindow === entry.infoWindow) {
+                        activeMerchantInfoWindow = null;
+                    }
+                }
+            };
+            if (isSavedView) {
+                entry.isVisible = false;
+                hideMerchant();
+                return;
+            }
+            const searchableText = typeof entry.searchText === 'string' ? entry.searchText : '';
+            const matchesSearch = currentSearchTokens.length === 0 ||
+                (searchableText && currentSearchTokens.every(token => searchableText.includes(token)));
+            if (matchesSearch) {
+                entry.isVisible = true;
+                if (entry.marker.map !== map) {
+                    entry.marker.map = map;
+                }
+            } else {
+                entry.isVisible = false;
+                hideMerchant();
+            }
+        });
+
         updatePinListCategorySummary();
         updatePinListDateSummary();
         updatePinListPanel({ reason: 'filter' });
@@ -7494,8 +7938,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const visibleMarkers = markers.filter(marker => marker.isVisible);
         const visibleLiveSellerEntries = lastLiveSellerSearchResults
             .filter(entry => entry && entry.isVisible && entry.marker);
+        const visibleMerchantEntries = merchantMarkers
+            .filter(entry => entry && entry.isVisible !== false && entry.marker);
 
-        if (!visibleMarkers.length && !visibleLiveSellerEntries.length) {
+        if (!visibleMarkers.length && !visibleLiveSellerEntries.length && !visibleMerchantEntries.length) {
             alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
             return;
         }
@@ -7519,7 +7965,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             }))
             .filter(candidate => Boolean(candidate.position));
 
-        const allCandidates = pinCandidates.concat(liveSellerCandidates);
+        const merchantCandidates = visibleMerchantEntries
+            .map(entry => ({
+                type: 'merchant',
+                entry,
+                position: toLatLngLiteral(entry.marker ? entry.marker.position : null)
+            }))
+            .filter(candidate => Boolean(candidate.position));
+
+        const allCandidates = pinCandidates.concat(liveSellerCandidates, merchantCandidates);
         if (!allCandidates.length) {
             alert('Pencarian tidak ditemukan. Coba kata kunci lainnya yuk!');
             return;
@@ -7553,6 +8007,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (typeof nearestCandidate.entry.infoWindow.open === 'function') {
                     nearestCandidate.entry.infoWindow.open({ map, anchor: nearestCandidate.entry.marker });
                     activeLiveSellerInfoWindow = nearestCandidate.entry.infoWindow;
+                }
+            }
+
+            if (nearestCandidate.type === 'merchant' && nearestCandidate.entry && nearestCandidate.entry.infoWindow) {
+                if (activeMerchantInfoWindow && activeMerchantInfoWindow !== nearestCandidate.entry.infoWindow) {
+                    activeMerchantInfoWindow.close();
+                }
+                if (typeof nearestCandidate.entry.infoWindow.open === 'function') {
+                    nearestCandidate.entry.infoWindow.open({ map, anchor: nearestCandidate.entry.marker });
+                    activeMerchantInfoWindow = nearestCandidate.entry.infoWindow;
                 }
             }
         }
@@ -7758,6 +8222,7 @@ async function initMap() {
     }
     refreshMarkerCluster(markers);
     startLiveSellerRefreshLoop();
+    fetchMerchants().catch(() => undefined);
     syncResidentShareMarkersFromCache();
     refreshResidentShareMarkers({ force: true });
     startResidentShareRefreshLoop();
