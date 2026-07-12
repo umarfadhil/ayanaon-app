@@ -23,6 +23,12 @@
 - Mass promo pins share images via `sharedImagesFromGroup` referencing `massPromotionGroupId` — only the first pin in a group stores actual image data; resolved at read time by `resolveSharedImages()`
 - IP address used for anonymous voting and visitor tracking (`x-nf-client-connection-ip` header)
 - Merchant writes come ONLY from the AyaKasir partner API (Bearer `AYAKASIR_PARTNER_SECRET`, timing-safe compare); every payload field is re-sanitized server-side and `slug` is immutable after create (SEO permanence). Every merchant write must bust `sitemapCache`
+- Gather Pins browser work runs only in the separately deployed Apify Actor; Netlify starts/polls runs and persists normalized results. Never put Chromium/Playwright in the Netlify function.
+- Gather drafts require title, description, category, valid HTTP(S) link, start/end dates, and valid coordinates before publication; static location sources intentionally leave dates incomplete for human review.
+- Gather deduplication prefers `source + externalId` (not link alone) because Pertamina/SPKLU records legitimately share a locator URL.
+- Before starting an Actor run, Netlify sends known source IDs (or links only when an ID is absent); adapters skip them before detail/geocoding work and continue until the requested number of new rows is collected.
+- Gather Actor images are normalized to at most three HTTP(S) references and persisted with the draft; re-import may enrich an existing image-less draft without creating a duplicate.
+- Google Indexing API must not be used for merchant pages: Google limits it to `JobPosting` and livestream `BroadcastEvent` pages. Merchant discovery uses canonical SSR pages + the submitted sitemap; keep sitemap CDN caching aligned with `SITEMAP_CACHE_TTL_MS` so merchant writes surface promptly
 - Inline client scripts emitted from server-rendered pages (`waScript`/`themeScript`/`availScript` in the toko page) live inside JS template literals — they must contain NO backticks and NO dollar-brace; use quotes + string concatenation, and `\\n` in api.js source to emit `\n` escapes
 - Search visibility spans THREE layers: pins, live sellers, merchants. Any feature consuming search results (`filterMarkers`, `updatePinListPanel`, `focusMapOnSearchResults`) must handle all three or merchant-only matches break
 

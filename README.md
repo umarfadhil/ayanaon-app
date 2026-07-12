@@ -103,6 +103,22 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.5.2
+- **Clean Scraped Descriptions:** Gather strips source HTML, restores paragraph breaks, and decodes nested entities such as `&amp;mdash` before drafts are displayed or saved.
+- **Reliable Loket Banners:** Loket drafts read the official `event_banner` and `event_banner_mobile` API fields and store available banner URLs as supportive images.
+- **Preflight Duplicate Skipping:** Netlify sends existing source IDs to Apify before each run; adapters skip known rows before detail/geocoding calls, keep paging for new rows, and report how many items were excluded at the start.
+
+### What's New in v2.5.1
+- **Compact Gather Workflow:** The source/run controls use the admin type system, place their actions inline, shorten labels to “Mulai” and “Refresh”, and remove the oversized empty editor state.
+- **Editable Categories and Locations:** Gather drafts use the live AyaNaon category list plus a searchable, clickable, draggable Google Maps preview that fills latitude and longitude.
+- **Automatic Supportive Images:** Actor adapters collect up to three source photos, Netlify persists safe HTTP(S) image references, and repeat imports can enrich matching drafts that previously had no images.
+
+### What's New in v2.5.0
+- **Gather Pins Admin Desk:** Admins and pin managers can run external scrapers, review persistent pre-publication drafts, edit all required pin fields, attach up to three supportive images, and publish only complete records.
+- **Eight Source Adapters:** The deployable Apify Actor covers tiket.com, Loket, Yesplis, IndoRelawan, KalenderLari, MICHELIN Guide hotels, Pertamina outlets, and SPKLU locations through a mix of direct APIs and proxy-enabled Playwright.
+- **Safe Async Import:** Netlify starts Actor jobs without waiting for the crawl, polls their status, imports completed datasets into MongoDB, and reports new, duplicate, and incomplete records.
+- **Publication Guardrails:** Gather endpoints require admin/pin-manager JWTs, normalize source data, block missing mandatory fields and duplicate source records, and preserve scraper provenance on published pins.
+
 ### What's New in v2.4.16
 - **Toko / UMKM Layer (AyaKasir Integration):** New `merchants` collection fed by a secret-gated partner API (`PUT/DELETE /api/partners/ayakasir/stores`, Bearer `AYAKASIR_PARTNER_SECRET`) lets AyaKasir POS tenants publish their stores to AyaNaon. Stores render as rounded-square logo pins with a compact popup (logo, name, category · city, menu photo previews, "Kunjungi Toko") that closes on any map tap.
 - **SEO Store Pages (`/toko/<slug>`):** Server-rendered, sitemap-listed store pages with FoodEstablishment JSON-LD, the tenant's full categorized menu (List/Grid/Accordion layout passthrough, photos, prices), opening hours, map embed, and a persisted light/dark theme toggle.

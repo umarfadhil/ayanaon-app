@@ -1,0 +1,25 @@
+{
+  "title": "AyaNaon Gather Pins input",
+  "description": "Choose one supported website and the maximum number of normalized AyaNaon pin drafts to gather.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "source": {
+      "title": "Source",
+      "description": "Website connector to run. Browser sources use Playwright; API sources use direct HTTP requests.",
+      "type": "string",
+      "enum": ["tiket", "loket", "yesplis", "indorelawan", "kalenderlari", "michelin", "pertamina", "spklu"],
+      "editor": "select"
+    },
+    "limit": {
+      "title": "Maximum items",
+      "description": "Maximum number of normalized draft records written to this run's default dataset.",
+      "type": "integer",
+      "editor": "number",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 500
+    }
+  },
+  "required": ["source"]
+}

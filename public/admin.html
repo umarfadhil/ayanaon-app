@@ -23,6 +23,7 @@
         </header>
         <div class="admin-tabs" role="tablist" aria-label="Admin Navigation">
             <button class="admin-tab admin-tab--active" data-tab="pins" role="tab" aria-selected="true">Manage Pins</button>
+            <button class="admin-tab" data-tab="gather" role="tab" aria-selected="false">Gather Pins</button>
             <button class="admin-tab" data-tab="mass" role="tab" aria-selected="false">Mass Promotions</button>
             <button class="admin-tab" data-tab="users" role="tab" aria-selected="false" data-admin-only="true">Manage Users</button>
             <button class="admin-tab" data-tab="metrics" role="tab" aria-selected="false" data-admin-only="true">Business Metrics</button>
@@ -253,6 +254,148 @@
             </section>
         </section>
         </section>
+
+        <div id="admin-gather-pane" class="admin-tab-content hidden">
+            <section class="gather-workbench">
+                <header class="gather-hero">
+                    <div>
+                        <p class="eyebrow">External ingestion desk</p>
+                        <h2>Gather Pins</h2>
+                        <p>Jalankan scraper di Apify, periksa data wajib, lalu publikasikan pin yang sudah siap.</p>
+                    </div>
+                    <div class="gather-hero__status" id="gather-service-status" data-state="checking">
+                        <span class="gather-status-dot" aria-hidden="true"></span>
+                        <span>Memeriksa layanan...</span>
+                    </div>
+                </header>
+
+                <div id="gather-message" class="admin-message" role="status" aria-live="polite"></div>
+
+                <div class="gather-command-grid">
+                    <section class="gather-command-card" aria-labelledby="gather-source-title">
+                        <div class="gather-command-copy">
+                            <h3 id="gather-source-title">Pilih sumber</h3>
+                            <p>Setiap proses menghasilkan draft, bukan pin publik.</p>
+                        </div>
+                        <div class="gather-command-controls">
+                            <label class="gather-field gather-field--wide">
+                                <span>Website</span>
+                                <select id="gather-source-select" aria-label="Website sumber"></select>
+                            </label>
+                            <label class="gather-field">
+                                <span>Maksimum hasil</span>
+                                <input id="gather-limit" type="number" min="1" max="500" value="50">
+                            </label>
+                            <button id="gather-run-btn" class="primary-btn" type="button">Mulai</button>
+                        </div>
+                    </section>
+
+                    <section class="gather-run-card" aria-labelledby="gather-run-title">
+                        <div class="gather-run-head">
+                            <div>
+                                <h3 id="gather-run-title">Proses terbaru</h3>
+                                <p id="gather-run-summary">Belum ada proses pada sesi ini.</p>
+                            </div>
+                            <button id="gather-refresh-btn" class="chip-btn" type="button">Refresh</button>
+                        </div>
+                        <div class="gather-progress" aria-hidden="true"><span id="gather-progress-bar"></span></div>
+                        <div class="gather-run-metrics" id="gather-run-metrics"></div>
+                    </section>
+                </div>
+
+                <div id="gather-review-grid" class="gather-review-grid is-editor-empty">
+                    <aside class="gather-queue">
+                        <div class="gather-queue__head">
+                            <div>
+                                <p class="eyebrow">Draft queue</p>
+                                <h3>Siap diperiksa <span id="gather-draft-count">0</span></h3>
+                            </div>
+                            <select id="gather-draft-source-filter" aria-label="Filter sumber">
+                                <option value="">Semua sumber</option>
+                            </select>
+                        </div>
+                        <input id="gather-draft-search" class="gather-search" type="search" placeholder="Cari judul atau kategori...">
+                        <div id="gather-draft-list" class="gather-draft-list"></div>
+                    </aside>
+
+                    <section class="gather-editor" aria-labelledby="gather-editor-title">
+                        <form id="gather-draft-form" class="pin-form hidden" novalidate>
+                            <div class="gather-editor__head">
+                                <div>
+                                    <p class="eyebrow" id="gather-editor-source">Source</p>
+                                    <h3 id="gather-editor-title">Edit draft</h3>
+                                </div>
+                                <span id="gather-completeness" class="gather-completeness"></span>
+                            </div>
+                            <div class="form-group">
+                                <label for="gather-title">Title *</label>
+                                <input id="gather-title" type="text" maxlength="180" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="gather-description">Description *</label>
+                                <textarea id="gather-description" rows="6" maxlength="6000" required></textarea>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="gather-category">Category *</label>
+                                    <select id="gather-category" required>
+                                        <option value="">Pilih kategori</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="gather-link">Link *</label>
+                                    <input id="gather-link" type="url" maxlength="2048" required>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="gather-start-date">Start Date *</label>
+                                    <input id="gather-start-date" type="date" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="gather-end-date">End Date *</label>
+                                    <input id="gather-end-date" type="date" required>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="gather-lat">Latitude *</label>
+                                    <input id="gather-lat" type="number" min="-90" max="90" step="any" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="gather-lng">Longitude *</label>
+                                    <input id="gather-lng" type="number" min="-180" max="180" step="any" required>
+                                </div>
+                            </div>
+                            <div class="gather-location-picker">
+                                <div class="gather-location-search">
+                                    <input id="gather-location-search-input" type="search" placeholder="Cari nama tempat atau alamat..." aria-label="Cari lokasi draft">
+                                    <button id="gather-location-search-btn" class="chip-btn" type="button">Cari lokasi</button>
+                                </div>
+                                <div id="gather-location-map" class="gather-location-map" aria-label="Peta lokasi draft"></div>
+                                <span class="image-hint">Cari tempat, klik peta, atau geser penanda untuk mengisi koordinat.</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Supportive images (optional)</label>
+                                <div id="gather-image-list" class="image-list"></div>
+                                <label class="upload-btn gather-upload-btn">
+                                    <input id="gather-image-input" type="file" accept="image/*" multiple>
+                                    <span>Add Photos</span>
+                                </label>
+                                <span class="image-hint">Maksimum 3 foto, 4MB per foto.</span>
+                            </div>
+                            <div class="gather-editor__actions">
+                                <button id="gather-delete-btn" class="ghost-btn ghost-btn--danger" type="button">Hapus draft</button>
+                                <div>
+                                    <button id="gather-save-btn" class="ghost-btn" type="submit">Simpan draft</button>
+                                    <button id="gather-publish-btn" class="primary-btn" type="button">Publikasikan pin</button>
+                                </div>
+                            </div>
+                        </form>
+                    </section>
+                </div>
+            </section>
+        </div>
 
         <div id="admin-mass-pane" class="admin-tab-content hidden">
             <section class="admin-mass">
@@ -902,5 +1045,6 @@
     </main>
     <script src="resident-session.js"></script>
     <script src="admin.js"></script>
+    <script src="admin-gather.js"></script>
 </body>
 </html>

@@ -2,6 +2,42 @@
 Append-only log of durable discoveries.
 Max 10 lines per task.
 
+## Gather Pins external ingestion (2026-07-11)
+- Added the Gather Pins admin tab for authenticated admin/pin-manager users: start scraper, poll status, review durable drafts, edit all mandatory fields, attach up to 3 images, delete, and publish.
+- Browser scraping cannot run reliably inside Netlify; `gather-actor/` is a separate Apify Playwright Actor with proxy support, while Netlify only orchestrates runs and stores results.
+- Eight adapters cover tiket.com, Loket, Yesplis, IndoRelawan, KalenderLari, MICHELIN, Pertamina, and SPKLU; API sources avoid browser cost where possible.
+- Scrape results persist in `gather_pin_drafts`; Actor execution metadata and import counters persist in `gather_runs`.
+- Deduplicate by `source + externalId`, with a link/coordinate/title fallback; link-only dedupe breaks locator datasets whose records share one directory URL.
+- MICHELIN/Pertamina/SPKLU lack natural event dates, so their drafts remain intentionally incomplete and cannot publish until dates are reviewed.
+- Deployment requires Netlify `APIFY_API_TOKEN` + `APIFY_GATHER_ACTOR_ID`, plus an Apify deployment of `gather-actor/`.
+- Apify input-schema fields require `description`; integer UI fields also use `editor: number`. A schema build failure surfaces later as the misleading run error `Actor version was not found`.
+
+## Gather Pins review workflow v2.5.1 (2026-07-11)
+- Gather controls now use the shared admin font, compact labels, full-width sections, and right-aligned actions; the numbered step and empty editor panel were removed.
+- Draft categories come from `GET /api/categories`; a scraped legacy value remains as a temporary option so the editor never silently clears it.
+- Draft coordinates use the existing `/api/config` Google Maps key with address geocoding, map clicks, and a draggable marker that update latitude/longitude.
+- Actor adapters emit up to three HTTP(S) image URLs; the Netlify importer normalizes and persists them as supportive-image records.
+- Source audit confirmed Loket uses `event.banner`/`event_banner`, Yesplis uses `full_path`/`picture2_full_path`, and MICHELIN uses `main_image`/`images`.
+- A repeated Actor import may add photos to a matching image-less draft while still counting the source item as a duplicate.
+- Version and service-worker cache advanced to v2.5.1 so deployed admins receive the new Gather assets.
+
+## Gather source cleanup and preflight dedupe v2.5.2 (2026-07-11)
+- Loket detail descriptions are encoded HTML; clean them in both the Actor and Netlify normalization so tags/entities never leak into drafts.
+- Nested malformed entities such as `&amp;mdash` and `&amp;rsquos` require iterative decoding before HTML removal.
+- Loket’s current detail API exposes the banner as `event_banner` (with optional `event_banner_mobile`), not generic `image`.
+- Netlify now loads up to 6,000 known source records and sends their external IDs—or links only when IDs are absent—to the Actor before a run.
+- Adapters skip exclusions before detail/geocoding work and keep paging until they collect the requested count of new items.
+- Shared locator links for Pertamina/SPKLU must never drive exclusions when an external ID exists.
+- Existing raw-HTML drafts remain eligible for one refresh so a repeat Loket run can clean their stored description and enrich missing images.
+- Version and service-worker cache advanced to v2.5.2.
+
+## Merchant Google discovery freshness (2026-07-11)
+- Google Indexing API is not eligible for `/toko/:slug`; it only supports `JobPosting` and livestream `BroadcastEvent` pages, so do not send merchant URLs to it.
+- Google's unauthenticated sitemap ping endpoint is deprecated and returns 404; sitemap submission/discovery is the supported path for these store pages.
+- Merchant writes already invalidate `sitemapCache`, and active stores already have canonical SSR pages plus timestamped sitemap entries.
+- Fixed the sitemap CDN TTL mismatch: Netlify could serve a stale sitemap for 24 hours despite the 15-minute function cache and write invalidation.
+- Sitemap responses now use `s-maxage=900, stale-while-revalidate=60`, targeting new store discovery within about 15 minutes of a Google sitemap fetch.
+
 ## SEO & Canonical URLs (2026-02-14)
 
 ### Issue: Google Search Console "Alternative page with proper canonical tag"

@@ -6,7 +6,7 @@
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
-- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~7750+ lines)
+- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~8660+ lines)
   - Express router mounted at `/api/*` via Netlify redirect
   - MongoDB connection + index setup
   - All REST endpoints (see API Routes below)
@@ -23,7 +23,13 @@
 ### Admin
 - `admin.html` - admin dashboard page
 - `admin.js` - admin logic (manage pins, SEO, categories, brands, areas, mass promos, analytics)
+- `admin-gather.js` - Gather Pins source runs, polling, category-backed draft editing, searchable map coordinates, automatic/manual images, and publication UI
 - `admin.css` - admin styles
+
+### External Gather Actor (`gather-actor/`)
+- `src/main.js` - normalized, duplicate-aware adapters for tiket.com, Loket, Yesplis, IndoRelawan, KalenderLari, MICHELIN, Pertamina, and SPKLU
+- `.actor/actor.json` + `.actor/input_schema.json` - Apify Actor manifest and source/limit input schema
+- `Dockerfile` - Playwright Chrome Actor runtime; deployed separately from Netlify
 
 ### Auth - Sellers (Gerobak Online)
 - `login.html` - seller login page
@@ -70,6 +76,9 @@
 - `POST /live-sellers/:id/community-verify`
 
 ### Admin
+- `GET /admin/gather/sources` - source catalog + external-service configuration status
+- `POST /admin/gather/runs` | `GET /admin/gather/runs[/:id]` - start/poll/list Apify runs; successful results import into drafts
+- `GET /PUT/DELETE /admin/gather/drafts[/:id]` | `POST /admin/gather/drafts/:id/publish` - review, edit, discard, and publish gathered drafts
 - `GET /admin/residents` | `PUT /:id/role` | `DELETE /:id`
 - `POST /admin/pins/backfill-city` | `backfill-provinces`
 - `GET /admin/mass-promotions` - list mass promo groups; `PUT /:groupId` - bulk-edit group; `DELETE /:groupId` - bulk-delete group

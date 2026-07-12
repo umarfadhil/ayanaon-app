@@ -15,7 +15,9 @@ const {
     MONGODB_URI,
     GOOGLE_MAPS_API_KEY,
     JWT_SECRET = 'ayanaon-dev-secret',
-    DASHBOARD_PASSWORD = process.env.MONGODB_DASHBOARD_PASSWORD || ''
+    DASHBOARD_PASSWORD = process.env.MONGODB_DASHBOARD_PASSWORD || '',
+    APIFY_API_TOKEN = '',
+    APIFY_GATHER_ACTOR_ID = ''
 } = process.env;
 
 // Establish the database connection outside of the handler
@@ -101,6 +103,11 @@ async function ensureIndexes(database) {
         await database.collection('merchants').createIndex({ slug: 1 }, { unique: true });
         await database.collection('merchants').createIndex({ tenantId: 1 }, { unique: true });
         await database.collection('merchants').createIndex({ status: 1, updatedAt: -1 });
+        await database.collection('gather_runs').createIndex({ apifyRunId: 1 }, { unique: true, sparse: true });
+        await database.collection('gather_runs').createIndex({ createdAt: -1 });
+        await database.collection('gather_pin_drafts').createIndex({ status: 1, createdAt: -1 });
+        await database.collection('gather_pin_drafts').createIndex({ source: 1, link: 1 });
+        await database.collection('gather_pin_drafts').createIndex({ source: 1, externalId: 1, status: 1 });
         indexesEnsured = true;
     } catch (error) {
         console.error('Failed to ensure indexes', error);
@@ -876,6 +883,7 @@ const DEFAULT_SEO_SETTINGS = {
 
 const SEO_SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SITEMAP_CACHE_TTL_MS = 15 * 60 * 1000;
+const SITEMAP_CACHE_CONTROL = 'public, max-age=0, s-maxage=900, stale-while-revalidate=60';
 let seoSettingsCache = null;
 let seoSettingsCacheExpiresAt = 0;
 let sitemapCache = { baseUrl: '', xml: '', expiresAt: 0 };
@@ -5475,7 +5483,7 @@ const handleSitemapRequest = async (req, res) => {
         const now = Date.now();
         if (sitemapCache.xml && now < sitemapCache.expiresAt && sitemapCache.baseUrl === baseUrl) {
             res.set('Content-Type', 'application/xml');
-            res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+            res.set('Cache-Control', SITEMAP_CACHE_CONTROL);
             res.send(sitemapCache.xml);
             return;
         }
@@ -5506,7 +5514,7 @@ const handleSitemapRequest = async (req, res) => {
             expiresAt: now + SITEMAP_CACHE_TTL_MS
         };
         res.set('Content-Type', 'application/xml');
-        res.set('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+        res.set('Cache-Control', SITEMAP_CACHE_CONTROL);
         res.send(xml);
     } catch (error) {
         console.error('Failed to build sitemap', error);
@@ -6749,6 +6757,572 @@ router.delete('/admin/residents/:id', async (req, res) => {
         console.error('Failed to delete resident', error);
         res.status(500).json({ message: 'Tidak dapat menghapus warga.' });
     }
+});
+
+const GATHER_SOURCES = [
+    { id: 'tiket', label: 'tiket.com', kind: 'browser', category: '🎉 Konser Musik & Acara' },
+    { id: 'loket', label: 'Loket', kind: 'api', category: '🎉 Konser Musik & Acara' },
+    { id: 'yesplis', label: 'Yesplis', kind: 'api', category: '🎉 Konser Musik & Acara' },
+    { id: 'indorelawan', label: 'Indorelawan', kind: 'browser', category: '🧑‍🤝‍🧑 Sosial & Kopdar' },
+    { id: 'kalenderlari', label: 'KalenderLari', kind: 'browser', category: '🏃 Olahraga' },
+    { id: 'michelin', label: 'MICHELIN Guide', kind: 'api', category: '🏡 Akomodasi Pilihan' },
+    { id: 'pertamina', label: 'Pertamina Outlet', kind: 'api', category: '⛽ SPBU' },
+    { id: 'spklu', label: 'SPKLU', kind: 'api', category: '⚡ SPKLU' }
+];
+const GATHER_SOURCE_IDS = new Set(GATHER_SOURCES.map((source) => source.id));
+const APIFY_API_BASE = 'https://api.apify.com/v2';
+const GATHER_TERMINAL_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
+
+function getGatherActorId() {
+    return String(APIFY_GATHER_ACTOR_ID || '').trim().replace('/', '~');
+}
+
+function requireGatherConfiguration(res) {
+    if (!APIFY_API_TOKEN || !getGatherActorId()) {
+        res.status(503).json({
+            message: 'Gather Pins belum dikonfigurasi. Tambahkan APIFY_API_TOKEN dan APIFY_GATHER_ACTOR_ID di Netlify.'
+        });
+        return false;
+    }
+    return true;
+}
+
+function gatherApifyHeaders() {
+    return {
+        Authorization: `Bearer ${APIFY_API_TOKEN}`,
+        'Content-Type': 'application/json'
+    };
+}
+
+function cleanGatherText(value, maxLength) {
+    return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function decodeGatherHtmlEntities(value) {
+    const entities = {
+        amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ',
+        mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', hellip: '…'
+    };
+    return value.replace(/&(#x[0-9a-f]+|#\d+|amp|quot|apos|lt|gt|nbsp|mdash|ndash|lsquo|rsquo|ldquo|rdquo|hellip);?/gi, (match, entity) => {
+        if (entity[0] === '#') {
+            const radix = entity[1].toLowerCase() === 'x' ? 16 : 10;
+            const number = Number.parseInt(entity.slice(radix === 16 ? 2 : 1), radix);
+            return Number.isFinite(number) ? String.fromCodePoint(number) : match;
+        }
+        return entities[entity.toLowerCase()] || match;
+    });
+}
+
+function cleanGatherDescription(value) {
+    let cleaned = cleanGatherText(value, 20_000);
+    for (let pass = 0; pass < 3; pass += 1) {
+        const decoded = decodeGatherHtmlEntities(cleaned);
+        if (decoded === cleaned) break;
+        cleaned = decoded;
+    }
+    return cleaned
+        .replace(/<br\s*\/?\s*>/gi, '\n')
+        .replace(/<\/p\s*>/gi, '\n\n')
+        .replace(/<li[^>]*>/gi, '• ')
+        .replace(/<\/li\s*>/gi, '\n')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line) => line.replace(/[\t ]+/g, ' ').trim())
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+        .replace(/^"(?=[^"]*$)/, '')
+        .slice(0, 6000);
+}
+
+function cleanGatherDate(value) {
+    const text = cleanGatherText(value, 40);
+    const match = /^(\d{4}-\d{2}-\d{2})/.exec(text);
+    if (!match) return '';
+    const parsed = new Date(`${match[1]}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? '' : match[1];
+}
+
+function cleanGatherLink(value) {
+    const link = cleanGatherText(value, 2048);
+    try {
+        const parsed = new URL(link);
+        return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : '';
+    } catch {
+        return '';
+    }
+}
+
+function getGatherItemKey(item) {
+    const source = cleanGatherText(item?.source, 40);
+    const externalId = cleanGatherText(item?.externalId, 180);
+    if (externalId) return `${source}:id:${externalId}`;
+    return `${source}:fallback:${cleanGatherText(item?.link, 2048)}:${Number(item?.lat)}:${Number(item?.lng)}:${cleanGatherText(item?.title, 180)}`;
+}
+
+function validateGatherImagePayload(images) {
+    if (images === null || typeof images === 'undefined') return '';
+    if (!Array.isArray(images)) return 'Format foto draft tidak valid.';
+    if (images.length > 3) return 'Maksimal 3 foto untuk setiap draft.';
+    for (const image of images) {
+        const declaredSize = Number(image?.size || 0);
+        if (Number.isFinite(declaredSize) && declaredSize > 4 * 1024 * 1024) return 'Setiap foto maksimal 4MB.';
+        const dataUrl = typeof image === 'string' ? image : image?.dataUrl;
+        if (typeof dataUrl !== 'string' || (!/^https?:\/\//i.test(dataUrl) && !/^data:image\/[^;]+;base64,/i.test(dataUrl))) {
+            return 'Sumber foto draft tidak valid.';
+        }
+        const match = typeof dataUrl === 'string' ? /^data:[^;]+;base64,(.+)$/i.exec(dataUrl) : null;
+        if (match && Buffer.byteLength(match[1], 'base64') > 4 * 1024 * 1024) return 'Setiap foto maksimal 4MB.';
+    }
+    return '';
+}
+
+function normalizeGatherImages(rawImages) {
+    const values = Array.isArray(rawImages) ? rawImages : [];
+    const seen = new Set();
+    const images = [];
+    for (const raw of values) {
+        if (images.length >= 3) break;
+        const source = cleanGatherText(getPinImageSource(raw), 6_000_000);
+        const isRemote = /^https?:\/\//i.test(source);
+        const dataMatch = /^data:(image\/[^;]+);base64,(.+)$/i.exec(source);
+        if ((!isRemote && !dataMatch) || seen.has(source)) continue;
+        seen.add(source);
+        let originalName = cleanGatherText(raw?.originalName, 255);
+        if (!originalName && isRemote) {
+            try { originalName = decodeURIComponent(new URL(source).pathname.split('/').pop() || '').slice(0, 255); } catch {}
+        }
+        images.push({
+            _id: cleanGatherText(raw?._id, 180) || new ObjectId().toString(),
+            dataUrl: source,
+            contentType: dataMatch?.[1] || cleanGatherText(raw?.contentType, 120) || 'image/jpeg',
+            size: dataMatch ? Buffer.byteLength(dataMatch[2], 'base64') : Math.max(Number(raw?.size) || 0, 0),
+            originalName
+        });
+    }
+    return images;
+}
+
+function normalizeGatherDraft(raw, fallbackSource) {
+    const source = GATHER_SOURCE_IDS.has(raw?.source) ? raw.source : fallbackSource;
+    const lat = Number(raw?.lat);
+    const lng = Number(raw?.lng);
+    const draft = {
+        source,
+        externalId: cleanGatherText(raw?.externalId || raw?.id, 180),
+        title: cleanGatherText(raw?.title, 180),
+        description: cleanGatherDescription(raw?.description),
+        category: cleanGatherText(raw?.category, 120),
+        link: cleanGatherLink(raw?.link),
+        startDate: cleanGatherDate(raw?.startDate || raw?.lifetime?.start),
+        endDate: cleanGatherDate(raw?.endDate || raw?.lifetime?.end),
+        lat: Number.isFinite(lat) && lat >= -90 && lat <= 90 ? lat : null,
+        lng: Number.isFinite(lng) && lng >= -180 && lng <= 180 ? lng : null,
+        images: normalizeGatherImages(raw?.images || raw?.imageUrls || []),
+        sourceMeta: raw?.sourceMeta && typeof raw.sourceMeta === 'object' ? raw.sourceMeta : {}
+    };
+    if (draft.startDate && draft.endDate && draft.endDate < draft.startDate) {
+        draft.endDate = '';
+    }
+    draft.missingFields = [
+        ['title', draft.title],
+        ['description', draft.description],
+        ['category', draft.category],
+        ['link', draft.link],
+        ['startDate', draft.startDate],
+        ['endDate', draft.endDate],
+        ['coordinates', Number.isFinite(draft.lat) && Number.isFinite(draft.lng)]
+    ].filter((entry) => !entry[1]).map((entry) => entry[0]);
+    return draft;
+}
+
+function serializeGatherRun(run) {
+    if (!run) return null;
+    return {
+        id: run._id?.toString(),
+        source: run.source,
+        status: run.status,
+        apifyRunId: run.apifyRunId,
+        itemCount: Number(run.itemCount || 0),
+        draftCount: Number(run.draftCount || 0),
+        excludedItemCount: Number(run.excludedItemCount || 0),
+        duplicateCount: Number(run.duplicateCount || 0),
+        invalidCount: Number(run.invalidCount || 0),
+        error: run.error || '',
+        createdAt: run.createdAt,
+        finishedAt: run.finishedAt || null
+    };
+}
+
+function serializeGatherDraft(draft) {
+    if (!draft) return null;
+    return {
+        id: draft._id?.toString(),
+        source: draft.source,
+        externalId: draft.externalId || '',
+        title: draft.title || '',
+        description: cleanGatherDescription(draft.description),
+        category: draft.category || '',
+        link: draft.link || '',
+        startDate: draft.startDate || '',
+        endDate: draft.endDate || '',
+        lat: draft.lat,
+        lng: draft.lng,
+        missingFields: Array.isArray(draft.missingFields) ? draft.missingFields : [],
+        status: draft.status || 'draft',
+        images: Array.isArray(draft.images) ? draft.images : [],
+        imageCount: Array.isArray(draft.images) ? draft.images.length : 0,
+        createdAt: draft.createdAt,
+        updatedAt: draft.updatedAt,
+        publishedPinId: draft.publishedPinId?.toString() || ''
+    };
+}
+
+async function loadGatherExclusions(database, source) {
+    const maxRecords = 6000;
+    const [drafts, pins] = await Promise.all([
+        database.collection('gather_pin_drafts').find(
+            { source, status: { $in: ['draft', 'published'] } },
+            { projection: { externalId: 1, link: 1, description: 1, images: 1 } }
+        ).sort({ createdAt: -1 }).limit(maxRecords).toArray(),
+        database.collection('pins').find(
+            { 'gatheredFrom.source': source },
+            { projection: { 'gatheredFrom.externalId': 1, link: 1 } }
+        ).sort({ createdAt: -1 }).limit(maxRecords).toArray()
+    ]);
+    const externalIds = new Set();
+    const links = new Set();
+    const add = (externalId, link) => {
+        const cleanId = cleanGatherText(externalId, 180);
+        if (cleanId) {
+            externalIds.add(cleanId);
+            return;
+        }
+        const cleanLink = cleanGatherLink(link);
+        if (cleanLink) links.add(cleanLink);
+    };
+    drafts.forEach((draft) => {
+        const descriptionNeedsCleaning = /<[^>]+>|&(?:amp|quot|apos|lt|gt|nbsp|mdash|ndash|lsquo|rsquo|ldquo|rdquo|hellip)/i.test(draft.description || '');
+        if (!descriptionNeedsCleaning) add(draft.externalId, draft.link);
+    });
+    pins.forEach((pin) => add(pin.gatheredFrom?.externalId, pin.link));
+    return {
+        excludeExternalIds: [...externalIds],
+        excludeLinks: [...links]
+    };
+}
+
+async function importGatherRunDataset(database, runDoc, apifyRun) {
+    const runs = database.collection('gather_runs');
+    const lock = await runs.findOneAndUpdate(
+        { _id: runDoc._id, importState: { $ne: 'complete' }, importing: { $ne: true } },
+        { $set: { importing: true, updatedAt: new Date() } },
+        { returnDocument: 'after' }
+    );
+    if (!lock) return runs.findOne({ _id: runDoc._id });
+
+    try {
+        const datasetId = apifyRun.defaultDatasetId;
+        if (!datasetId) throw new Error('Dataset hasil scraper tidak ditemukan.');
+        const response = await axios.get(`${APIFY_API_BASE}/datasets/${encodeURIComponent(datasetId)}/items`, {
+            headers: gatherApifyHeaders(),
+            params: { clean: 1, format: 'json' },
+            timeout: 45000
+        });
+        const items = Array.isArray(response.data) ? response.data : [];
+        const draftsCollection = database.collection('gather_pin_drafts');
+        const normalizedItems = items.map((item) => normalizeGatherDraft(item, runDoc.source));
+        const links = normalizedItems.map((item) => item.link).filter(Boolean);
+        const externalIds = normalizedItems.map((item) => item.externalId).filter(Boolean);
+        const duplicateQueries = [];
+        if (externalIds.length) duplicateQueries.push({ 'gatheredFrom.source': runDoc.source, 'gatheredFrom.externalId': { $in: externalIds } });
+        if (links.length) duplicateQueries.push({ link: { $in: links }, 'gatheredFrom.source': { $ne: runDoc.source } });
+        const draftQueries = [];
+        if (externalIds.length) draftQueries.push({ source: runDoc.source, externalId: { $in: externalIds } });
+        if (links.length) draftQueries.push({ link: { $in: links }, source: { $ne: runDoc.source } });
+        const [existingPins, existingDrafts] = await Promise.all([
+            duplicateQueries.length ? database.collection('pins').find({ $or: duplicateQueries }, { projection: { link: 1, title: 1, lat: 1, lng: 1, gatheredFrom: 1 } }).toArray() : [],
+            draftQueries.length ? draftsCollection.find({ $and: [{ status: { $in: ['draft', 'published'] } }, { $or: draftQueries }] }, { projection: { source: 1, externalId: 1, link: 1, title: 1, description: 1, lat: 1, lng: 1, images: 1, status: 1 } }).toArray() : []
+        ]);
+        const knownKeys = new Set();
+        existingPins.forEach((entry) => knownKeys.add(getGatherItemKey({
+            source: entry.gatheredFrom?.source || runDoc.source,
+            externalId: entry.gatheredFrom?.externalId || '',
+            link: entry.link,
+            title: entry.title,
+            lat: entry.lat,
+            lng: entry.lng
+        })));
+        const existingDraftByKey = new Map();
+        existingDrafts.forEach((entry) => {
+            const key = getGatherItemKey(entry);
+            knownKeys.add(key);
+            existingDraftByKey.set(key, entry);
+        });
+        const now = new Date();
+        const documents = [];
+        let duplicateCount = 0;
+        let invalidCount = 0;
+        for (const normalized of normalizedItems) {
+            const itemKey = getGatherItemKey(normalized);
+            if (knownKeys.has(itemKey)) {
+                const existingDraft = existingDraftByKey.get(itemKey);
+                if (existingDraft?.status === 'draft') {
+                    const refresh = {};
+                    if (!existingDraft.images?.length && normalized.images.length) refresh.images = normalized.images;
+                    if (normalized.description && cleanGatherDescription(existingDraft.description) !== existingDraft.description) {
+                        refresh.description = normalized.description;
+                    }
+                    if (Object.keys(refresh).length) {
+                        refresh.updatedAt = now;
+                        await draftsCollection.updateOne(
+                            { _id: existingDraft._id, status: 'draft' },
+                            { $set: refresh }
+                        );
+                    }
+                }
+                duplicateCount += 1;
+                continue;
+            }
+            knownKeys.add(itemKey);
+            if (normalized.missingFields.length) invalidCount += 1;
+            documents.push({
+                ...normalized,
+                status: 'draft',
+                runId: runDoc._id,
+                apifyRunId: runDoc.apifyRunId,
+                createdBy: runDoc.createdBy,
+                createdAt: now,
+                updatedAt: now
+            });
+        }
+        if (documents.length) await draftsCollection.insertMany(documents);
+        await runs.updateOne(
+            { _id: runDoc._id },
+            {
+                $set: {
+                    status: 'SUCCEEDED',
+                    importState: 'complete',
+                    importing: false,
+                    itemCount: items.length,
+                    draftCount: documents.length,
+                    duplicateCount,
+                    invalidCount,
+                    finishedAt: new Date(apifyRun.finishedAt || Date.now()),
+                    updatedAt: new Date()
+                }
+            }
+        );
+    } catch (error) {
+        await runs.updateOne(
+            { _id: runDoc._id },
+            { $set: { importing: false, error: error.message || 'Gagal mengimpor hasil scraper.', updatedAt: new Date() } }
+        );
+        throw error;
+    }
+    return runs.findOne({ _id: runDoc._id });
+}
+
+router.get('/admin/gather/sources', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    res.json({
+        configured: Boolean(APIFY_API_TOKEN && getGatherActorId()),
+        sources: GATHER_SOURCES
+    });
+});
+
+router.post('/admin/gather/runs', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    if (!requireGatherConfiguration(res)) return;
+    const source = cleanGatherText(req.body?.source, 40);
+    if (!GATHER_SOURCE_IDS.has(source)) return res.status(400).json({ message: 'Sumber scraper tidak dikenal.' });
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 50, 1), 500);
+    try {
+        const database = await connectToDatabase();
+        const exclusions = await loadGatherExclusions(database, source);
+        const actorId = encodeURIComponent(getGatherActorId());
+        const callbackUrl = cleanGatherText(req.body?.callbackUrl, 2048);
+        const response = await axios.post(
+            `${APIFY_API_BASE}/acts/${actorId}/runs`,
+            { source, limit, callbackUrl, ...exclusions },
+            { headers: gatherApifyHeaders(), timeout: 30000 }
+        );
+        const apifyRun = response.data?.data;
+        if (!apifyRun?.id) throw new Error('Apify tidak mengembalikan ID proses.');
+        const now = new Date();
+        const document = {
+            source,
+            status: apifyRun.status || 'READY',
+            apifyRunId: apifyRun.id,
+            defaultDatasetId: apifyRun.defaultDatasetId || '',
+            importState: 'pending',
+            importing: false,
+            itemCount: 0,
+            draftCount: 0,
+            duplicateCount: 0,
+            invalidCount: 0,
+            excludedItemCount: exclusions.excludeExternalIds.length + exclusions.excludeLinks.length,
+            createdBy: resident._id,
+            createdAt: now,
+            updatedAt: now
+        };
+        const result = await database.collection('gather_runs').insertOne(document);
+        document._id = result.insertedId;
+        res.status(202).json({ run: serializeGatherRun(document) });
+    } catch (error) {
+        console.error('Failed to start Gather Pins actor', error.response?.data || error);
+        res.status(502).json({ message: error.response?.data?.error?.message || error.message || 'Gagal memulai scraper eksternal.' });
+    }
+});
+
+router.get('/admin/gather/runs/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'ID proses tidak valid.' });
+    try {
+        const database = await connectToDatabase();
+        let run = await database.collection('gather_runs').findOne({ _id: new ObjectId(req.params.id) });
+        if (!run) return res.status(404).json({ message: 'Proses scraper tidak ditemukan.' });
+        if (!GATHER_TERMINAL_STATUSES.has(run.status) || (run.status === 'SUCCEEDED' && run.importState !== 'complete')) {
+            if (!requireGatherConfiguration(res)) return;
+            const response = await axios.get(`${APIFY_API_BASE}/actor-runs/${encodeURIComponent(run.apifyRunId)}`, {
+                headers: gatherApifyHeaders(),
+                timeout: 20000
+            });
+            const apifyRun = response.data?.data || {};
+            if (apifyRun.status === 'SUCCEEDED') {
+                run = await importGatherRunDataset(database, run, apifyRun);
+            } else {
+                const nextStatus = apifyRun.status || run.status;
+                const update = { status: nextStatus, updatedAt: new Date() };
+                if (GATHER_TERMINAL_STATUSES.has(nextStatus)) {
+                    update.finishedAt = new Date(apifyRun.finishedAt || Date.now());
+                    update.error = apifyRun.statusMessage || `Scraper berhenti dengan status ${nextStatus}.`;
+                }
+                await database.collection('gather_runs').updateOne({ _id: run._id }, { $set: update });
+                run = { ...run, ...update };
+            }
+        }
+        res.json({ run: serializeGatherRun(run) });
+    } catch (error) {
+        console.error('Failed to refresh Gather Pins run', error.response?.data || error);
+        res.status(502).json({ message: error.message || 'Gagal memeriksa status scraper.' });
+    }
+});
+
+router.get('/admin/gather/drafts', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    const query = { status: req.query.status === 'published' ? 'published' : 'draft' };
+    if (GATHER_SOURCE_IDS.has(req.query.source)) query.source = req.query.source;
+    const search = cleanGatherText(req.query.q, 120);
+    if (search) query.$or = [
+        { title: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { category: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }
+    ];
+    const database = await connectToDatabase();
+    const drafts = await database.collection('gather_pin_drafts').find(query).sort({ createdAt: -1 }).limit(500).toArray();
+    res.json({ drafts: drafts.map(serializeGatherDraft) });
+});
+
+router.put('/admin/gather/drafts/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'ID draft tidak valid.' });
+    const database = await connectToDatabase();
+    const drafts = database.collection('gather_pin_drafts');
+    const existing = await drafts.findOne({ _id: new ObjectId(req.params.id), status: 'draft' });
+    if (!existing) return res.status(404).json({ message: 'Draft tidak ditemukan.' });
+    const imageError = validateGatherImagePayload(req.body?.images);
+    if (imageError) return res.status(400).json({ message: imageError });
+    const normalized = normalizeGatherDraft({ ...existing, ...req.body, source: existing.source }, existing.source);
+    let images = existing.images || [];
+    if (Array.isArray(req.body?.images)) images = normalizeIncomingPinImages(existing.images || [], req.body.images);
+    if (req.body?.images === null) images = [];
+    await drafts.updateOne(
+        { _id: existing._id },
+        { $set: { ...normalized, images, updatedAt: new Date(), updatedBy: resident._id } }
+    );
+    res.json({ draft: serializeGatherDraft(await drafts.findOne({ _id: existing._id })) });
+});
+
+router.delete('/admin/gather/drafts/:id', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'ID draft tidak valid.' });
+    const database = await connectToDatabase();
+    const result = await database.collection('gather_pin_drafts').deleteOne({ _id: new ObjectId(req.params.id), status: 'draft' });
+    if (!result.deletedCount) return res.status(404).json({ message: 'Draft tidak ditemukan.' });
+    res.json({ ok: true });
+});
+
+router.post('/admin/gather/drafts/:id/publish', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'ID draft tidak valid.' });
+    const database = await connectToDatabase();
+    const drafts = database.collection('gather_pin_drafts');
+    const draft = await drafts.findOne({ _id: new ObjectId(req.params.id), status: 'draft' });
+    if (!draft) return res.status(404).json({ message: 'Draft tidak ditemukan.' });
+    const normalized = normalizeGatherDraft(draft, draft.source);
+    if (normalized.missingFields.length) {
+        return res.status(400).json({ message: `Lengkapi field wajib: ${normalized.missingFields.join(', ')}.` });
+    }
+    const duplicateQuery = draft.externalId
+        ? { 'gatheredFrom.source': draft.source, 'gatheredFrom.externalId': draft.externalId }
+        : { link: normalized.link, lat: normalized.lat, lng: normalized.lng };
+    const duplicate = await database.collection('pins').findOne(duplicateQuery, { projection: { _id: 1 } });
+    if (duplicate) return res.status(409).json({ message: 'Pin dengan link yang sama sudah dipublikasikan.' });
+    const now = new Date();
+    const pin = {
+        title: normalized.title,
+        description: normalized.description,
+        category: normalized.category,
+        link: normalized.link,
+        lat: normalized.lat,
+        lng: normalized.lng,
+        lifetime: { type: 'date', start: normalized.startDate, end: normalized.endDate },
+        expiresAt: computeExpiresAtFromLifetime({ type: 'date', start: normalized.startDate, end: normalized.endDate }),
+        images: Array.isArray(draft.images) ? draft.images : [],
+        imageCount: Array.isArray(draft.images) ? draft.images.length : 0,
+        createdAt: now,
+        reporter: `gather:${draft.source}`,
+        upvotes: 0,
+        downvotes: 0,
+        upvoterIps: [],
+        downvoterIps: [],
+        gatheredFrom: { source: draft.source, externalId: draft.externalId || '', runId: draft.runId }
+    };
+    const location = await resolveProvinceCityFromCoords(pin.lat, pin.lng);
+    if (location) {
+        pin.province = location.province;
+        pin.city = location.city;
+    }
+    const result = await database.collection('pins').insertOne(pin);
+    await drafts.updateOne(
+        { _id: draft._id },
+        { $set: { status: 'published', publishedPinId: result.insertedId, publishedAt: now, updatedAt: now, publishedBy: resident._id } }
+    );
+    res.status(201).json({ ok: true, pinId: result.insertedId.toString() });
+});
+
+router.get('/admin/gather/runs', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) return res.status(403).json({ message: 'Akses Gather Pins ditolak.' });
+    const database = await connectToDatabase();
+    const runs = await database.collection('gather_runs').find({}).sort({ createdAt: -1 }).limit(12).toArray();
+    res.json({ runs: runs.map(serializeGatherRun) });
 });
 
 router.get('/admin/mass-promotions', async (req, res) => {

@@ -248,6 +248,7 @@
         els.categoriesSaveBtn = document.getElementById('categories-save-btn');
         els.categoriesResetBtn = document.getElementById('categories-reset-btn');
         els.massContent = document.getElementById('admin-mass-pane');
+        els.gatherContent = document.getElementById('admin-gather-pane');
         els.massMessage = document.getElementById('mass-message');
         els.massSearchInput = document.getElementById('mass-search-input');
         els.massSearchBtn = document.getElementById('mass-search-btn');
@@ -429,7 +430,7 @@
             const adminOnly = btn.dataset.adminOnly === 'true';
             const base = {
                 admin: true,
-                pin_manager: !adminOnly && (tabId === 'pins' || tabId === 'mass'),
+                pin_manager: !adminOnly && (tabId === 'pins' || tabId === 'gather' || tabId === 'mass'),
                 resident: false
             };
             if (adminOnly) {
@@ -2537,6 +2538,9 @@
         if (els.massContent) {
             els.massContent.classList.toggle('hidden', nextTab !== 'mass');
         }
+        if (els.gatherContent) {
+            els.gatherContent.classList.toggle('hidden', nextTab !== 'gather');
+        }
         if (els.usersContent) {
             els.usersContent.classList.toggle('hidden', nextTab !== 'users');
         }
@@ -2567,6 +2571,9 @@
             if (!state.massGroups.loaded) {
                 loadMassGroups();
             }
+        }
+        if (nextTab === 'gather') {
+            document.dispatchEvent(new CustomEvent('ayanaon:gather-visible'));
         }
         if (nextTab === 'tabs') {
             resetTabVisibilityDraft();
