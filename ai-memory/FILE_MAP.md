@@ -10,6 +10,7 @@
 - `.dev.vars.example` - redacted local Cloudflare runtime-variable template
 - `tests/deployment-adapters.test.js` - provider-adapter exports, Google browser-key routing, and Cloudflare/Netlify client-IP precedence tests
 - `tests/request-scope.test.js` - concurrent isolation, nested reuse, and error-path disposal regression tests
+- `tests/google-geocoding.test.js` - server-key Google Geocoding request, zero-results handling, and missing-key regression tests
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
@@ -32,7 +33,7 @@
 ### Admin
 - `admin.html` - admin dashboard page
 - `admin.js` - admin logic (manage pins, SEO, categories, brands, areas, mass promos, analytics)
-- `admin-gather.js` - Gather Pins source runs, polling, category-backed draft editing, searchable map coordinates, automatic/manual images, and publication UI
+- `admin-gather.js` - Gather Pins source runs, polling, category-backed draft editing, authenticated server-proxied address search, map coordinates, automatic/manual images, and publication UI
 - `admin.css` - admin styles
 
 ### External Gather Actor (`gather-actor/`)

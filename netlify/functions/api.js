@@ -6822,6 +6822,62 @@ const GATHER_SOURCE_IDS = new Set(GATHER_SOURCES.map((source) => source.id));
 const APIFY_API_BASE = 'https://api.apify.com/v2';
 const GATHER_TERMINAL_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
 
+function createGeocodingError(message, statusCode, code) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    error.code = code;
+    return error;
+}
+
+async function geocodeAddressWithGoogle(address, options = {}) {
+    const normalizedAddress = cleanGatherText(address, 250);
+    if (!normalizedAddress) {
+        throw createGeocodingError('Masukkan nama tempat atau alamat terlebih dahulu.', 400, 'INVALID_ADDRESS');
+    }
+
+    const hasApiKeyOverride = Object.prototype.hasOwnProperty.call(options, 'apiKey');
+    const apiKey = hasApiKeyOverride ? options.apiKey : GOOGLE_GEOCODING_API_KEY;
+    if (!apiKey) {
+        throw createGeocodingError('Google Geocoding belum dikonfigurasi.', 503, 'NOT_CONFIGURED');
+    }
+
+    const httpClient = options.httpClient || axios;
+    const response = await httpClient.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: {
+            address: normalizedAddress,
+            region: 'id',
+            language: 'id',
+            key: apiKey
+        },
+        timeout: 10000
+    });
+    const payload = response.data || {};
+    const googleStatus = String(payload.status || '').toUpperCase();
+    if (googleStatus === 'ZERO_RESULTS') {
+        throw createGeocodingError('Lokasi tidak ditemukan. Coba alamat yang lebih lengkap.', 404, googleStatus);
+    }
+    if (googleStatus === 'OVER_QUERY_LIMIT') {
+        throw createGeocodingError('Kuota pencarian lokasi sedang habis. Coba lagi nanti.', 503, googleStatus);
+    }
+    if (googleStatus !== 'OK' || !payload.results?.[0]) {
+        throw createGeocodingError('Google Geocoding menolak atau gagal memproses pencarian.', 502, googleStatus || 'UNKNOWN_ERROR');
+    }
+
+    const firstResult = payload.results[0];
+    const lat = Number(firstResult.geometry?.location?.lat);
+    const lng = Number(firstResult.geometry?.location?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw createGeocodingError('Google Geocoding mengembalikan koordinat yang tidak valid.', 502, 'INVALID_RESULT');
+    }
+
+    return {
+        lat,
+        lng,
+        formattedAddress: cleanGatherText(firstResult.formatted_address || normalizedAddress, 500),
+        placeId: cleanGatherText(firstResult.place_id || '', 250)
+    };
+}
+
 function getGatherActorId() {
     return String(APIFY_GATHER_ACTOR_ID || '').trim().replace('/', '~');
 }
@@ -7181,6 +7237,29 @@ router.get('/admin/gather/sources', async (req, res) => {
         configured: Boolean(APIFY_API_TOKEN && getGatherActorId()),
         sources: GATHER_SOURCES
     });
+});
+
+router.get('/admin/gather/geocode', async (req, res) => {
+    const resident = await authenticateResidentRequest(req, res);
+    if (!resident) return;
+    if (!canManagePinsResident(resident)) {
+        return res.status(403).json({ message: 'Akses pencarian lokasi ditolak.' });
+    }
+
+    try {
+        const result = await geocodeAddressWithGoogle(req.query?.query);
+        res.json({ result });
+    } catch (error) {
+        const statusCode = Number(error?.statusCode);
+        if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
+            return res.status(statusCode).json({ message: error.message });
+        }
+        console.error('Gather location geocoding failed', {
+            message: error?.message || 'Unknown error',
+            googleStatus: error?.response?.data?.status || ''
+        });
+        res.status(502).json({ message: 'Pencarian lokasi sedang tidak tersedia.' });
+    }
 });
 
 router.post('/admin/gather/runs', async (req, res) => {
@@ -8711,6 +8790,7 @@ app.use('/api', router);
 
 module.exports.app = app;
 module.exports.runWithDatabaseRequestContext = runWithDatabaseRequestContext;
+module.exports.geocodeAddressWithGoogle = geocodeAddressWithGoogle;
 
 const netlifyHandler = serverless(app);
 module.exports.handler = (...args) => (

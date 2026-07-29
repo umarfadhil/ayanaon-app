@@ -18,7 +18,6 @@
     let googleMapsPromise = null;
     let locationMap = null;
     let locationMarker = null;
-    let locationGeocoder = null;
 
     function cacheElements() {
         const ids = [
@@ -179,7 +178,6 @@
                     mapTypeControl: false,
                     fullscreenControl: false
                 });
-                locationGeocoder = new maps.Geocoder();
                 locationMarker = new maps.Marker({ map: locationMap, draggable: true, visible: false });
                 locationMap.addListener('click', (event) => applyCoordinates(event.latLng.lat(), event.latLng.lng()));
                 locationMarker.addListener('dragend', (event) => applyCoordinates(event.latLng.lat(), event.latLng.lng()));
@@ -199,16 +197,10 @@
         if (!query) return showMessage('error', 'Masukkan nama tempat atau alamat terlebih dahulu.');
         try {
             await initializeLocationMap();
-            if (!locationGeocoder) throw new Error('Pencarian lokasi belum siap.');
-            const results = await new Promise((resolve, reject) => {
-                locationGeocoder.geocode({ address: query, region: 'ID' }, (rows, status) => {
-                    if (status === 'OK' && rows?.[0]) resolve(rows);
-                    else reject(new Error('Lokasi tidak ditemukan. Coba alamat yang lebih lengkap.'));
-                });
-            });
-            const point = results[0].geometry.location;
-            applyCoordinates(point.lat(), point.lng());
-            showMessage('success', `Lokasi ditemukan: ${results[0].formatted_address || query}`);
+            const data = await api(`/api/admin/gather/geocode?query=${encodeURIComponent(query)}`);
+            const result = data?.result || {};
+            applyCoordinates(Number(result.lat), Number(result.lng));
+            showMessage('success', `Lokasi ditemukan: ${result.formattedAddress || query}`);
         } catch (error) {
             showMessage('error', error.message);
         }

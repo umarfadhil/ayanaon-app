@@ -474,3 +474,11 @@ Max 10 lines per task.
 - Global I/O objects/promises are forbidden. The existing `indexesEnsured` boolean may remain global because it is primitive readiness metadata; concurrent cold-start index attempts are idempotent and no database promise crosses requests.
 - Pre-deploy verification: current Workers types `5.20260729.1`, syntax checks, seven adapter/request-scope tests, Wrangler dry-run bundle (4,800.42 KiB / 963.14 KiB gzip), and three local concurrent waves (18 total calls across pins/count/features/live-sellers/resident-share/config) all passed with HTTP 200 JSON.
 - Production staging verification after Git build `d869c49` (Worker version 7): 30/30 concurrent API calls passed across five waves, each pins response returned 3,095 records, the browser logged `Pins synchronized` and rendered 582 visible `gmp-advanced-marker` elements, and observability returned zero error events for version `f6db24c8-fdb1-4f0c-a480-ca4280a0521d` during the test window.
+
+## Cloudflare staging acceptance checkpoint (2026-07-29)
+- Owner confirmed the complete temporary-pin workflow on `ayanaon.petalytix-id.workers.dev`: create with image, marker/popup display, reload persistence, search, detail/share page, admin edit, and delete all passed.
+- Owner confirmed Warga registration/login, session persistence, profile changes, saved-pin persistence, logout/login restoration, and location-sharing enable/disable all pass on the Worker.
+- Gerobak Online seller acceptance is intentionally skipped, not failed, because the feature is currently deactivated.
+- The Gather Pins/Apify run completed and produced a reviewable draft; its location search then exposed a browser-key `Geocoding Service` authorization failure.
+- Gather address search now uses authenticated `GET /api/admin/gather/geocode` with the server-only `GOOGLE_GEOCODING_API_KEY`; the browser key remains limited to map rendering. Deployment verification remains pending.
+- Next manual gate is completing Gather draft review/publish/delete after location search verification, before AyaKasir, SEO/PWA, and DNS tests.
