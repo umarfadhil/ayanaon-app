@@ -5,3 +5,10 @@ node_modules
 .vscode/mcp.json
 # Claude session artifacts (worktrees got committed as phantom submodules and broke Netlify's clone)
 .claude/
+
+# Cloudflare Wrangler local state and generated dry-run output
+.wrangler/
+.wrangler-dist/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

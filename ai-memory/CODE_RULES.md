@@ -5,7 +5,7 @@
 - **No frontend framework** - DOM manipulation with `document.getElementById` etc.
 - **Monolith backend** - everything in one `api.js` file with Express router
 - **Monolith frontend** - `app.js` is one large file with global variables
-- **Serverless** - runs as Netlify Functions via `serverless-http`
+- **Serverless** - the shared Express app runs through Netlify `serverless-http` and Cloudflare Workers `httpServerHandler` adapters during migration
 
 ## Language & Naming
 - UI text is in **Bahasa Indonesia** (Indonesian)
@@ -14,14 +14,14 @@
 - Collection/field names are in English
 
 ## Backend Patterns
-- `connectToDatabase()` - singleton MongoDB connection, called on cold start
+- `connectToDatabase()` - lazy singleton MongoDB connection created inside the first request; never open database sockets during Worker module initialization
 - Collection helpers: `getSellersCollection()`, `getResidentsCollection()`, `getSettingsCollection()`
 - Auth: JWT tokens verified inline per route (no middleware), `req.headers.authorization` Bearer token
 - Settings stored in `settings` collection with `{ key: string, value: any }` pattern
 - Photos stored as base64 data URIs in MongoDB documents directly
 - Mass promo image reads must tolerate legacy docs where `sharedImageCount` exists but `sharedImagesFromGroup` is missing; fallback to `massPromotionGroupId` before calling `resolveSharedImages()`
 - Mass promo pins share images via `sharedImagesFromGroup` referencing `massPromotionGroupId` — only the first pin in a group stores actual image data; resolved at read time by `resolveSharedImages()`
-- IP address used for anonymous voting and visitor tracking (`x-nf-client-connection-ip` header)
+- IP address used for anonymous voting and visitor tracking via `getClientIp(req)`: prefer `cf-connecting-ip`, then `x-nf-client-connection-ip`, then local `req.ip`
 - Merchant writes come ONLY from the AyaKasir partner API (Bearer `AYAKASIR_PARTNER_SECRET`, timing-safe compare); every payload field is re-sanitized server-side and `slug` is immutable after create (SEO permanence). Every merchant write must bust `sitemapCache`
 - Gather Pins browser work runs only in the separately deployed Apify Actor; Netlify starts/polls runs and persists normalized results. Never put Chromium/Playwright in the Netlify function.
 - Gather drafts require title, description, category, valid HTTP(S) link, start/end dates, and valid coordinates before publication; static location sources intentionally leave dates incomplete for human review.
@@ -43,9 +43,11 @@
 - Theme preference: `localStorage` key `ayanaon_theme`
 
 ## Deployment
-- `npm run dev` = `netlify dev` (local development)
-- Deploy by pushing to GitHub; Netlify auto-builds
-- No test suite (`npm test` exits with error)
+- `npm run dev` / `npm run dev:cloudflare` = Wrangler local Worker; `npm run dev:netlify` retains rollback-provider development
+- `npm run check:cloudflare` performs the Worker bundle dry run; `npm run deploy:cloudflare` deploys only after secrets and the Cloudflare project exist
+- Netlify remains production and auto-builds until explicit DNS cutover; do not remove its adapter/configuration early
+- `public/_redirects` must not contain Netlify function rewrites; keep those only in `netlify.toml` so Workers Static Assets fall through to Express
+- `npm run test:deployment` validates both provider exports, browser-key routing, and Cloudflare/Netlify IP precedence without MongoDB access; the legacy `npm test` placeholder remains
 - Service worker cache version must be bumped on each release
 
 ## Constraints

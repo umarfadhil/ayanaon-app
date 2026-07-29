@@ -1,13 +1,19 @@
 # File Map
 
 ## Root
-- `package.json` - deps: express, mongodb, serverless-http, bcryptjs, jsonwebtoken, axios, ws
-- `netlify.toml` - build config: functions from `netlify/functions/`, publish from `public/`
+- `package.json` - runtime deps plus Netlify CLI and Wrangler dual-provider development/deploy scripts
+- `netlify.toml` - Netlify rollback build config and all Netlify-only API/SEO rewrites
+- `wrangler.jsonc` - Cloudflare Worker entry, Node compatibility, static assets, observability, and unused MongoDB-native-module aliases
+- `src/worker.js` - Cloudflare `httpServerHandler` adapter over the shared Express app
+- `src/mongodb-optional-native-stub.js` - excludes unused Kerberos/client-encryption native add-ons from the Worker bundle
+- `.dev.vars.example` - redacted local Cloudflare runtime-variable template
+- `tests/deployment-adapters.test.js` - provider-adapter exports, Google browser-key routing, and Cloudflare/Netlify client-IP precedence tests
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
 - `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~8660+ lines)
-  - Express router mounted at `/api/*` via Netlify redirect
+  - Express router mounted at `/api/*`; exports both the shared `app` and the Netlify `handler`
+  - MongoDB client connects lazily in-request for Cloudflare socket compatibility
   - MongoDB connection + index setup
   - All REST endpoints (see API Routes below)
   - Server-rendered HTML for `/pin/:id`, `/toko/:slug`, sitemap, robots.txt
@@ -19,6 +25,7 @@
 - `index.html` - main page (map, pin list, forms, modals)
 - `app.js` - all map/pin/UI logic (large monolith)
 - `style.css` - all main styles
+- `_headers` - provider-compatible `no-cache` rule for the service worker; Netlify-only `_redirects` moved to `netlify.toml`
 
 ### Admin
 - `admin.html` - admin dashboard page
@@ -108,3 +115,6 @@
 ### SEO (server-rendered)
 - `GET /seo/sitemap` | `robots` (sitemap includes active `/toko/:slug` entries; cache busted on merchant writes)
 - `GET /pin/:id` - server-rendered pin detail page
+
+## Migration
+- `ai-memory/CLOUDFLARE_MIGRATION_STEP1.md` - redacted Step 1 infrastructure, security, DNS, environment, Atlas, Google Maps, cost, and rollback handoff for the Netlify-to-Cloudflare migration

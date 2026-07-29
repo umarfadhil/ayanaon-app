@@ -425,3 +425,43 @@ Max 10 lines per task.
 
 ### Learning
 - NEVER let `.claude/` into git: worktrees inside the repo = phantom submodules = broken deploy clones. The staged deletions ride the next commit — commit + push, then Netlify's clone succeeds
+
+## Cloudflare deployment migration assessment (2026-07-29)
+- Target Cloudflare Workers with Static Assets, not a new Pages project: AyaNaon is a full-stack Express app with static `public/` assets and dynamic API/SEO routes.
+- Migration is not configuration-only: replace `serverless-http` with Workers `httpServerHandler` under `nodejs_compat`, and remove the eager top-level MongoDB connection.
+- Keep MongoDB Atlas initially; Hyperdrive does not support MongoDB, so prove the native driver/TLS connection in a staging Worker before DNS cutover.
+- Replace every `x-nf-client-connection-ip` read with a centralized `cf-connecting-ip` helper (plus a local-development fallback) to preserve voting, reporting, and analytics behavior.
+- Remove the Netlify `public/_redirects` function rewrites; unmatched paths should reach Express while matching files are served by Workers Static Assets.
+- Use Cloudflare edge rules for Always Use HTTPS and apex-to-`www`; preserve `https://www.ayanaon.app` as the canonical host.
+- Workers Paid (minimum $5/month) is the safe starting tier because bcrypt, SSR, MongoDB, and large JSON photo handling can exceed the Free plan's 10 ms CPU limit.
+- Cut over only after staging route, auth, uploads, Apify, AyaKasir partner API, SEO routes, caching, PWA, and rollback tests pass; keep Netlify intact during observation.
+
+## Cloudflare migration Step 1 evidence audit (2026-07-29)
+- Netlify credit usage rose from 265 to 299 to 334 across the last three periods; the screenshot shows category trends but not exact per-category units or the plan allowance.
+- DNS evidence records apex/`www` Netlify targets, Google verification TXT, 3600-second TTL, and four `p05.nsone.net` authoritative nameservers.
+- DNSSEC status is still missing and must be captured at the domain registrar before nameserver migration.
+- The environment export is production-scoped but contains exposed credentials; rotate/revoke them and keep only a redacted name/scope inventory in migration documentation.
+- `JWT_SECRET` is absent, so production currently falls back to the hard-coded development secret; setting a strong value will invalidate existing JWT sessions.
+- `ABLY_API_KEY`, `DASHBOARD_PASSWORD`, and both `NETLIFY_DATABASE_URL*` names are not referenced by the AyaNaon repository; verify external consumers before removal.
+- The supplied Atlas table is Database Access (users/roles), not Network Access (IP access list); the actual CIDR/IP rules remain required.
+- The application Atlas user is over-privileged (`atlasAdmin` plus database read/write); plan a least-privilege replacement with only `readWrite@ayanaon-db`.
+
+## Cloudflare migration Step 1 completed (2026-07-29)
+- Netlify Free includes 300 credits; the latest 334-credit period exceeded the allowance by 34 credits (about 11.3%), with compute/bandwidth dominant visually.
+- The authoritative DNS export is complete: only apex and `www` Netlify targets plus the Google verification TXT; registrar is Hostinger.
+- Hostinger shows no configured DNSSEC/DS record, so DNSSEC is currently disabled and does not need removal before the nameserver switch.
+- All Netlify environment contexts/scopes/builds are accounted for; exposed credentials still require rotation before production cutover.
+- The Google key has redundant/invalid referrers (including an `ayanaop.app` typo) and access to 31 APIs; reduce it to required hosts/APIs and add Cloudflare staging/local Wrangler hosts.
+- Split browser Maps/Places access from server Geocoding into separate keys because HTTP-referrer restrictions do not protect or reliably authorize Worker-side requests.
+- Atlas Network Access contains active `0.0.0.0/0`, so a staging Worker can reach Atlas, but the two `/32` entries are redundant while allow-all remains.
+- Step 2 may begin; retain allow-all temporarily for compatibility, paired with rotated credentials and a least-privilege `readWrite@ayanaon-db` application user.
+
+## Cloudflare migration Step 2 local implementation (2026-07-29)
+- Added the redacted future handoff at `ai-memory/CLOUDFLARE_MIGRATION_STEP1.md`; it contains no credential values.
+- `api.js` now exports the shared Express app plus the unchanged Netlify handler; the existing WhatsApp-only merchant edit remains intact.
+- MongoDB creation/connection is lazy, client IP lookup supports Cloudflare/Netlify/local, and browser/server Google keys are split with legacy fallback.
+- Added `src/worker.js`, `wrangler.jsonc`, required-secret validation, Static Assets, observability, and redacted `.dev.vars.example`.
+- Wrangler aliases only unused MongoDB Kerberos/client-encryption native add-ons; dry bundle succeeds at 962.56 KiB gzip with 22 assets.
+- Netlify-only rewrites moved from `public/_redirects` to `netlify.toml`; `public/_headers` keeps the service worker at `no-cache` on both providers.
+- Four deployment-adapter tests pass; Wrangler runtime smoke tests pass; Netlify 35.1.6 offline build still bundles `api.js` successfully.
+- Remote Worker/Atlas validation is pending Cloudflare project secrets; npm audit also reports 5 high and 3 moderate production-tree advisories for a separate pre-cutover dependency update.

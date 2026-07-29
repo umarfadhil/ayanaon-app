@@ -13,23 +13,37 @@ app.use(bodyParser.json({ limit: '20mb' }));
 
 const {
     MONGODB_URI,
-    GOOGLE_MAPS_API_KEY,
+    GOOGLE_MAPS_API_KEY = '',
+    GOOGLE_MAPS_BROWSER_API_KEY = GOOGLE_MAPS_API_KEY,
+    GOOGLE_GEOCODING_API_KEY = GOOGLE_MAPS_API_KEY,
     JWT_SECRET = 'ayanaon-dev-secret',
     DASHBOARD_PASSWORD = process.env.MONGODB_DASHBOARD_PASSWORD || '',
     APIFY_API_TOKEN = '',
     APIFY_GATHER_ACTOR_ID = ''
 } = process.env;
 
-// Establish the database connection outside of the handler
-const client = new MongoClient(MONGODB_URI);
+// Cloudflare Workers cannot open database sockets during module initialization.
+// Create the client lazily inside the first request and reuse it while the runtime is warm.
+let client;
 let db;
 let indexesEnsured = false;
+
+function getMongoClient() {
+    if (!MONGODB_URI) {
+        throw new Error('MONGODB_URI is not configured');
+    }
+    if (!client) {
+        client = new MongoClient(MONGODB_URI);
+    }
+    return client;
+}
 
 async function connectToDatabase() {
     if (db) return db;
     try {
-        await client.connect();
-        db = client.db('ayanaon-db');
+        const mongoClient = getMongoClient();
+        await mongoClient.connect();
+        db = mongoClient.db('ayanaon-db');
         await ensureIndexes(db);
         return db;
     } catch (error) {
@@ -38,14 +52,19 @@ async function connectToDatabase() {
     }
 }
 
-// Immediately connect to the database when the function is initialized
-connectToDatabase();
-
 function isTruthy(value) {
     if (value === undefined || value === null) return false;
     if (typeof value === 'boolean') return value;
     const normalized = String(value).trim().toLowerCase();
     return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function getClientIp(req) {
+    const cloudflareIp = String(req?.headers?.['cf-connecting-ip'] || '').trim();
+    if (cloudflareIp) return cloudflareIp;
+    const netlifyIp = String(req?.headers?.['x-nf-client-connection-ip'] || '').trim();
+    if (netlifyIp) return netlifyIp;
+    return String(req?.ip || '').trim();
 }
 
 function computeImageCount(doc) {
@@ -408,11 +427,11 @@ async function reverseGeocodeCity(lat, lng) {
     if (geocodeCityCache.has(key)) {
         return geocodeCityCache.get(key);
     }
-    const useGoogle = Boolean(GOOGLE_MAPS_API_KEY);
+    const useGoogle = Boolean(GOOGLE_GEOCODING_API_KEY);
     try {
         if (useGoogle) {
             const response = await axios.get(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_GEOCODING_API_KEY}`
             );
             const results = response.data?.results || [];
             if (results.length) {
@@ -472,13 +491,13 @@ async function reverseGeocodeProvinceCity(lat, lng) {
     if (geocodeProvinceCityCache.has(key)) {
         return geocodeProvinceCityCache.get(key);
     }
-    const useGoogle = Boolean(GOOGLE_MAPS_API_KEY);
+    const useGoogle = Boolean(GOOGLE_GEOCODING_API_KEY);
     try {
         let rawProvince = '';
         let rawCity = '';
         if (useGoogle) {
             const response = await axios.get(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_GEOCODING_API_KEY}`
             );
             const results = response.data?.results || [];
             if (results.length) {
@@ -4772,7 +4791,7 @@ router.get('/live-sellers', async (req, res) => {
     try {
         const database = await connectToDatabase();
         const cutoff = new Date(Date.now() - 3 * 60 * 1000);
-        const requesterIp = req.headers['x-nf-client-connection-ip'] || '';
+        const requesterIp = getClientIp(req) || '';
         const sellers = await database
             .collection('sellers')
             .find(
@@ -4825,7 +4844,7 @@ router.post('/live-sellers/:id/community-verify', async (req, res) => {
         if (!ObjectId.isValid(id)) {
             return res.status(400).json({ message: 'ID penjual tidak valid.' });
         }
-        const voterIp = req.headers['x-nf-client-connection-ip'];
+        const voterIp = getClientIp(req);
         if (!voterIp) {
             return res.status(400).json({ message: 'Tidak dapat memverifikasi tanpa identitas pengunjung.' });
         }
@@ -5106,7 +5125,7 @@ function normalizeIncomingPinImages(currentImages, incomingImages) {
 
 router.get('/pins', async (req, res) => {
     const db = await connectToDatabase();
-    const ip = req.headers['x-nf-client-connection-ip'];
+    const ip = getClientIp(req);
     await recordIpAddress(ip);
 
     const { city } = req.query;
@@ -5815,9 +5834,17 @@ function sanitizeMerchantPayload(body) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
         return { error: 'lat/lng wajib berupa koordinat yang valid.' };
     }
+    // orderUrl is OPTIONAL. When present it must be a valid AyaKasir Pesanan
+    // Online link (the /toko page renders a "Pesan Online" CTA). When absent
+    // (e.g. a free-plan store without Pesanan Online) the store is WhatsApp-only,
+    // so a whatsapp number is required instead.
     const orderUrl = cleanMerchantHttpsUrl(payload.orderUrl, 300);
-    if (!orderUrl || !orderUrl.startsWith(getAyakasirOrderUrlPrefix())) {
-        return { error: 'orderUrl wajib berupa tautan Pesanan Online AyaKasir yang valid.' };
+    if (orderUrl && !orderUrl.startsWith(getAyakasirOrderUrlPrefix())) {
+        return { error: 'orderUrl harus berupa tautan Pesanan Online AyaKasir yang valid.' };
+    }
+    const whatsapp = cleanMerchantWhatsapp(payload.whatsapp);
+    if (!orderUrl && !whatsapp) {
+        return { error: 'orderUrl atau whatsapp wajib diisi agar toko bisa menerima pesanan.' };
     }
     const status = payload.status === 'hidden' ? 'hidden' : 'active';
     const photos = Array.isArray(payload.photos)
@@ -5832,10 +5859,10 @@ function sanitizeMerchantPayload(body) {
             address: cleanMerchantText(payload.address, 300),
             city: cleanMerchantText(payload.city, 120),
             province: cleanMerchantText(payload.province, 120),
-            whatsapp: cleanMerchantWhatsapp(payload.whatsapp),
+            whatsapp,
             lat,
             lng,
-            orderUrl,
+            orderUrl: orderUrl || null,
             logoUrl: cleanMerchantHttpsUrl(payload.logoUrl) || null,
             menuLayout: MERCHANT_MENU_LAYOUTS.includes(payload.menuLayout) ? payload.menuLayout : 'LIST',
             photos,
@@ -7670,11 +7697,11 @@ router.get('/unique-ips', async (req, res) => {
 });
 
 router.get('/config', (req, res) => {
-    res.json({ googleMapsApiKey: GOOGLE_MAPS_API_KEY });
+    res.json({ googleMapsApiKey: GOOGLE_MAPS_BROWSER_API_KEY });
 });
 
 router.get('/ip', (req, res) => {
-    const ip = req.headers['x-nf-client-connection-ip'];
+    const ip = getClientIp(req);
     res.json({ ip: ip });
 });
 
@@ -7711,7 +7738,7 @@ router.post('/analytics/track', async (req, res) => {
             city,
             country
         } = req.body || {};
-        const ip = req.headers['x-nf-client-connection-ip'] || '';
+        const ip = getClientIp(req) || '';
         const userAgent = req.headers['user-agent'] || '';
         const doc = {
             eventType: String(eventType || 'pageview'),
@@ -8066,7 +8093,7 @@ router.post('/pins', async (req, res) => {
         pin.lat = lat;
         pin.lng = lng;
         pin.createdAt = new Date();
-        pin.reporter = req.headers['x-nf-client-connection-ip'];
+        pin.reporter = getClientIp(req);
         pin.upvotes = 0;
         pin.downvotes = 0;
         pin.upvoterIps = [];
@@ -8124,7 +8151,7 @@ router.post('/pins', async (req, res) => {
 router.put('/pins/:id', async (req, res) => {
     const db = await connectToDatabase();
     const { id } = req.params;
-    const ip = req.headers['x-nf-client-connection-ip'];
+    const ip = getClientIp(req);
     const authResident = await authenticateResidentRequest(req, res, { optional: true });
     if (!authResident && req.headers.authorization) {
         // Sudah diberi respons oleh authenticateResidentRequest ketika token tidak valid
@@ -8198,7 +8225,7 @@ router.put('/pins/:id', async (req, res) => {
 router.delete('/pins/:id', async (req, res) => {
     const db = await connectToDatabase();
     const { id } = req.params;
-    const ip = req.headers['x-nf-client-connection-ip'];
+    const ip = getClientIp(req);
     const authResident = await authenticateResidentRequest(req, res, { optional: true });
     if (!authResident && req.headers.authorization) {
         return;
@@ -8219,7 +8246,7 @@ router.delete('/pins/:id', async (req, res) => {
 router.post('/pins/:id/upvote', async (req, res) => {
     const db = await connectToDatabase();
     const { id } = req.params;
-    const ip = req.headers['x-nf-client-connection-ip'];
+    const ip = getClientIp(req);
     const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
 
     if (pin.upvoterIps.includes(ip)) {
@@ -8238,7 +8265,7 @@ router.post('/pins/:id/upvote', async (req, res) => {
 router.post('/pins/:id/downvote', async (req, res) => {
     const db = await connectToDatabase();
     const { id } = req.params;
-    const ip = req.headers['x-nf-client-connection-ip'];
+    const ip = getClientIp(req);
     const pin = await db.collection('pins').findOne({ _id: new ObjectId(id) });
 
     if (pin.downvoterIps.includes(ip)) {
@@ -8660,4 +8687,5 @@ app.get('/kategori/:category/:region', handleCategoryLegacyRedirect);
 
 app.use('/api', router);
 
+module.exports.app = app;
 module.exports.handler = serverless(app);

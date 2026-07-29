@@ -48,7 +48,7 @@ AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in 
 AyaNaon-app is a modern web application built with:
 
 - **Frontend:** HTML, CSS, and JavaScript, utilizing the Google Maps JavaScript API for the interactive map.
-- **Backend:** Powered by Netlify Functions (serverless functions) using Node.js and Express.js.
+- **Backend:** One Express.js app with parallel Netlify Functions and Cloudflare Workers adapters during the migration.
 - **Database:** MongoDB for storing all pin data, user IP addresses (anonymously), and other application information.
 
 ## Getting Started
@@ -62,17 +62,21 @@ cd ayanaon-app
 ```
 
 ### 2. Set up your environment variables
-You'll need a `.env` file in your project root with:
-- `MONGODB_URI`: Your MongoDB connection string.
-- `GOOGLE_MAPS_API_KEY`: Your Google Maps JavaScript API key.
+For Netlify, keep runtime values in `.env`/Netlify secrets. For Cloudflare local development, copy `.dev.vars.example` to `.dev.vars` and fill it without committing the file. Required values include `MONGODB_URI`, `JWT_SECRET`, separate browser/geocoding Google keys, AyaKasir credentials, and Apify credentials.
 
 ### 3. Install dependencies
 ```bash
 npm install
 ```
 
-### 4. Deploy to Netlify
-This app is designed for easy deployment on Netlify. Connect your GitHub repository to Netlify, and it will automatically build and deploy your functions and frontend.
+### 4. Run either deployment adapter
+
+- Cloudflare local development: `npm run dev`
+- Cloudflare bundle check: `npm run check:cloudflare`
+- Netlify rollback development: `npm run dev:netlify`
+- Dual-provider adapter tests: `npm run test:deployment`
+
+Production remains on Netlify until the Cloudflare staging test matrix and DNS cutover are explicitly completed. See `ai-memory/CLOUDFLARE_MIGRATION_STEP1.md` for the redacted infrastructure handoff.
 
 ## PWA Install & Updates
 

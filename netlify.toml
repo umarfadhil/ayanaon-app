@@ -31,3 +31,39 @@
   for = "/service-worker.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+# Dynamic SEO routes retained for the Netlify rollback deployment.
+[[redirects]]
+  from = "/pin/*"
+  to = "/.netlify/functions/api/pin/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/toko/*"
+  to = "/.netlify/functions/api/toko/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/kategori"
+  to = "/.netlify/functions/api/kategori"
+  status = 200
+
+[[redirects]]
+  from = "/kategori/"
+  to = "/.netlify/functions/api/kategori"
+  status = 200
+
+[[redirects]]
+  from = "/kategori/*"
+  to = "/.netlify/functions/api/kategori/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/sitemap.xml"
+  to = "/.netlify/functions/api/seo/sitemap"
+  status = 200
+
+[[redirects]]
+  from = "/robots.txt"
+  to = "/.netlify/functions/api/seo/robots"
+  status = 200

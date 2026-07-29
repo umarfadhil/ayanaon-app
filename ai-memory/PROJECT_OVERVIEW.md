@@ -13,8 +13,8 @@
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
 - **Map:** Google Maps JavaScript API
-- **Backend:** Single Express.js app wrapped with `serverless-http`
-- **Hosting:** Netlify (static files + serverless functions)
+- **Backend:** Single Express.js app exported through a Netlify `serverless-http` adapter and a Cloudflare Workers `httpServerHandler` adapter
+- **Hosting:** Netlify remains production; Cloudflare Workers + Static Assets dual-provider migration support is implemented locally but not deployed
 - **Database:** MongoDB (database name: `ayanaon-db`)
 - **Auth:** JWT + bcrypt (separate flows for sellers and residents)
 
@@ -29,7 +29,8 @@
 
 ## Environment Variables
 - `MONGODB_URI` - MongoDB connection string
-- `GOOGLE_MAPS_API_KEY` - Google Maps API key
+- `GOOGLE_MAPS_BROWSER_API_KEY` - browser-restricted Maps JavaScript/Places key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
+- `GOOGLE_GEOCODING_API_KEY` - server-only Geocoding API key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
 - `JWT_SECRET` - JWT signing secret (default: `ayanaon-dev-secret`)
 - `MONGODB_DASHBOARD_PASSWORD` - embedded MongoDB Charts password
 - `AYAKASIR_PARTNER_SECRET` - Bearer secret for the AyaKasir merchants push API (integration returns 503 when unset)
