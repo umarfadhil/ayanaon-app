@@ -465,3 +465,12 @@ Max 10 lines per task.
 - Netlify-only rewrites moved from `public/_redirects` to `netlify.toml`; `public/_headers` keeps the service worker at `no-cache` on both providers.
 - Four deployment-adapter tests pass; Wrangler runtime smoke tests pass; Netlify 35.1.6 offline build still bundles `api.js` successfully.
 - Remote Worker/Atlas validation is pending Cloudflare project secrets; npm audit also reports 5 high and 3 moderate production-tree advisories for a separate pre-cutover dependency update.
+
+## Cloudflare request-scoped MongoDB lifecycle fix (2026-07-29)
+- Symptom on the live staging Worker: concurrent database-backed routes intermittently returned Cloudflare Error 1101 HTML; browser JSON parsing then failed with `Unexpected token '<'`, so the map rendered without pins even though `/api/pins?lean=1` could return 3,095 valid pins when requested alone.
+- Cloudflare observability reported requests canceled as hung. Root cause was the module-level `MongoClient` and database object in `api.js`, which reused request-bound TCP/I/O resources across Worker invocations.
+- Added `src/request-scope.js` using `AsyncLocalStorage`. Each outer adapter request creates independent state; nested calls reuse that state; async disposal runs once in `finally`, including error paths.
+- `connectToDatabase()` now lazily creates one MongoDB client and one shared connection promise per request, while `src/worker.js` and the Netlify handler both wrap their complete request lifecycle. The client closes before the adapter request resolves.
+- Global I/O objects/promises are forbidden. The existing `indexesEnsured` boolean may remain global because it is primitive readiness metadata; concurrent cold-start index attempts are idempotent and no database promise crosses requests.
+- Pre-deploy verification: current Workers types `5.20260729.1`, syntax checks, seven adapter/request-scope tests, Wrangler dry-run bundle (4,800.42 KiB / 963.14 KiB gzip), and three local concurrent waves (18 total calls across pins/count/features/live-sellers/resident-share/config) all passed with HTTP 200 JSON.
+- Production staging concurrency and map verification remain pending the Git-connected Cloudflare build.

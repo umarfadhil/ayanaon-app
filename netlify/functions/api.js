@@ -5,6 +5,7 @@ const { MongoClient, ObjectId } = require('mongodb');
 const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { createRequestScope } = require('../../src/request-scope.js');
 
 const app = express();
 const router = express.Router();
@@ -22,33 +23,54 @@ const {
     APIFY_GATHER_ACTOR_ID = ''
 } = process.env;
 
-// Cloudflare Workers cannot open database sockets during module initialization.
-// Create the client lazily inside the first request and reuse it while the runtime is warm.
-let client;
-let db;
 let indexesEnsured = false;
 
-function getMongoClient() {
-    if (!MONGODB_URI) {
-        throw new Error('MONGODB_URI is not configured');
+const databaseRequestScope = createRequestScope({
+    createState: () => ({
+        client: null,
+        database: null,
+        connectionPromise: null
+    }),
+    dispose: async (state) => {
+        if (!state.client) return;
+        try {
+            await state.client.close();
+        } catch (error) {
+            console.error('Failed to close the request-scoped database client', error);
+        }
     }
-    if (!client) {
-        client = new MongoClient(MONGODB_URI);
-    }
-    return client;
+});
+
+function runWithDatabaseRequestContext(callback) {
+    return databaseRequestScope.run(callback);
 }
 
 async function connectToDatabase() {
-    if (db) return db;
+    const state = databaseRequestScope.getStore();
+    if (!state) {
+        throw new Error('Database access requires a request context');
+    }
+
+    if (state.database) return state.database;
+    if (!state.connectionPromise) {
+        state.connectionPromise = (async () => {
+            if (!MONGODB_URI) {
+                throw new Error('MONGODB_URI is not configured');
+            }
+
+            state.client = new MongoClient(MONGODB_URI);
+            await state.client.connect();
+            state.database = state.client.db('ayanaon-db');
+            await ensureIndexes(state.database);
+            return state.database;
+        })();
+    }
+
     try {
-        const mongoClient = getMongoClient();
-        await mongoClient.connect();
-        db = mongoClient.db('ayanaon-db');
-        await ensureIndexes(db);
-        return db;
+        return await state.connectionPromise;
     } catch (error) {
-        console.error("Failed to connect to the database", error);
-        throw new Error("Failed to connect to the database");
+        console.error('Failed to connect to the database', error);
+        throw new Error('Failed to connect to the database');
     }
 }
 
@@ -8688,4 +8710,9 @@ app.get('/kategori/:category/:region', handleCategoryLegacyRedirect);
 app.use('/api', router);
 
 module.exports.app = app;
-module.exports.handler = serverless(app);
+module.exports.runWithDatabaseRequestContext = runWithDatabaseRequestContext;
+
+const netlifyHandler = serverless(app);
+module.exports.handler = (...args) => (
+    runWithDatabaseRequestContext(() => netlifyHandler(...args))
+);

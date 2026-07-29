@@ -4,17 +4,19 @@
 - `package.json` - runtime deps plus Netlify CLI and Wrangler dual-provider development/deploy scripts
 - `netlify.toml` - Netlify rollback build config and all Netlify-only API/SEO rewrites
 - `wrangler.jsonc` - Cloudflare Worker entry, Node compatibility, static assets, observability, and unused MongoDB-native-module aliases
-- `src/worker.js` - Cloudflare `httpServerHandler` adapter over the shared Express app
+- `src/worker.js` - Cloudflare `httpServerHandler` adapter over the shared Express app; wraps every fetch in the database request context
+- `src/request-scope.js` - AsyncLocalStorage request-scope utility with nested reuse and guaranteed async disposal
 - `src/mongodb-optional-native-stub.js` - excludes unused Kerberos/client-encryption native add-ons from the Worker bundle
 - `.dev.vars.example` - redacted local Cloudflare runtime-variable template
 - `tests/deployment-adapters.test.js` - provider-adapter exports, Google browser-key routing, and Cloudflare/Netlify client-IP precedence tests
+- `tests/request-scope.test.js` - concurrent isolation, nested reuse, and error-path disposal regression tests
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
 - `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~8660+ lines)
   - Express router mounted at `/api/*`; exports both the shared `app` and the Netlify `handler`
-  - MongoDB client connects lazily in-request for Cloudflare socket compatibility
-  - MongoDB connection + index setup
+  - MongoDB client connects lazily once per request context, shares one in-request connection promise, and closes before the adapter request completes
+  - MongoDB connection + index setup; never retain MongoDB clients/databases/I/O promises across Worker requests
   - All REST endpoints (see API Routes below)
   - Server-rendered HTML for `/pin/:id`, `/toko/:slug`, sitemap, robots.txt
   - "Merchants" section (~line 5690): AyaKasir partner integration (secret-gated push API + merchant SSR page)

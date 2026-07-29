@@ -14,7 +14,7 @@
 - Collection/field names are in English
 
 ## Backend Patterns
-- `connectToDatabase()` - lazy singleton MongoDB connection created inside the first request; never open database sockets during Worker module initialization
+- `connectToDatabase()` - MongoDB is lazy and request-scoped: one client/connection promise may be shared only within the active request context, the client closes in the request wrapper `finally`, and MongoDB clients/databases/I/O promises must never be stored globally or reused across Worker requests
 - Collection helpers: `getSellersCollection()`, `getResidentsCollection()`, `getSettingsCollection()`
 - Auth: JWT tokens verified inline per route (no middleware), `req.headers.authorization` Bearer token
 - Settings stored in `settings` collection with `{ key: string, value: any }` pattern
@@ -47,7 +47,7 @@
 - `npm run check:cloudflare` performs the Worker bundle dry run; `npm run deploy:cloudflare` deploys only after secrets and the Cloudflare project exist
 - Netlify remains production and auto-builds until explicit DNS cutover; do not remove its adapter/configuration early
 - `public/_redirects` must not contain Netlify function rewrites; keep those only in `netlify.toml` so Workers Static Assets fall through to Express
-- `npm run test:deployment` validates both provider exports, browser-key routing, and Cloudflare/Netlify IP precedence without MongoDB access; the legacy `npm test` placeholder remains
+- `npm run test:deployment` validates both provider exports, browser-key routing, Cloudflare/Netlify IP precedence, and request-scope isolation/nesting/cleanup; the legacy `npm test` placeholder remains
 - Service worker cache version must be bumped on each release
 
 ## Constraints

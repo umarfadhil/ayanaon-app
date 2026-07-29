@@ -14,7 +14,7 @@
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
 - **Map:** Google Maps JavaScript API
 - **Backend:** Single Express.js app exported through a Netlify `serverless-http` adapter and a Cloudflare Workers `httpServerHandler` adapter
-- **Hosting:** Netlify remains production; Cloudflare Workers + Static Assets dual-provider migration support is implemented locally but not deployed
+- **Hosting:** Netlify remains the custom-domain production/rollback provider; the Cloudflare Workers + Static Assets staging deployment is live at `ayanaon.petalytix-id.workers.dev` pending DNS cutover
 - **Database:** MongoDB (database name: `ayanaon-db`)
 - **Auth:** JWT + bcrypt (separate flows for sellers and residents)
 

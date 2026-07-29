@@ -1,4 +1,4 @@
-﻿const assert = require('node:assert/strict');
+const assert = require('node:assert/strict');
 const { after, before, test } = require('node:test');
 
 process.env.GOOGLE_MAPS_BROWSER_API_KEY = 'browser-test-key';
@@ -28,6 +28,7 @@ after(async () => {
 test('exports the shared Express app and Netlify handler', () => {
     assert.equal(typeof apiModule.app?.listen, 'function');
     assert.equal(typeof apiModule.handler, 'function');
+    assert.equal(typeof apiModule.runWithDatabaseRequestContext, 'function');
 });
 
 test('returns the browser-specific Google Maps key', async () => {
