@@ -480,5 +480,71 @@ Max 10 lines per task.
 - Owner confirmed Warga registration/login, session persistence, profile changes, saved-pin persistence, logout/login restoration, and location-sharing enable/disable all pass on the Worker.
 - Gerobak Online seller acceptance is intentionally skipped, not failed, because the feature is currently deactivated.
 - The Gather Pins/Apify run completed and produced a reviewable draft; its location search then exposed a browser-key `Geocoding Service` authorization failure.
-- Gather address search now uses authenticated `GET /api/admin/gather/geocode` with the server-only `GOOGLE_GEOCODING_API_KEY`; the browser key remains limited to map rendering. Deployment verification remains pending.
-- Next manual gate is completing Gather draft review/publish/delete after location search verification, before AyaKasir, SEO/PWA, and DNS tests.
+- Gather address search now uses authenticated `GET /api/admin/gather/geocode` with the server-only `GOOGLE_GEOCODING_API_KEY`; the owner confirmed Jakarta search now works and fills the map coordinates.
+- Cloudflare observability confirmed four authenticated Jakarta requests reached Worker version 9 with `outcome: ok` and controlled HTTP 502 responses in roughly 0.3 seconds; this is not a Worker crash or auth failure.
+- The separate Google server-key creation/restriction action is complete: Geocoding API authorization now succeeds while the browser key remains separate.
+- Owner confirmed the complete Gather draft lifecycle passed: required-field completion, save/reload persistence, publication, public map/search/popup/detail/share verification, and cleanup.
+- Next manual gate is the AyaKasir partner sync lifecycle; staging currently returns two active merchants (`ES TEH SOLO`, `Kedai Rakyat`) as the comparison baseline before SEO/PWA and DNS tests.
+
+## Cloudflare AyaKasir staging acceptance (2026-07-29)
+- Owner confirmed the AyaKasir control-panel lifecycle path: a newly synced store appears on AyaNaon, disappears when unlisted, and returns after reactivation.
+- Owner confirmed re-sync updates store/menu data while preserving `/toko/:slug`; marker, search, popup, storefront, and live-availability behavior all passed.
+- The AyaKasir staging gate is fully passed. Next is SEO/PWA route, canonical, sitemap, cache, installation, offline, and rollback validation.
+
+## Cloudflare SEO/PWA staging implementation (2026-07-29)
+- Deployed commit `0401bec` through the connected Git build; Cloudflare build `68752187-e6ce-42b9-b41d-68bbf3653d3f` completed successfully.
+- The `workers.dev` staging hostname now returns `X-Robots-Tag: noindex, nofollow` for both Static Assets and Worker-generated API/SSR responses; production hosts remain indexable and canonical URLs still target `https://www.ayanaon.app/`.
+- Homepage metadata now uses Indonesian document language, absolute production social images, a root-relative manifest, and the package-aligned `2.5.2` footer.
+- The manifest has stable `/` identity/start/scope, Indonesian language metadata, standalone display, and exact 192x192 plus 512x512 PNG assets; the previously mislabeled 193x193 and 500x500 files were normalized.
+- Service-worker installation is now atomic: failed precaching does not activate an incomplete cache, activation waits for cleanup, updates wait for the existing user-controlled `SKIP_WAITING` action, API/dynamic requests bypass cache interception, and only successful static responses enter cache.
+- Automated verification passed: 15 deployment/request-scope/geocoding/PWA tests, Wrangler dry-run (22 assets, 4,804.35 KiB / 964.25 KiB gzip), Netlify 35.1.6 offline rollback build, and live HTTP checks for homepage/manifest/service worker/icons/API/sitemap.
+- Connected-browser verification confirmed the deployed `lang=id`, `/manifest.webmanifest`, version 2.5.2, map presence, service-worker registration, and pin synchronization. Geolocation errors are expected because the automation browser has no location permission.
+- Remaining manual SEO/PWA gate: install from a real Chrome/Android device, confirm standalone launch, disable network and reopen/reload a previously visited page to confirm cached-shell fallback, then restore network. The in-app automation browser does not expose its install prompt or offline emulation, so these are not yet marked passed.
+- DNS/custom-domain cutover must not start until this device-only install/offline gate is confirmed.
+
+## Cloudflare SEO/PWA staging acceptance completed (2026-07-29)
+- Owner confirmed all four device-only checks passed: installation, standalone launch, offline shell, and online recovery.
+- The SEO/PWA staging gate is fully passed.
+- Cloudflare account inspection confirms Workers Paid is active, the Worker has all nine required configuration/secret binding names, and no `ayanaon.app` Cloudflare DNS zone or Worker custom domain exists yet.
+- Next phase is controlled DNS onboarding: create the Cloudflare zone and copy the three authoritative records while Netlify remains the origin; do not change Hostinger nameservers or attach production Worker domains until the imported zone is verified and exposed credentials are confirmed rotated.
+
+## Cloudflare DNS onboarding review (2026-07-29)
+- `ayanaon.app` now exists as a pending full Cloudflare zone on the Free Website plan; assigned nameservers are `brad.ns.cloudflare.com` and `riya.ns.cloudflare.com`.
+- The authoritative registrar delegation is unchanged and still uses the four `p05.nsone.net` nameservers, so the pending Cloudflare zone is not serving production DNS yet.
+- Quick Scan preserved the Google verification TXT but converted the two Netlify hostnames into four proxied A records (`13.52.188.95` and `52.52.192.191` at apex and `www`). These point-in-time IP records are rejected for the migration baseline.
+- Before nameserver activation, delete all four scanned A records and create DNS-only CNAMEs from apex and `www` to `ayanaon.netlify.app`; retain the TXT unchanged. Reverify that exactly three records remain before changing Hostinger nameservers.
+
+## Cloudflare pre-activation DNS verification passed (2026-07-29)
+- Cloudflare API confirms the pending zone contains exactly three records: DNS-only CNAMEs from apex and `www` to `ayanaon.netlify.app`, plus the unchanged Google verification TXT.
+- The rejected scanned A records are gone, no Worker custom domain is attached, and production remains on Netlify.
+- The Hostinger nameserver replacement is approved: remove all four `p05.nsone.net` nameservers and set only `brad.ns.cloudflare.com` plus `riya.ns.cloudflare.com`; keep DNSSEC disabled.
+- After submitting the registrar change, request Cloudflare's nameserver check and wait for the zone to become active before creating any Worker custom domain.
+- The dashboard's `ayanaon.app is not fully protected` warning is expected during this DNS-only bridge: do not proxy the temporary Netlify CNAMEs. Workers Custom Domains will later replace them with Cloudflare-managed proxied records.
+
+## Cloudflare authoritative DNS activation completed (2026-07-29)
+- Hostinger delegation now uses only `brad.ns.cloudflare.com` and `riya.ns.cloudflare.com`; both `1.1.1.1` and `8.8.8.8` return the new nameservers.
+- Cloudflare marked zone `ayanaon.app` active at `2026-07-29T12:52:43Z`.
+- Bridge verification passed: apex returns Netlify HTTP 301 to `https://www.ayanaon.app/`; `www` and `ayanaon.netlify.app` return matching Netlify HTTP 200 content over HTTPS.
+- No Worker Custom Domain is attached yet. Netlify remains the production origin and rollback path while the next custom-domain rehearsal is prepared.
+
+## Cloudflare staging custom-domain rehearsal deployed (2026-07-29)
+- Added staging-host crawler protection before routing: both Static Assets and Worker-generated responses on `staging.ayanaon.app` return `X-Robots-Tag: noindex, nofollow`, while `www.ayanaon.app` remains indexable.
+- Commit `f2f1282` passed 16 deployment tests, Wrangler dry-run (22 assets, 4,804.41 KiB / 964.26 KiB gzip), the Netlify 35.1.6 offline rollback build, and Cloudflare Git build `6c39aa88-462a-4e58-9046-05faafdb6ec7`.
+- Attached `staging.ayanaon.app` to Worker `ayanaon` as an enabled Custom Domain. Cloudflare issued certificate `e4b0685b-4241-468f-b6c7-b4020dd48dbb` and created a managed proxied AAAA placeholder record (`100::`).
+- Public `1.1.1.1` and `8.8.8.8` resolution, HTTPS, homepage, manifest, service worker, merchants API, sitemap, production canonicals, and crawler headers all pass on the custom hostname.
+- Connected-browser verification rendered 584 markers and logged successful service-worker registration, visitor count, active pin count, and pin synchronization. No Google authorization error occurred; automation-only geolocation permission errors are expected.
+- Apex and `www` remain DNS-only Netlify CNAMEs. Before production `www` cutover, perform a short custom-domain smoke test for public search/storefront, Warga login/session/logout, and admin login plus Jakarta geocoding.
+
+## Cloudflare staging custom-domain acceptance completed (2026-07-29)
+- Owner confirmed the complete `staging.ayanaon.app` smoke test passed: public map/search/storefront, Warga login/session/logout, admin login, and Jakarta geocoding.
+- The custom-domain rehearsal gate is fully passed. Apex and `www` intentionally remain DNS-only CNAMEs to Netlify; no production routing change is approved yet.
+- A fresh production-only `npm audit --omit=dev` found seven advisories: four high and three moderate. Direct findings are `axios` (high) and `body-parser` (moderate); transitive findings are `follow-redirects`, `form-data`, `jws`, `path-to-regexp`, and `qs`.
+- `npm audit fix --dry-run --omit=dev` reports fixes for all seven without requiring `--force`, including `axios` 1.18.1, `body-parser` 2.3.0, and patched transitive versions. Apply the update deliberately and rerun the complete automated/staging regression gate before production cutover.
+- Production cutover remains blocked until the dependency audit is clean and the owner confirms—without sharing values—that all credentials exposed in the original inventory were rotated and synchronized with any system that must remain a working rollback path.
+
+## Cloudflare pre-cutover dependency remediation completed (2026-07-29)
+- Updated the production runtime to `axios` 1.18.1, `body-parser` 2.3.0, Express 5.2.1, and `jsonwebtoken` 9.0.3; the lockfile now resolves patched `follow-redirects`, `form-data`, `jws`, `path-to-regexp`, and `qs` transitives.
+- `npm audit --package-lock-only --omit=dev` now reports zero production vulnerabilities.
+- Compatibility verification passed: all 16 deployment/request-scope/geocoding/PWA tests, Wrangler dry-run (22 assets, 4,306.98 KiB / 777.07 KiB gzip), and Netlify 35.5.14 offline rollback build.
+- Netlify CLI remains at the existing 23.5.1 range to keep the rollback-tool change out of this patch. The full development-tool audit still reports 41 findings; these are not in the production runtime and should be retired with the Netlify toolchain after the rollback window.
+- The patched dependency commit still requires a Cloudflare Git build plus a brief live staging smoke test. Production cutover also remains blocked until the owner confirms—without sharing values—that exposed credentials were rotated and synchronized with the rollback environment.
