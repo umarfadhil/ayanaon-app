@@ -10,6 +10,21 @@ const { createRequestScope } = require('../../src/request-scope.js');
 const app = express();
 const router = express.Router();
 
+function isWorkersDevHostname(hostname) {
+    const normalizedHostname = String(hostname || '')
+        .trim()
+        .toLowerCase()
+        .split(':')[0];
+    return normalizedHostname === 'workers.dev' || normalizedHostname.endsWith('.workers.dev');
+}
+
+app.use((req, res, next) => {
+    if (isWorkersDevHostname(req.headers.host)) {
+        res.set('X-Robots-Tag', 'noindex, nofollow');
+    }
+    next();
+});
+
 app.use(bodyParser.json({ limit: '20mb' }));
 
 const {
@@ -8791,6 +8806,7 @@ app.use('/api', router);
 module.exports.app = app;
 module.exports.runWithDatabaseRequestContext = runWithDatabaseRequestContext;
 module.exports.geocodeAddressWithGoogle = geocodeAddressWithGoogle;
+module.exports.isWorkersDevHostname = isWorkersDevHostname;
 
 const netlifyHandler = serverless(app);
 module.exports.handler = (...args) => (

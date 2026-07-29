@@ -1,2 +1,5 @@
 /service-worker.js
   Cache-Control: no-cache
+
+https://ayanaon.petalytix-id.workers.dev/*
+  X-Robots-Tag: noindex, nofollow
