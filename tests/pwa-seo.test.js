@@ -69,4 +69,5 @@ test('homepage metadata and staging crawler controls remain migration-safe', () 
     const headers = readPublicFile('_headers');
     assert.match(headers, /\/service-worker\.js\s+Cache-Control: no-cache/);
     assert.match(headers, /https:\/\/ayanaon\.petalytix-id\.workers\.dev\/\*\s+X-Robots-Tag: noindex, nofollow/);
+    assert.match(headers, /https:\/\/staging\.ayanaon\.app\/\*\s+X-Robots-Tag: noindex, nofollow/);
 });

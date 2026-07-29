@@ -30,7 +30,7 @@ test('exports the shared Express app and Netlify handler', () => {
     assert.equal(typeof apiModule.app?.listen, 'function');
     assert.equal(typeof apiModule.handler, 'function');
     assert.equal(typeof apiModule.runWithDatabaseRequestContext, 'function');
-    assert.equal(typeof apiModule.isWorkersDevHostname, 'function');
+    assert.equal(typeof apiModule.isNonProductionHostname, 'function');
 });
 
 function requestWithHost(host) {
@@ -52,6 +52,12 @@ function requestWithHost(host) {
 
 test('marks workers.dev responses as non-indexable', async () => {
     const response = await requestWithHost('ayanaon.petalytix-id.workers.dev');
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['x-robots-tag'], 'noindex, nofollow');
+});
+
+test('marks the custom staging hostname as non-indexable', async () => {
+    const response = await requestWithHost('staging.ayanaon.app');
     assert.equal(response.statusCode, 200);
     assert.equal(response.headers['x-robots-tag'], 'noindex, nofollow');
 });

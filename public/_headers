@@ -3,3 +3,6 @@
 
 https://ayanaon.petalytix-id.workers.dev/*
   X-Robots-Tag: noindex, nofollow
+
+https://staging.ayanaon.app/*
+  X-Robots-Tag: noindex, nofollow

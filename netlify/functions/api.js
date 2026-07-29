@@ -10,16 +10,18 @@ const { createRequestScope } = require('../../src/request-scope.js');
 const app = express();
 const router = express.Router();
 
-function isWorkersDevHostname(hostname) {
+function isNonProductionHostname(hostname) {
     const normalizedHostname = String(hostname || '')
         .trim()
         .toLowerCase()
         .split(':')[0];
-    return normalizedHostname === 'workers.dev' || normalizedHostname.endsWith('.workers.dev');
+    return normalizedHostname === 'staging.ayanaon.app'
+        || normalizedHostname === 'workers.dev'
+        || normalizedHostname.endsWith('.workers.dev');
 }
 
 app.use((req, res, next) => {
-    if (isWorkersDevHostname(req.headers.host)) {
+    if (isNonProductionHostname(req.headers.host)) {
         res.set('X-Robots-Tag', 'noindex, nofollow');
     }
     next();
@@ -8806,7 +8808,7 @@ app.use('/api', router);
 module.exports.app = app;
 module.exports.runWithDatabaseRequestContext = runWithDatabaseRequestContext;
 module.exports.geocodeAddressWithGoogle = geocodeAddressWithGoogle;
-module.exports.isWorkersDevHostname = isWorkersDevHostname;
+module.exports.isNonProductionHostname = isNonProductionHostname;
 
 const netlifyHandler = serverless(app);
 module.exports.handler = (...args) => (
