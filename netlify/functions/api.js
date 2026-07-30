@@ -5839,6 +5839,29 @@ function cleanMerchantOpeningHours(value) {
     return out;
 }
 
+/** Per-product variants (size/flavor/etc.) — one purchasable row per entry. */
+function cleanMerchantVariants(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object') continue;
+        const name = cleanMerchantText(entry.name, 60);
+        if (!name) continue;
+        const priceNumber = Number(entry.price);
+        const price = Number.isFinite(priceNumber) && priceNumber >= 0 && priceNumber <= 100000000
+            ? Math.round(priceNumber)
+            : null;
+        if (price === null) continue;
+        out.push({
+            name,
+            price,
+            available: entry.available !== false
+        });
+        if (out.length >= 30) break;
+    }
+    return out;
+}
+
 function cleanMerchantMenuHighlights(value) {
     if (!Array.isArray(value)) return [];
     const out = [];
@@ -5852,13 +5875,17 @@ function cleanMerchantMenuHighlights(value) {
             : null;
         const photoUrl = cleanMerchantHttpsUrl(entry.photoUrl);
         const category = cleanMerchantText(entry.category, 60);
+        // Variants (size/flavor/etc.): when present, the /toko page renders one
+        // orderable row per variant instead of a single bare-product row.
+        const variants = cleanMerchantVariants(entry.variants);
         out.push({
             name,
             price,
             photoUrl: photoUrl || null,
             category: category || null,
             // Push-time stock snapshot from AyaKasir (default: available).
-            available: entry.available !== false
+            available: entry.available !== false,
+            variants
         });
         // Full menu parity with the AyaKasir order page (not just highlights).
         if (out.length >= 100) break;
@@ -5898,7 +5925,7 @@ function sanitizeMerchantPayload(body) {
             tenantId,
             name,
             description: cleanMerchantMultilineText(payload.description, 2000),
-            category: cleanMerchantText(payload.category, 60) || 'Kuliner',
+            category: cleanMerchantText(payload.category, 60) || 'Restoran',
             address: cleanMerchantText(payload.address, 300),
             city: cleanMerchantText(payload.city, 120),
             province: cleanMerchantText(payload.province, 120),
@@ -6240,33 +6267,48 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         if (!menuByCategory.has(key)) menuByCategory.set(key, []);
         menuByCategory.get(key).push(item);
     });
-    const buildMenuItemHtml = (item) => {
-        const price = Number.isFinite(item.price) ? item.price : 0;
+    // variant, when passed, turns this into one orderable row for that variant
+    // (e.g. "Es Kopi Susu (Large)") instead of a bare-product row — same markup/
+    // classes either way, so the WA-cart script and the availability poll
+    // script (both keyed on generic .toko-menu__item[data-name]) need no changes.
+    const buildMenuItemRowHtml = (item, variant) => {
+        const price = Number.isFinite(variant ? variant.price : item.price) ? (variant ? variant.price : item.price) : 0;
         const priceLabel = formatMerchantPrice(price);
         // Availability: SSR uses the push-time snapshot; the live poll script
         // (availScript) then re-syncs against the AyaKasir order page, so the
         // badge + stepper are ALWAYS rendered and toggled via [hidden]/disabled.
-        const isAvailable = item.available !== false;
+        const isAvailable = (variant ? variant.available : item.available) !== false;
+        const rowName = variant ? `${item.name} (${variant.name})` : item.name;
+        const dataName = variant ? `${item.name} - ${variant.name}` : item.name;
         const thumb = item.photoUrl && String(item.photoUrl).startsWith('https://')
-            ? `<img class="toko-menu__thumb" src="${escapeHtml(item.photoUrl)}" alt="${escapeHtml(item.name)}" loading="lazy">`
+            ? `<img class="toko-menu__thumb" src="${escapeHtml(item.photoUrl)}" alt="${escapeHtml(rowName)}" loading="lazy">`
             : '';
         const stepper = canOrderViaWa
             ? `<div class="toko-menu__qty">
-                <button type="button" class="toko-menu__step" data-step="-1"${isAvailable ? '' : ' disabled'} aria-label="Kurangi ${escapeHtml(item.name)}">&minus;</button>
+                <button type="button" class="toko-menu__step" data-step="-1"${isAvailable ? '' : ' disabled'} aria-label="Kurangi ${escapeHtml(rowName)}">&minus;</button>
                 <span class="toko-menu__count">0</span>
-                <button type="button" class="toko-menu__step" data-step="1"${isAvailable ? '' : ' disabled'} aria-label="Tambah ${escapeHtml(item.name)}">+</button>
+                <button type="button" class="toko-menu__step" data-step="1"${isAvailable ? '' : ' disabled'} aria-label="Tambah ${escapeHtml(rowName)}">+</button>
             </div>`
             : '';
         const soldOutBadge = `<span class="toko-soldout"${isAvailable ? ' hidden' : ''}>Habis</span>`;
-        return `<li class="toko-menu__item${isAvailable ? '' : ' toko-menu__item--out'}" data-name="${escapeHtml(item.name)}" data-price="${price}">
+        return `<li class="toko-menu__item${isAvailable ? '' : ' toko-menu__item--out'}" data-name="${escapeHtml(dataName)}" data-price="${price}">
             ${thumb}
             <div class="toko-menu__info">
-                <span class="toko-menu__name">${escapeHtml(item.name)}</span>
+                <span class="toko-menu__name">${escapeHtml(rowName)}</span>
                 ${priceLabel ? `<span class="toko-menu__price">${escapeHtml(priceLabel)}</span>` : ''}
             </div>
             ${soldOutBadge}
             ${stepper}
         </li>`;
+    };
+    // Products with variants (size/flavor/etc.) render one row per variant —
+    // the bare product isn't directly orderable, matching the AyaKasir order
+    // page where a variant selection is required. No variants → unchanged.
+    const buildMenuItemHtml = (item) => {
+        if (Array.isArray(item.variants) && item.variants.length > 0) {
+            return item.variants.map((variant) => buildMenuItemRowHtml(item, variant)).join('');
+        }
+        return buildMenuItemRowHtml(item);
     };
     // Layout follows the tenant's "Tampilan menu pelanggan" (online_menu_layout):
     // LIST = rows per category, GRID = photo cards, ACCORDION = collapsible
