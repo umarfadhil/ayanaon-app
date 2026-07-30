@@ -11,10 +11,11 @@
 - `tests/deployment-adapters.test.js` - provider-adapter exports, Google browser-key routing, and Cloudflare/Netlify client-IP precedence tests
 - `tests/request-scope.test.js` - concurrent isolation, nested reuse, and error-path disposal regression tests
 - `tests/google-geocoding.test.js` - server-key Google Geocoding request, zero-results handling, and missing-key regression tests
+- `tests/gather-pins.test.js` - Gather duplicate-suppression, draft-cleanup, source-link, and browser-adapter deployment regression tests
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
-- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~8660+ lines)
+- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~8910+ lines)
   - Express router mounted at `/api/*`; exports both the shared `app` and the Netlify `handler`
   - MongoDB client connects lazily once per request context, shares one in-request connection promise, and closes before the adapter request completes
   - MongoDB connection + index setup; never retain MongoDB clients/databases/I/O promises across Worker requests
@@ -38,8 +39,10 @@
 
 ### External Gather Actor (`gather-actor/`)
 - `src/main.js` - normalized, duplicate-aware adapters for tiket.com, Loket, Yesplis, IndoRelawan, KalenderLari, MICHELIN, Pertamina, and SPKLU
+- `src/tiket-utils.js` - Tiket full-venue cleanup, price normalization, and Indonesian event-summary formatting
 - `.actor/actor.json` + `.actor/input_schema.json` - Apify Actor manifest and source/limit input schema
-- `Dockerfile` - Playwright Chrome Actor runtime; deployed separately from Netlify
+- `Dockerfile` - Playwright Chrome Actor runtime; deployed separately from the web app
+- `.actorignore` - excludes local dependencies, storage, environment files, and logs from Apify source uploads
 
 ### Auth - Sellers (Gerobak Online)
 - `login.html` - seller login page
@@ -87,6 +90,7 @@
 
 ### Admin
 - `GET /admin/gather/sources` - source catalog + external-service configuration status
+- `GET /admin/gather/geocode?query=` - authenticated, server-side Google Geocoding lookup for Gather and admin location searches
 - `POST /admin/gather/runs` | `GET /admin/gather/runs[/:id]` - start/poll/list Apify runs; successful results import into drafts
 - `GET /PUT/DELETE /admin/gather/drafts[/:id]` | `POST /admin/gather/drafts/:id/publish` - review, edit, discard, and publish gathered drafts
 - `GET /admin/residents` | `PUT /:id/role` | `DELETE /:id`

@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const http = require('node:http');
+const path = require('node:path');
 const { after, before, test } = require('node:test');
 
 process.env.GOOGLE_MAPS_BROWSER_API_KEY = 'browser-test-key';
@@ -32,6 +34,31 @@ test('exports the shared Express app and Netlify handler', () => {
     assert.equal(typeof apiModule.runWithDatabaseRequestContext, 'function');
     assert.equal(typeof apiModule.isNonProductionHostname, 'function');
 });
+
+test('falls back from empty Wrangler Google bindings to the legacy key', () => {
+    assert.equal(apiModule.resolveGoogleApiKey('', 'legacy-test-key'), 'legacy-test-key');
+    assert.equal(apiModule.resolveGoogleApiKey('specific-test-key', 'legacy-test-key'), 'specific-test-key');
+});
+
+test('local Wrangler dev loads the legacy Google key without weakening production requirements', () => {
+    const wrangler = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../wrangler.jsonc'), 'utf8'));
+    const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
+    const productionSecrets = wrangler.secrets.required;
+    const localSecrets = wrangler.env.local.secrets.required;
+
+    assert.equal(productionSecrets.includes('GOOGLE_MAPS_API_KEY'), false);
+    assert.equal(productionSecrets.includes('GOOGLE_MAPS_BROWSER_API_KEY'), true);
+    assert.equal(productionSecrets.includes('GOOGLE_GEOCODING_API_KEY'), true);
+    assert.equal(localSecrets.includes('GOOGLE_MAPS_API_KEY'), true);
+    assert.equal(localSecrets.includes('GOOGLE_MAPS_BROWSER_API_KEY'), true);
+    assert.equal(localSecrets.includes('GOOGLE_GEOCODING_API_KEY'), true);
+    assert.equal(packageJson.scripts.dev, 'wrangler dev --env local');
+    assert.equal(packageJson.scripts['dev:cloudflare'], 'wrangler dev --env local');
+    assert.equal(packageJson.scripts['deploy:cloudflare'], 'wrangler deploy --env=""');
+    assert.equal(packageJson.scripts['check:cloudflare'], 'wrangler deploy --env="" --dry-run --outdir .wrangler-dist');
+});
+
+
 
 function requestWithHost(host) {
     const address = server.address();

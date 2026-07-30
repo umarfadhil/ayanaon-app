@@ -19,6 +19,26 @@
       "GOOGLE_GEOCODING_API_KEY"
     ]
   },
+  "env": {
+    "local": {
+      "vars": {
+        "AYAKASIR_ORDER_URL_PREFIX": "https://ayakasir.petalytix.id/"
+      },
+      "secrets": {
+        "required": [
+          "MONGODB_URI",
+          "JWT_SECRET",
+          "MONGODB_DASHBOARD_PASSWORD",
+          "AYAKASIR_PARTNER_SECRET",
+          "APIFY_API_TOKEN",
+          "APIFY_GATHER_ACTOR_ID",
+          "GOOGLE_MAPS_API_KEY",
+          "GOOGLE_MAPS_BROWSER_API_KEY",
+          "GOOGLE_GEOCODING_API_KEY"
+        ]
+      }
+    }
+  },
   "alias": {
     "kerberos": "./src/mongodb-optional-native-stub.js",
     "mongodb-client-encryption": "./src/mongodb-optional-native-stub.js"

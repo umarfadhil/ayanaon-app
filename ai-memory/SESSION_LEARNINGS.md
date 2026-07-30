@@ -547,4 +547,103 @@ Max 10 lines per task.
 - `npm audit --package-lock-only --omit=dev` now reports zero production vulnerabilities.
 - Compatibility verification passed: all 16 deployment/request-scope/geocoding/PWA tests, Wrangler dry-run (22 assets, 4,306.98 KiB / 777.07 KiB gzip), and Netlify 35.5.14 offline rollback build.
 - Netlify CLI remains at the existing 23.5.1 range to keep the rollback-tool change out of this patch. The full development-tool audit still reports 41 findings; these are not in the production runtime and should be retired with the Netlify toolchain after the rollback window.
-- The patched dependency commit still requires a Cloudflare Git build plus a brief live staging smoke test. Production cutover also remains blocked until the owner confirms—without sharing values—that exposed credentials were rotated and synchronized with the rollback environment.
+- Commit `5d00a67` deployed successfully through Cloudflare Git build `8c6cd384-9852-4030-90c5-a282bed113bf`.
+- Post-deploy staging checks passed: homepage and manifest HTTP 200, `X-Robots-Tag: noindex, nofollow`, 3,097 pins, two active merchants, and configuration API HTTP 200.
+- One brief owner-operated authentication/admin smoke test remains because private login credentials are not available to automation. Production cutover also remains blocked until the owner confirms—without sharing values—that exposed credentials were rotated and synchronized with the rollback environment.
+
+## Cloudflare production cutover preflight passed (2026-07-29)
+- Owner confirmed the post-dependency staging smoke test passed, including the private Warga/admin paths.
+- Owner confirmed the least-privilege `local_migration` MongoDB credential, MongoDB dashboard password, AyaKasir partner secret, and Apify token were rotated and synchronized with the Netlify rollback environment; no secret values were recorded.
+- Cloudflare zone `ayanaon.app` is active on `brad.ns.cloudflare.com` and `riya.ns.cloudflare.com`. The Google verification TXT is preserved.
+- Apex and `www` remain DNS-only CNAMEs to `ayanaon.netlify.app`; public HTTPS verifies `www` is served by Netlify and apex returns HTTP 301 to `https://www.ayanaon.app/`.
+- Only `staging.ayanaon.app` is attached to Worker `ayanaon`; it returns HTTP 200 from Cloudflare with `X-Robots-Tag: noindex, nofollow`.
+- All implementation, security, staging, dependency, DNS, and rollback gates are passed. The remaining action is the explicitly approved production Custom Domain cutover, followed by immediate public/auth/admin verification and a 7–14 day Netlify rollback window.
+
+## Cloudflare www production cutover completed (2026-07-29)
+- Owner explicitly approved the `www` production cutover. Immediately before mutation, `www.ayanaon.app` was the single DNS-only CNAME `508fb177a04ebc62d576eb34cbda42ee` to `ayanaon.netlify.app`, and Worker build `8c6cd384-9852-4030-90c5-a282bed113bf` for commit `5d00a67` was successful.
+- Cloudflare required deletion of the external CNAME before attachment. The CNAME was removed and `www.ayanaon.app` was attached to Worker `ayanaon` as Custom Domain `0e0310885f0d39954d8083a89f8f47ffd797febf`, with certificate `b6011ce2-72ae-4bf4-80c2-48db5738cb0e`.
+- Cloudflare created managed proxied AAAA record `7a713bf5cccc7baa6d0cebdadab2dde5` (`100::`, read-only). Both `1.1.1.1` and `8.8.8.8` resolve `www` to Cloudflare anycast IPv4/IPv6 addresses.
+- Production verification passed: homepage, manifest, service worker, sitemap, and configuration API return HTTP 200 from Cloudflare; production has no staging crawler header, the canonical is `https://www.ayanaon.app/`, the database reports 3,097 pins and two merchants, and the rendered map synchronized 584 markers.
+- Automation-only geolocation errors are expected. The disabled Gerobak/live-seller warning is identical on staging and is not a cutover regression.
+- Apex remains DNS-only on Netlify and still returns HTTP 301 to `https://www.ayanaon.app/`, preserving the planned rollback window. Rollback is to detach Custom Domain `0e0310885f0d39954d8083a89f8f47ffd797febf` and recreate a DNS-only CNAME from `www.ayanaon.app` to `ayanaon.netlify.app`.
+- Next gate is owner-operated production Warga/admin acceptance. If it passes, observe Cloudflare production for 7–14 days while retaining Netlify unchanged.
+
+## Cloudflare production acceptance completed (2026-07-29)
+- Owner confirmed all private production acceptance checks passed on `https://www.ayanaon.app`: public map/search/storefront, Warga authentication/session/logout, admin authentication, and Jakarta geocoding.
+- Final Cloudflare snapshot confirms Custom Domains `www.ayanaon.app` and `staging.ayanaon.app` remain enabled on Worker `ayanaon`; the managed proxied records and certificates are unchanged.
+- Apex remains the DNS-only CNAME to `ayanaon.netlify.app`, and the Google verification TXT remains unchanged. Netlify is still the rollback path.
+- The observation window starts 2026-07-29. Earliest seven-day review is 2026-08-05; the recommended fourteen-day retirement review is 2026-08-12.
+- During observation, do not delete the Netlify site, remove its synchronized secrets, change the apex record, retire rollback credentials/users, remove staging, or enable DNSSEC.
+- After a clean observation window: move the apex redirect fully to Cloudflare, verify path/query preservation, retire Netlify and obsolete Netlify-only tooling/credentials, remove the staging hostname if no longer needed, review Atlas access and legacy database users, then enable DNSSEC as a separate final change.
+
+## Production admin Maps referrer incident (2026-07-30)
+- `https://www.ayanaon.app/admin` reports Google Maps JavaScript API `RefererNotAllowedMapError`; the browser-key value is intentionally not recorded.
+- Admin correctly fetches `GOOGLE_MAPS_BROWSER_API_KEY` through `/api/config` and loads the Google Maps JavaScript API with the Places library. This is an external key restriction mismatch, not a Cloudflare routing failure.
+- The captured legacy allowlist included the root and `/admin.html`, but the production application now uses the clean `/admin` route. The intended migration policy already requires host-wide `https://www.ayanaon.app/*` and `https://ayanaon.app/*` entries.
+- Add/retain host-wide website restrictions for production, staging, Netlify rollback, and approved local development origins; keep API restrictions limited to Maps JavaScript API and Places API (New). The server Geocoding key remains separate.
+- The repository has no `IntersectionObserver` usage. The Google-script observer exception is treated as a secondary symptom of failed Maps initialization unless it persists after referrer authorization is corrected.
+- No application deployment or DNS change is required. Save the Google browser-key restrictions, allow propagation, hard-refresh `/admin`, and retest the map plus Jakarta search.
+
+## Production Admin geocoding proxy completed (2026-07-30)
+- Owner confirmed the production Admin map renders after the host-wide browser referrer update, but Manage Pins search returned `GEOCODER_GEOCODE: REQUEST_DENIED` because `public/admin.js` still instantiated the browser-side `google.maps.Geocoder`.
+- This was an application migration gap, not a DNS or Cloudflare routing issue. The security policy remains unchanged: the browser key is limited to Maps JavaScript API and Places API (New), while Geocoding API uses the separate server-only `GOOGLE_GEOCODING_API_KEY`.
+- Manage Pins single-location search and the shared mass/brand location scope now call authenticated `GET /api/admin/gather/geocode`; the existing endpoint retains resident authentication plus `canManagePinsResident` authorization and returns only normalized coordinates/address metadata.
+- Removed all `new gmaps.Geocoder()` use from Admin and advanced the PWA static cache revision from `cf1` to `cf2` so installed clients can receive the corrected `admin.js` through the existing user-controlled update flow.
+- Verification passed: JavaScript syntax, all 17 deployment/request-scope/geocoding/PWA tests, Wrangler dry-run (22 assets, 4,844.29 KiB / 972.44 KiB gzip), and Netlify 35.5.14 offline rollback build.
+- Commit `a0b7663` deployed successfully through Cloudflare Git build `35e10606-07ea-44e9-9a1f-c06609f9d7de`. Production serves the proxy-based Admin bundle and `cf2` service worker with HTTP 200; unauthenticated geocode requests return HTTP 401, confirming the route remains protected.
+- Remaining acceptance action: approve/apply the PWA update if prompted, reload `https://www.ayanaon.app/admin`, sign in, and confirm Manage Pins search for Jakarta moves the marker and fills latitude/longitude. Also spot-check a mass/brand query with a location suffix such as `kopi di Jakarta`.
+
+## Gather Pins tiket/KalenderLari recovery + published duplicate cleanup (2026-07-30)
+- Root cause for KalenderLari zero rows: the Actor still selected singular `/event/` links, while the live archive exposes event details under plural `/events/<slug>` URLs.
+- Root cause for tiket.com zero rows: the search cards still render, but current detail pages no longer expose the old hydrated product object and localized browser detail requests may return HTTP 403. The adapter now reads title/date/location/images from the rendered search card, tries Event JSON-LD when detail is available, and emits the card fallback when detail navigation is blocked.
+- Tiket date normalization now supports English and Indonesian full/abbreviated month names. Missing numeric values remain `null` instead of becoming false `0,0` coordinates.
+- KalenderLari now reads current `/events/` links, tolerates the site's invalid escaped apostrophes in Event JSON-LD, and falls back to MEC date/location elements. HTML entities in gathered titles are decoded.
+- Live local Actor verification passed: tiket.com gathered one dated/geocoded row with three images despite a reproduced detail HTTP 403; KalenderLari gathered one dated/geocoded row with the venue/location populated. Nominatim now retries the broader locality when the exact venue string has no match.
+- Published duplicate suppression now checks Gather provenance first, then normalized title plus either coordinates within 350 meters or the same canonical link. This catches manual/admin-published pins such as `SPBU COCO Jakarta Samanhudi` without collapsing different stations that share the Pertamina locator URL.
+- New imports skip published matches, draft refresh automatically deletes older queue entries that match a published pin, and publish rechecks the same rule to close race/manual-entry gaps.
+- The Gather Link field now includes an `Open in new tab` control that is enabled only for valid HTTP(S) links and uses `noopener noreferrer`.
+- PWA static cache revision advanced from `cf2` to `cf3` for the updated Admin assets.
+- Verification passed: live one-row Actor runs for both repaired sources, Actor/backend/Admin JavaScript syntax, `git diff --check`, five new Gather regression tests, the complete 22-test deployment suite, and Wrangler dry-run (22 assets, 4,848.72 KiB / 973.38 KiB gzip).
+- Deployment is still required for this patch: rebuild the Apify Gather Actor, then deploy the AyaNaon app/Worker so the backend, Admin UI, and `cf3` service worker are live.
+
+## Gather Pins localhost Maps configuration isolation (2026-07-30)
+- Reproduced `Google Maps belum dikonfigurasi.` on the already-running `localhost:8787`: `/api/config` returned an empty browser key even though the legacy `GOOGLE_MAPS_API_KEY` in local `.env` was non-empty; no secret value was printed or recorded.
+- The scraper had not failed. After Tiket.com or KalenderLari completed, automatic draft selection initialized the optional map preview, and that later UI warning could overwrite the successful Gather message.
+- Root cause of the configuration mismatch: Wrangler can supply declared-but-unset `GOOGLE_MAPS_BROWSER_API_KEY` and `GOOGLE_GEOCODING_API_KEY` bindings as empty strings, while JavaScript destructuring defaults only apply to `undefined`. Both split keys now use truthy fallback to the legacy key.
+- A fresh process loaded from the same `.env` returned a configured `/api/config` response, confirming the fallback. An already-running Wrangler process still requires restart because environment-derived constants are captured at module startup.
+- Missing/unloadable browser Maps configuration now renders only an inline unavailable state in the preview. It no longer changes the Gather run result, and authenticated server geocoding can still fill latitude/longitude before the preview retries.
+- The PWA static cache revision advanced from `cf3` to `cf4` for the corrected Admin assets.
+- Verification passed: backend/Admin/service-worker syntax, the complete 24-test deployment suite, and Wrangler 4.115.0 dry-run (22 assets, 4,849.10 KiB / 973.46 KiB gzip). The existing `whatwg-url` default-import warning remains non-blocking.
+- This patch is local only; restart `npm run dev:cloudflare` for localhost to load it, and deploy the Worker/Admin assets separately when ready.
+
+## Wrangler local Maps secret allowlist fix (2026-07-30)
+- Adding `http://localhost:8787/*` and `http://127.0.0.1:8787/*` to Google browser-key referrers did not affect `Google Maps belum dikonfigurasi.` because that message occurs before Google receives a browser request.
+- Safe inspection confirmed `.dev.vars` is absent, local `.env` contains a non-empty legacy `GOOGLE_MAPS_API_KEY` but not the split names, and the running port 8787 still returned an empty `/api/config` key.
+- Current Cloudflare behavior is authoritative: when `wrangler.jsonc` defines `secrets.required`, local development loads only listed names from `.env`/`.dev.vars`; the unlisted legacy key was filtered out before Worker startup.
+- Added Wrangler environment `local` with the legacy and split Google names plus all existing local requirements. `npm run dev` and `npm run dev:cloudflare` now select it, allowing the API's truthy split-to-legacy fallback to execute.
+- The top-level production secret requirements remain unchanged and keep browser/server keys separate. Deploy and bundle-check scripts now pass `--env=""` explicitly so the new named local environment can never become an accidental deployment target.
+- Isolated Wrangler 4.115.0 verification on port 8788 loaded the hidden legacy key from `.env`; `/api/config` returned configured with key length 39. The homepage rendered meaningful content and its map container with no browser console errors or framework overlay.
+- Verification passed: JSON/JavaScript syntax, `git diff --check`, the complete 25-test deployment suite, and the explicit top-level Worker dry-run (22 assets, 4,849.10 KiB / 973.46 KiB gzip). The existing `whatwg-url` warning remains non-blocking.
+- Port 8787 is still the owner's earlier process and must be stopped and restarted with `npm run dev:cloudflare`; no Google Console change or production deployment is required for this localhost fix.
+
+## Apify Gather Actor 1.1 browser-adapter deployment (2026-07-30)
+- The new Tiket/KalenderLari zero-result reports were remote deployment drift, not duplicate filtering or a new website failure: recent successful-status runs had zero dataset rows, zero exclusions, build `1.0.2`, and the old `Gathered 0 <source> item(s).` log signature.
+- Pushed the already-repaired browser adapters as Actor version `1.1`; build `1.1.1` succeeded and the Actor's default run option remains `build: latest`. The package now reports version `1.1.0`, and `.actorignore` keeps `node_modules`, local Actor storage, environment files, and logs out of uploads.
+- Live remote one-row smoke runs succeeded on build `1.1.1`: Tiket returned `LANY: soft world tour (29 October 2026) - General on Sale` with all eight mandatory fields and three images; KalenderLari returned `d'BestO Family Run 2026` with all eight mandatory fields. Both logs used the new duplicate-aware completion message.
+- The two smoke runs cost about USD 0.0836 combined. A subsequent Gather action from localhost or the deployed Admin will use the repaired `latest` Actor without an app restart or Worker deployment because the backend starts the external Actor by ID.
+- Added deployment metadata regression coverage for Actor/Node version alignment, the `latest` build tag, and upload exclusions. The complete deployment suite passes 26/26 tests; Actor syntax and `git diff --check` also pass.
+
+## Tiket full event-detail summary and venue precision (2026-07-30)
+- Root cause of the LANY draft's generic description and Tanah Abang centroid: the Tiket detail handler evaluated immediately after `domcontentloaded`, before the dynamically rendered event header labels existed, then fell back to the broad search-card location.
+- Actor version `1.2.0` now waits for the detail header, reads its price/full venue/display date, removes Tiket's appended region/country display suffix, and formats the draft summary as price + full venue + a blank line + Indonesian weekday/date. `tiket-utils.js` keeps those transformations deterministic and unit-testable.
+- Full-address geocoding now tries a venue + final locality + country fallback before dropping the venue. For Indonesia Arena this resolves `-6.2148291, 106.8005215` instead of the Tanah Abang centroid.
+- Tiket discovery now starts at the explicit `/en-id/` search URL, limits unproductive scrolling, records whether cards were actually observed, and throws when the page renders no cards so Crawlee retries rather than returning a false successful zero-row run.
+- Deployed default-latest Actor build `1.2.2`; its successful one-row live dataset returned the exact requested LANY description, full Indonesia Arena address, 2026-10-29 dates, precise coordinates, and three images. The completion log reported one new Tiket item.
+- Guarded production-data migration updated only the existing LANY draft whose old description and coordinates still matched the known Tanah Abang values; it now contains the verified summary/location/price and retains all three images.
+- The two builds and two smoke runs used about USD 0.0596 of Apify usage. The first smoke exposed the list-page false-zero path; the second verified the hardened build.
+
+## v2.6.0 release alignment (2026-07-30)
+- v2.6.0 packages the July 28-30 Cloudflare production delivery, PWA/SEO hardening, protected server-side admin geocoding, and Gather Pins reliability work.
+- Production `www.ayanaon.app` is served by Cloudflare Workers; retain Netlify's apex redirect and rollback deployment unchanged for the documented 7-14 day observation window.
+- The Gather Actor now uses the `latest` build path with Tiket full-venue summaries, KalenderLari `/events/` discovery, and duplicate checks that also protect against matching manual pins.
+- Release metadata must advance together: root package and lockfile version, README notes, project overview, and service-worker cache revision.

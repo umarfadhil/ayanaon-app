@@ -61,9 +61,9 @@ test('requires a configured server geocoding key', async () => {
     );
 });
 test('admin location searches use the authenticated server geocoding endpoint', () => {
-    const adminSource = fs.readFileSync(path.resolve(__dirname, '../public/admin.js'), 'utf8');
+    const adminSource = fs.readFileSync(path.resolve(__dirname, '../public/admin-gather.js'), 'utf8');
 
     assert.match(adminSource, /\/api\/admin\/gather\/geocode\?query=/);
-    assert.match(adminSource, /headers\.Authorization = `Bearer \$\{token\}`/);
+    assert.match(adminSource, /Authorization: `Bearer \$\{getToken\(\)\}`/);
     assert.doesNotMatch(adminSource, /new\s+gmaps\.Geocoder\s*\(/);
 });

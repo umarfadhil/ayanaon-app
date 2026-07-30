@@ -107,6 +107,13 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.6.0
+- **Cloudflare Production Delivery:** AyaNaon now serves `www.ayanaon.app` through Cloudflare Workers and Static Assets, while Netlify remains available as the DNS-level rollback path during the observation window.
+- **Safer Maps & Admin Location Search:** Browser Maps/Places and server-side Geocoding use separate keys. Admin and Gather address searches now use an authenticated backend geocoding route, keeping the Geocoding key out of browsers.
+- **PWA & SEO Hardening:** The service worker, manifest, caching headers, canonical metadata, and staging `noindex` rules were strengthened for dependable updates and crawl-safe Cloudflare delivery.
+- **Reliable Gather Imports:** Tiket.com and KalenderLari adapters recover from current source changes, retain precise venue/location details, and use duplicate-aware import and publication checks that also catch matching manually created pins.
+- **Clearer Draft Review:** Gather drafts offer a safe "Open in new tab" source link, while unavailable Maps previews stay contained in the editor instead of masking an otherwise successful import.
+
 ### What's New in v2.5.2
 - **Clean Scraped Descriptions:** Gather strips source HTML, restores paragraph breaks, and decodes nested entities such as `&amp;mdash` before drafts are displayed or saved.
 - **Reliable Loket Banners:** Loket drafts read the official `event_banner` and `event_banner_mobile` API fields and store available banner URLs as supportive images.

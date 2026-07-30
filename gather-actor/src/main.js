@@ -1,9 +1,16 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler, RequestQueue } from 'crawlee';
+import { buildTiketDescription, cleanTiketLocation, normalizeTiketPrice } from './tiket-utils.js';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const TODAY = new Date().toISOString().slice(0, 10);
-const MONTHS_ID = { januari: 1, februari: 2, maret: 3, april: 4, mei: 5, juni: 6, juli: 7, agustus: 8, september: 9, oktober: 10, november: 11, desember: 12 };
+const MONTHS_ID = { januari: 1, jan: 1, februari: 2, feb: 2, maret: 3, mar: 3, april: 4, apr: 4, mei: 5, juni: 6, jun: 6, juli: 7, jul: 7, agustus: 8, agu: 8, ags: 8, september: 9, sep: 9, oktober: 10, okt: 10, november: 11, nov: 11, desember: 12, des: 12 };
+const MONTHS_EN = {
+    jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+    may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9,
+    sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
+    dec: 12, december: 12
+};
 const CATEGORIES = {
     event: '🎉 Konser Musik & Acara', social: '🧑‍🤝‍🧑 Sosial & Kopdar',
     sport: '🏃 Olahraga & Aktivitas Hobi', hotel: '🏡 Akomodasi Pilihan',
@@ -12,7 +19,7 @@ const CATEGORIES = {
 };
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
-function numeric(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
+function numeric(value) { if (value === null || value === '' || typeof value === 'undefined') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
 function decodeHtmlEntities(value) {
     const entities = {
         amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ',
@@ -64,9 +71,24 @@ function isExcluded(exclusions, item = {}) {
 function isoDate(value) {
     const direct = /^(\d{4}-\d{2}-\d{2})/.exec(text(value));
     if (direct) return direct[1];
-    const match = /(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})/i.exec(text(value));
+    const match = /(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i.exec(text(value));
     if (!match) return '';
-    return `${match[3]}-${String(MONTHS_ID[match[2].toLowerCase()]).padStart(2, '0')}-${String(match[1]).padStart(2, '0')}`;
+    const month = MONTHS_ID[match[2].toLowerCase()] || MONTHS_EN[match[2].toLowerCase()];
+    if (!month) return '';
+    return `${match[3]}-${String(month).padStart(2, '0')}-${String(match[1]).padStart(2, '0')}`;
+}
+function dateRange(value) {
+    const raw = text(value);
+    const isoDates = [...raw.matchAll(/\d{4}-\d{2}-\d{2}/g)].map((match) => match[0]);
+    if (isoDates.length) return { startDate: isoDates[0], endDate: isoDates.at(-1) || isoDates[0] };
+    const range = /(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{4}))?\s*(?:-|\u2013|\u2014|to|sampai)\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i.exec(raw);
+    if (range) {
+        const startDate = isoDate(`${range[1]} ${range[2]} ${range[3] || range[6]}`);
+        const endDate = isoDate(`${range[4]} ${range[5]} ${range[6]}`);
+        return { startDate, endDate: endDate || startDate };
+    }
+    const single = isoDate(raw);
+    return { startDate: single, endDate: single };
 }
 function normalizeImageUrls(values) {
     const urls = [];
@@ -88,7 +110,7 @@ function normalize(item, source) {
     return {
         source,
         externalId: text(item.externalId || item.id),
-        title: text(item.title),
+        title: htmlToText(item.title),
         description: htmlToText(item.description),
         category: text(item.category),
         link: text(item.link),
@@ -127,12 +149,21 @@ async function fetchJson(url, options = {}, retries = 3) {
     throw lastError;
 }
 async function geocode(query) {
-    if (!text(query)) return { lat: null, lng: null };
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&q=${encodeURIComponent(query)}`;
-    try {
-        const rows = await fetchJson(url, { headers: { 'user-agent': 'AyaNaonGather/1.0 contact@ayanaon.app' } });
-        return { lat: numeric(rows?.[0]?.lat), lng: numeric(rows?.[0]?.lon) };
-    } catch { return { lat: null, lng: null }; }
+    const exact = text(query);
+    if (!exact) return { lat: null, lng: null };
+    const parts = exact.split(',').map((part) => part.trim()).filter(Boolean);
+    const venueLocality = parts.length >= 3 ? `${parts[0]}, ${parts.at(-2)}, ${parts.at(-1)}` : '';
+    const candidates = [...new Set([exact, venueLocality, parts.length > 1 ? parts.slice(1).join(', ') : ''].filter(Boolean))];
+    for (const candidate of candidates) {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&q=${encodeURIComponent(candidate)}`;
+        try {
+            const rows = await fetchJson(url, { headers: { 'user-agent': 'AyaNaonGather/1.0 contact@ayanaon.app' } });
+            const lat = numeric(rows?.[0]?.lat);
+            const lng = numeric(rows?.[0]?.lon);
+            if (lat !== null && lng !== null) return { lat, lng };
+        } catch {}
+    }
+    return { lat: null, lng: null };
 }
 
 async function scrapeLoket(limit, exclusions) {
@@ -303,57 +334,146 @@ async function browserCrawlerOptions() {
 }
 
 async function scrapeTiket(limit, exclusions) {
-    const products = new Map();
+    const candidates = new Map();
     const details = [];
-    const eligibleProducts = () => [...products.values()].filter((product) => {
-        const slug = pickTranslation(product.translations).url;
-        return slug && !isExcluded(exclusions, { externalId: product.id, link: `https://www.tiket.com/to-do/${slug}` });
-    });
+    const addTiketCardFallback = async (candidate) => {
+        if (!candidate?.slug || details.some((item) => item.externalId === candidate.slug)) return;
+        const dates = dateRange(candidate.dateText || candidate.cardText);
+        const location = cleanTiketLocation(candidate.location);
+        const price = normalizeTiketPrice(candidate.cardText);
+        const geo = await geocode(location);
+        const item = normalize({
+            externalId: candidate.slug,
+            title: candidate.title,
+            description: buildTiketDescription({ price, location, startDate: dates.startDate }) || candidate.cardText,
+            category: CATEGORIES.event,
+            link: candidate.link,
+            ...dates,
+            images: candidate.cardImages,
+            sourceMeta: { location, price },
+            ...geo
+        }, 'tiket');
+        if (item.title) details.push(item);
+    };
     const queue = await RequestQueue.open(`tiket-${Date.now()}`);
-    await queue.addRequest({ url: 'https://www.tiket.com/to-do/search?title=&productAllCategoryCodes=EVENT', label: 'LIST' });
+    await queue.addRequest({ url: 'https://www.tiket.com/en-id/to-do/search?title=&productAllCategoryCodes=EVENT', label: 'LIST' });
     const crawler = new PlaywrightCrawler({
         ...(await browserCrawlerOptions()), requestQueue: queue,
-        preNavigationHooks: [async ({ page, request }) => {
-            await page.setExtraHTTPHeaders({ 'accept-language': 'id-ID,id;q=0.9,en;q=0.7' });
-            if (request.label === 'LIST') page.on('response', async (response) => {
-                if (!response.url().includes('product-cards') || response.url().includes('/count')) return;
-                try { for (const product of (await response.json())?.data || []) if (product.id) products.set(product.id, product); } catch {}
-            });
-        }],
         requestHandler: async ({ page, request }) => {
             if (request.label === 'LIST') {
-                await page.waitForTimeout(5000);
-                for (let i = 0; i < 12 && eligibleProducts().length < limit; i += 1) {
+                await page.waitForSelector("a[href*='/to-do/']", { timeout: 25000 }).catch(() => null);
+                let sawSearchCards = false;
+                for (let i = 0; i < 4 && candidates.size < limit; i += 1) {
+                    const cards = await page.evaluate(() => Array.from(document.querySelectorAll("a[href*='/to-do/']"))
+                        .map((anchor) => {
+                            const url = new URL(anchor.href);
+                            url.hash = '';
+                            url.search = '';
+                            const match = /^\/(?:[a-z]{2}-[a-z]{2}\/)?to-do\/([^/]+)\/?$/i.exec(url.pathname);
+                            if (!match || ['search', 'category'].includes(match[1].toLowerCase())) return null;
+                            return {
+                                link: `https://www.tiket.com/en-id/to-do/${match[1]}`,
+                                slug: match[1],
+                                title: anchor.querySelector('h2[title], h2')?.getAttribute('title') || anchor.querySelector('h2')?.textContent?.trim() || '',
+                                dateText: anchor.querySelector('section span[title], [class*="product_info"] span[title]')?.getAttribute('title') || '',
+                                location: anchor.querySelector('[class*="product_info_location"]')?.textContent?.trim() || '',
+                                cardText: (anchor.textContent || '').trim(),
+                                cardImages: Array.from(anchor.querySelectorAll('img'))
+                                    .filter((image) => Number(image.getAttribute('width') || 0) >= 100)
+                                    .map((image) => image.currentSrc || image.src)
+                                    .filter(Boolean)
+                            };
+                        }).filter(Boolean));
+                    if (cards.length) sawSearchCards = true;
+                    for (const card of cards) {
+                        if (!candidates.has(card.slug) && !isExcluded(exclusions, { externalId: card.slug, link: card.link })) {
+                            candidates.set(card.slug, card);
+                        }
+                    }
+                    if (candidates.size >= limit) break;
                     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
                     await page.waitForTimeout(1400);
                 }
-                for (const product of eligibleProducts().slice(0, limit)) {
-                    const slug = pickTranslation(product.translations).url;
-                    if (slug) await queue.addRequest({ url: `https://www.tiket.com/to-do/${slug}`, label: 'DETAIL', userData: { product, slug } });
+                if (!sawSearchCards) throw new Error('Tiket search returned no event cards');
+                for (const candidate of [...candidates.values()].slice(0, limit)) {
+                    await queue.addRequest({ url: candidate.link, label: 'DETAIL', userData: candidate });
                 }
                 return;
             }
             await page.waitForLoadState('domcontentloaded');
-            const payload = await page.locator('script#__NEXT_DATA__').textContent().then(JSON.parse).catch(() => null);
-            const product = detailProduct(payload);
-            if (!product) return;
-            const translation = pickTranslation(request.userData.product.translations);
-            const detailTranslation = pickTranslation(product.translations);
-            const coordinates = product.longLat || request.userData.product.longLat || [];
-            const dates = tiketDates(product);
-            const location = text(detailTranslation.completeAddress || detailTranslation.street1 || detailTranslation.location || detailTranslation.region);
-            const pageImages = await page.evaluate(() => [
-                document.querySelector('meta[property="og:image"]')?.content,
-                ...Array.from(document.images).map((image) => image.currentSrc || image.src)
-            ].filter(Boolean).slice(0, 8));
-            details.push(normalize({
-                externalId: request.userData.product.id, title: translation.title || request.userData.product.title,
-                description: `📍 ${location || 'Lokasi belum tersedia'}`, category: CATEGORIES.event,
-                link: request.url, ...dates, lat: coordinates[1], lng: coordinates[0],
-                images: [request.userData.product.images, request.userData.product.image, request.userData.product.imageUrl,
-                    request.userData.product.verticalImageUrl, product.images, product.image, detailTranslation.images,
-                    detailTranslation.image, pageImages]
-            }, 'tiket'));
+            await page.waitForSelector('h1', { timeout: 25000 }).catch(() => null);
+            await page.waitForFunction(() => {
+                const header = document.querySelector('h1')?.parentElement?.innerText || '';
+                return /(?:IDR|Rp\.?)\s*[\d]/i.test(header)
+                    && /\d{1,2}\s+[A-Za-z]+\s+\d{4}/.test(header);
+            }, undefined, { timeout: 15000 }).catch(() => null);
+            const pageData = await page.evaluate(() => {
+                const nodes = [];
+                const visit = (value) => {
+                    if (!value) return;
+                    if (Array.isArray(value)) return value.forEach(visit);
+                    if (typeof value !== 'object') return;
+                    if (Array.isArray(value['@graph'])) value['@graph'].forEach(visit);
+                    nodes.push(value);
+                };
+                for (const script of document.querySelectorAll("script[type='application/ld+json']")) {
+                    try { visit(JSON.parse((script.textContent || '{}').replace(/\\'/g, "'"))); } catch {}
+                }
+                const schema = nodes.find((node) => {
+                    const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+                    return types.some((type) => typeof type === 'string' && /Event$/i.test(type));
+                }) || {};
+                const address = schema.location?.address;
+                const addressText = typeof address === 'string'
+                    ? address
+                    : [address?.streetAddress, address?.addressLocality, address?.addressRegion].filter(Boolean).join(', ');
+                const headerLabels = Array.from(document.querySelector('h1')?.parentElement?.querySelectorAll("[class*='ATFSection_info_label'] span") || [])
+                    .map((element) => (element.innerText || element.textContent || '').trim())
+                    .filter(Boolean);
+                return {
+                    title: schema.name || document.querySelector('h1')?.textContent?.trim() || document.querySelector('meta[property="og:title"]')?.content || '',
+                    startDate: schema.startDate || '',
+                    endDate: schema.endDate || schema.startDate || '',
+                    location: addressText || schema.location?.name || '',
+                    lat: schema.location?.geo?.latitude,
+                    headerLocation: headerLabels[0] || '',
+                    headerDate: headerLabels.find((value) => /\d{1,2}\s+[A-Za-z]+\s+\d{4}/.test(value)) || '',
+                    price: headerLabels.find((value) => /(?:IDR|Rp\.?)\s*[\d]/i.test(value)) || schema.offers?.price || '',
+                    lng: schema.location?.geo?.longitude,
+                    images: [
+                        schema.image,
+                        document.querySelector('meta[property="og:image"]')?.content,
+                        ...Array.from(document.images).map((image) => image.currentSrc || image.src)
+                    ].filter(Boolean).slice(0, 8)
+                };
+            });
+            const cardDates = dateRange(request.userData.dateText || request.userData.cardText);
+            const headerDates = dateRange(pageData.headerDate);
+            const schemaDates = dateRange([pageData.startDate, pageData.endDate].filter(Boolean).join(' '));
+            const startDate = headerDates.startDate || cardDates.startDate || schemaDates.startDate;
+            const endDate = headerDates.endDate || cardDates.endDate || schemaDates.endDate;
+            const location = cleanTiketLocation(pageData.headerLocation || pageData.location || request.userData.location || '');
+            const price = normalizeTiketPrice(pageData.price || request.userData.cardText);
+            const geo = await geocode(location);
+            const lat = geo.lat ?? numeric(pageData.lat);
+            const lng = geo.lng ?? numeric(pageData.lng);
+            const item = normalize({
+                externalId: request.userData.slug,
+                title: pageData.title || request.userData.title,
+                description: buildTiketDescription({ price, location, startDate }) || request.userData.cardText,
+                category: CATEGORIES.event,
+                link: request.userData.link || request.url,
+                startDate,
+                endDate,
+                lat,
+                lng,
+                images: [request.userData.cardImages, pageData.images],
+                sourceMeta: { location, price }
+            }, 'tiket');
+            if (item.title && !details.some((entry) => entry.externalId === item.externalId)) details.push(item);
+        },
+        failedRequestHandler: async ({ request }) => {
+            if (request.label === 'DETAIL') await addTiketCardFallback(request.userData);
         }
     });
     await crawler.run();
@@ -409,23 +529,79 @@ async function scrapeKalenderLari(limit, exclusions) {
         ...(await browserCrawlerOptions()), requestQueue: queue, maxConcurrency: 2,
         requestHandler: async ({ page, request }) => {
             if (request.label === 'LIST') {
-                const links = await page.locator("a[href*='/event/']").evaluateAll((nodes) => [...new Set(nodes.map((node) => node.href))]);
-                for (const link of links.filter((item) => !isExcluded(exclusions, { link: item })).slice(0, limit)) {
-                    await queue.addRequest({ url: link, label: 'DETAIL' });
+                await page.waitForSelector("a[href*='/events/']", { timeout: 25000 }).catch(() => null);
+                const links = await page.locator("a[href*='/events/']").evaluateAll((nodes) => [...new Set(nodes.map((node) => {
+                    const url = new URL(node.href);
+                    url.hash = '';
+                    url.search = '';
+                    return /^\/events\/[^/]+\/?$/i.test(url.pathname) ? url.href.replace(/\/$/, '') : '';
+                }).filter(Boolean))]);
+                let queued = 0;
+                for (const link of links) {
+                    const slug = new URL(link).pathname.split('/').filter(Boolean).at(-1) || '';
+                    if (isExcluded(exclusions, { externalId: slug, link })) continue;
+                    await queue.addRequest({ url: link, label: 'DETAIL', userData: { slug } });
+                    queued += 1;
+                    if (queued >= limit) break;
                 }
                 return;
             }
             await page.waitForSelector('h1', { timeout: 25000 }).catch(() => null);
             const data = await page.evaluate(() => {
-                const body = document.body.innerText;
-                const title = document.querySelector('h1, .mec-single-title')?.textContent?.trim() || document.title;
-                const time = document.querySelector('time')?.getAttribute('datetime') || body.match(/\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}/i)?.[0] || '';
-                const location = document.querySelector('.mec-single-event-location, .mec-address')?.textContent?.trim() || '';
-                const image = document.querySelector('meta[property="og:image"]')?.content || document.querySelector('main img, article img')?.src || '';
-                return { title, time, location, description: body.slice(0, 5000), image };
+                const nodes = [];
+                const visit = (value) => {
+                    if (!value) return;
+                    if (Array.isArray(value)) return value.forEach(visit);
+                    if (typeof value !== 'object') return;
+                    if (Array.isArray(value['@graph'])) value['@graph'].forEach(visit);
+                    nodes.push(value);
+                };
+                for (const script of document.querySelectorAll("script[type='application/ld+json']")) {
+                    try { visit(JSON.parse((script.textContent || '{}').replace(/\\'/g, "'"))); } catch {}
+                }
+                const schema = nodes.find((node) => {
+                    const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+                    return types.includes('Event');
+                }) || {};
+                const address = schema.location?.address;
+                const addressText = typeof address === 'string'
+                    ? address
+                    : [address?.streetAddress, address?.addressLocality, address?.addressRegion].filter(Boolean).join(', ');
+                const description = schema.description
+                    || document.querySelector('.mec-single-event-description, .entry-content, article')?.innerHTML
+                    || document.querySelector('meta[property="og:description"]')?.content
+                    || '';
+                const domLocation = document.querySelector('.mec-single-event-location')?.textContent?.replace(/^\s*Location\s*/i, '').trim() || '';
+                const domStartDate = document.querySelector('.mec-single-event-date .mec-start-date-label, .mec-start-date-label')?.textContent?.trim() || '';
+                const domEndDate = document.querySelector('.mec-single-event-date .mec-end-date-label, .mec-end-date-label')?.textContent?.trim() || domStartDate;
+                return {
+                    title: schema.name || document.querySelector('h1, .mec-single-title')?.textContent?.trim() || document.title,
+                    startDate: schema.startDate || domStartDate,
+                    endDate: schema.endDate || schema.startDate || domEndDate,
+                    location: [...new Set([schema.location?.name, addressText].filter(Boolean))].join(', ') || domLocation,
+                    description,
+                    images: [
+                        schema.image,
+                        schema.location?.image,
+                        document.querySelector('meta[property="og:image"]')?.content,
+                        document.querySelector('main img, article img')?.src
+                    ].filter(Boolean)
+                };
             });
+            const dates = dateRange([data.startDate, data.endDate].filter(Boolean).join(' '));
             const geo = await geocode(data.location);
-            output.push(normalize({ title: data.title, description: data.description, category: CATEGORIES.sport, link: request.url, startDate: data.time, endDate: data.time, image: data.image, ...geo }, 'kalenderlari'));
+            const item = normalize({
+                externalId: request.userData.slug,
+                title: data.title,
+                description: data.description,
+                category: CATEGORIES.sport,
+                link: request.url,
+                ...dates,
+                images: data.images,
+                sourceMeta: { location: data.location },
+                ...geo
+            }, 'kalenderlari');
+            if (item.title) output.push(item);
         }
     });
     await crawler.run();

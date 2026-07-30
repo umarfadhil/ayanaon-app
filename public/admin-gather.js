@@ -26,7 +26,7 @@
             'gather-run-metrics', 'gather-draft-count', 'gather-draft-source-filter',
             'gather-draft-search', 'gather-draft-list', 'gather-review-grid', 'gather-draft-form',
             'gather-editor-source', 'gather-editor-title', 'gather-completeness', 'gather-title',
-            'gather-description', 'gather-category', 'gather-link', 'gather-start-date',
+            'gather-description', 'gather-category', 'gather-link', 'gather-open-link', 'gather-start-date',
             'gather-end-date', 'gather-lat', 'gather-lng', 'gather-location-search-input',
             'gather-location-search-btn', 'gather-location-map',
             'gather-image-list', 'gather-image-input', 'gather-delete-btn', 'gather-save-btn',
@@ -104,6 +104,24 @@
         return state.sources.find((source) => source.id === sourceId)?.label || sourceId || 'Unknown';
     }
 
+    function updateOpenLink(value = els.gatherLink?.value || '') {
+        if (!els.gatherOpenLink) return;
+        let href = '';
+        try {
+            const parsed = new URL(String(value).trim());
+            if (['http:', 'https:'].includes(parsed.protocol)) href = parsed.href;
+        } catch {}
+        if (href) {
+            els.gatherOpenLink.href = href;
+            els.gatherOpenLink.setAttribute('aria-disabled', 'false');
+            els.gatherOpenLink.removeAttribute('tabindex');
+        } else {
+            els.gatherOpenLink.removeAttribute('href');
+            els.gatherOpenLink.setAttribute('aria-disabled', 'true');
+            els.gatherOpenLink.setAttribute('tabindex', '-1');
+        }
+    }
+
     function ensureGoogleMaps() {
         if (window.google?.maps) return Promise.resolve(window.google.maps);
         if (googleMapsPromise) return googleMapsPromise;
@@ -170,6 +188,8 @@
         if (!els.gatherLocationMap) return;
         try {
             const maps = await ensureGoogleMaps();
+            els.gatherLocationMap.classList.remove('is-unavailable');
+            els.gatherLocationMap.removeAttribute('role');
             if (!locationMap) {
                 locationMap = new maps.Map(els.gatherLocationMap, {
                     center: DEFAULT_MAP_CENTER,
@@ -188,7 +208,9 @@
                 locationMap.setZoom(5);
             }
         } catch (error) {
-            showMessage('error', error.message);
+            els.gatherLocationMap.classList.add('is-unavailable');
+            els.gatherLocationMap.setAttribute('role', 'status');
+            els.gatherLocationMap.textContent = error.message;
         }
     }
 
@@ -196,10 +218,10 @@
         const query = els.gatherLocationSearchInput?.value.trim() || '';
         if (!query) return showMessage('error', 'Masukkan nama tempat atau alamat terlebih dahulu.');
         try {
-            await initializeLocationMap();
             const data = await api(`/api/admin/gather/geocode?query=${encodeURIComponent(query)}`);
             const result = data?.result || {};
             applyCoordinates(Number(result.lat), Number(result.lng));
+            await initializeLocationMap();
             showMessage('success', `Lokasi ditemukan: ${result.formattedAddress || query}`);
         } catch (error) {
             showMessage('error', error.message);
@@ -285,6 +307,7 @@
         els.gatherDescription.value = draft.description || '';
         populateCategories(draft.category || '');
         els.gatherLink.value = draft.link || '';
+        updateOpenLink(draft.link || '');
         els.gatherStartDate.value = draft.startDate || '';
         els.gatherEndDate.value = draft.endDate || '';
         els.gatherLat.value = Number.isFinite(Number(draft.lat)) ? draft.lat : '';
@@ -297,6 +320,7 @@
 
     function clearEditor() {
         state.selectedId = '';
+        updateOpenLink('');
         els.gatherReviewGrid?.classList.add('is-editor-empty');
         els.gatherDraftForm?.classList.add('hidden');
         renderDrafts();
@@ -542,6 +566,7 @@
             searchLocation();
         });
         [els.gatherLat, els.gatherLng].forEach((input) => input?.addEventListener('change', () => syncMapFromFields()));
+        els.gatherLink?.addEventListener('input', () => updateOpenLink());
         [els.gatherTitle, els.gatherDescription, els.gatherCategory, els.gatherLink, els.gatherStartDate, els.gatherEndDate, els.gatherLat, els.gatherLng]
             .forEach((input) => input?.addEventListener('input', () => updateCompleteness(null)));
     }

@@ -31,14 +31,18 @@ app.use(bodyParser.json({ limit: '20mb' }));
 
 const {
     MONGODB_URI,
-    GOOGLE_MAPS_API_KEY = '',
-    GOOGLE_MAPS_BROWSER_API_KEY = GOOGLE_MAPS_API_KEY,
-    GOOGLE_GEOCODING_API_KEY = GOOGLE_MAPS_API_KEY,
     JWT_SECRET = 'ayanaon-dev-secret',
     DASHBOARD_PASSWORD = process.env.MONGODB_DASHBOARD_PASSWORD || '',
     APIFY_API_TOKEN = '',
     APIFY_GATHER_ACTOR_ID = ''
 } = process.env;
+function resolveGoogleApiKey(specificKey, legacyKey) {
+    return specificKey || legacyKey || '';
+}
+
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+const GOOGLE_MAPS_BROWSER_API_KEY = resolveGoogleApiKey(process.env.GOOGLE_MAPS_BROWSER_API_KEY, GOOGLE_MAPS_API_KEY);
+const GOOGLE_GEOCODING_API_KEY = resolveGoogleApiKey(process.env.GOOGLE_GEOCODING_API_KEY, GOOGLE_MAPS_API_KEY);
 
 let indexesEnsured = false;
 
@@ -6983,6 +6987,92 @@ function getGatherItemKey(item) {
     return `${source}:fallback:${cleanGatherText(item?.link, 2048)}:${Number(item?.lat)}:${Number(item?.lng)}:${cleanGatherText(item?.title, 180)}`;
 }
 
+function canonicalGatherComparisonLink(value) {
+    const link = cleanGatherLink(value);
+    if (!link) return '';
+    try {
+        const parsed = new URL(link);
+        parsed.hash = '';
+        ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_page'].forEach((key) => parsed.searchParams.delete(key));
+        parsed.pathname = parsed.pathname.replace(/\/$/, '') || '/';
+        return parsed.href;
+    } catch {
+        return link.replace(/#.*$/, '').replace(/\/$/, '');
+    }
+}
+
+function normalizeGatherComparableText(value) {
+    return cleanGatherText(value, 180)
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function gatherDistanceKm(first, second) {
+    const coordinate = (value) => value === null || value === '' || typeof value === 'undefined' ? NaN : Number(value);
+    const firstLat = coordinate(first?.lat);
+    const firstLng = coordinate(first?.lng);
+    const secondLat = coordinate(second?.lat);
+    const secondLng = coordinate(second?.lng);
+    if (![firstLat, firstLng, secondLat, secondLng].every(Number.isFinite)) return Infinity;
+    const toRadians = (value) => value * Math.PI / 180;
+    const latDelta = toRadians(secondLat - firstLat);
+    const lngDelta = toRadians(secondLng - firstLng);
+    const a = Math.sin(latDelta / 2) ** 2
+        + Math.cos(toRadians(firstLat)) * Math.cos(toRadians(secondLat)) * Math.sin(lngDelta / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function isGatherPublishedDuplicate(item, pin) {
+    const source = cleanGatherText(item?.source, 40);
+    const externalId = cleanGatherText(item?.externalId, 180);
+    if (externalId
+        && source === cleanGatherText(pin?.gatheredFrom?.source, 40)
+        && externalId === cleanGatherText(pin?.gatheredFrom?.externalId, 180)) return true;
+
+    const itemTitle = normalizeGatherComparableText(item?.title);
+    if (!itemTitle || itemTitle !== normalizeGatherComparableText(pin?.title)) return false;
+    if (gatherDistanceKm(item, pin) <= 0.35) return true;
+    const itemLink = canonicalGatherComparisonLink(item?.link);
+    return Boolean(itemLink && itemLink === canonicalGatherComparisonLink(pin?.link));
+}
+
+async function findPublishedGatherDuplicateKeys(database, items) {
+    const candidates = (Array.isArray(items) ? items : []).filter(Boolean);
+    if (!candidates.length) return new Set();
+    const queries = [];
+    const idsBySource = new Map();
+    for (const item of candidates) {
+        const source = cleanGatherText(item.source, 40);
+        const externalId = cleanGatherText(item.externalId, 180);
+        if (!source || !externalId) continue;
+        if (!idsBySource.has(source)) idsBySource.set(source, new Set());
+        idsBySource.get(source).add(externalId);
+    }
+    for (const [source, ids] of idsBySource) {
+        queries.push({ 'gatheredFrom.source': source, 'gatheredFrom.externalId': { $in: [...ids] } });
+    }
+    const titles = [...new Set(candidates.map((item) => cleanGatherText(item.title, 180)).filter(Boolean))];
+    const links = [...new Set(candidates.map((item) => cleanGatherLink(item.link)).filter(Boolean))];
+    if (titles.length) queries.push({ title: { $in: titles } });
+    if (links.length) queries.push({ link: { $in: links } });
+    if (!queries.length) return new Set();
+
+    const pins = await database.collection('pins').find(
+        { $or: queries },
+        { projection: { title: 1, link: 1, lat: 1, lng: 1, gatheredFrom: 1 } }
+    ).collation({ locale: 'en', strength: 2 }).toArray();
+    const duplicateKeys = new Set();
+    for (const item of candidates) {
+        if (pins.some((pin) => isGatherPublishedDuplicate(item, pin))) {
+            duplicateKeys.add(getGatherItemKey(item));
+        }
+    }
+    return duplicateKeys;
+}
+
 function validateGatherImagePayload(images) {
     if (images === null || typeof images === 'undefined') return '';
     if (!Array.isArray(images)) return 'Format foto draft tidak valid.';
@@ -7157,25 +7247,14 @@ async function importGatherRunDataset(database, runDoc, apifyRun) {
         const normalizedItems = items.map((item) => normalizeGatherDraft(item, runDoc.source));
         const links = normalizedItems.map((item) => item.link).filter(Boolean);
         const externalIds = normalizedItems.map((item) => item.externalId).filter(Boolean);
-        const duplicateQueries = [];
-        if (externalIds.length) duplicateQueries.push({ 'gatheredFrom.source': runDoc.source, 'gatheredFrom.externalId': { $in: externalIds } });
-        if (links.length) duplicateQueries.push({ link: { $in: links }, 'gatheredFrom.source': { $ne: runDoc.source } });
         const draftQueries = [];
         if (externalIds.length) draftQueries.push({ source: runDoc.source, externalId: { $in: externalIds } });
         if (links.length) draftQueries.push({ link: { $in: links }, source: { $ne: runDoc.source } });
-        const [existingPins, existingDrafts] = await Promise.all([
-            duplicateQueries.length ? database.collection('pins').find({ $or: duplicateQueries }, { projection: { link: 1, title: 1, lat: 1, lng: 1, gatheredFrom: 1 } }).toArray() : [],
+        const [publishedDuplicateKeys, existingDrafts] = await Promise.all([
+            findPublishedGatherDuplicateKeys(database, normalizedItems),
             draftQueries.length ? draftsCollection.find({ $and: [{ status: { $in: ['draft', 'published'] } }, { $or: draftQueries }] }, { projection: { source: 1, externalId: 1, link: 1, title: 1, description: 1, lat: 1, lng: 1, images: 1, status: 1 } }).toArray() : []
         ]);
-        const knownKeys = new Set();
-        existingPins.forEach((entry) => knownKeys.add(getGatherItemKey({
-            source: entry.gatheredFrom?.source || runDoc.source,
-            externalId: entry.gatheredFrom?.externalId || '',
-            link: entry.link,
-            title: entry.title,
-            lat: entry.lat,
-            lng: entry.lng
-        })));
+        const knownKeys = new Set(publishedDuplicateKeys);
         const existingDraftByKey = new Map();
         existingDrafts.forEach((entry) => {
             const key = getGatherItemKey(entry);
@@ -7188,6 +7267,10 @@ async function importGatherRunDataset(database, runDoc, apifyRun) {
         let invalidCount = 0;
         for (const normalized of normalizedItems) {
             const itemKey = getGatherItemKey(normalized);
+            if (publishedDuplicateKeys.has(itemKey)) {
+                duplicateCount += 1;
+                continue;
+            }
             if (knownKeys.has(itemKey)) {
                 const existingDraft = existingDraftByKey.get(itemKey);
                 if (existingDraft?.status === 'draft') {
@@ -7373,8 +7456,20 @@ router.get('/admin/gather/drafts', async (req, res) => {
         { category: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }
     ];
     const database = await connectToDatabase();
-    const drafts = await database.collection('gather_pin_drafts').find(query).sort({ createdAt: -1 }).limit(500).toArray();
-    res.json({ drafts: drafts.map(serializeGatherDraft) });
+    const draftsCollection = database.collection('gather_pin_drafts');
+    let drafts = await draftsCollection.find(query).sort({ createdAt: -1 }).limit(500).toArray();
+    let removedDuplicateCount = 0;
+    if (query.status === 'draft' && drafts.length) {
+        const publishedDuplicateKeys = await findPublishedGatherDuplicateKeys(database, drafts);
+        const duplicateDrafts = drafts.filter((draft) => publishedDuplicateKeys.has(getGatherItemKey(draft)));
+        if (duplicateDrafts.length) {
+            await draftsCollection.deleteMany({ _id: { $in: duplicateDrafts.map((draft) => draft._id) }, status: 'draft' });
+            const duplicateIds = new Set(duplicateDrafts.map((draft) => draft._id.toString()));
+            drafts = drafts.filter((draft) => !duplicateIds.has(draft._id.toString()));
+            removedDuplicateCount = duplicateDrafts.length;
+        }
+    }
+    res.json({ drafts: drafts.map(serializeGatherDraft), removedDuplicateCount });
 });
 
 router.put('/admin/gather/drafts/:id', async (req, res) => {
@@ -7423,11 +7518,10 @@ router.post('/admin/gather/drafts/:id/publish', async (req, res) => {
     if (normalized.missingFields.length) {
         return res.status(400).json({ message: `Lengkapi field wajib: ${normalized.missingFields.join(', ')}.` });
     }
-    const duplicateQuery = draft.externalId
-        ? { 'gatheredFrom.source': draft.source, 'gatheredFrom.externalId': draft.externalId }
-        : { link: normalized.link, lat: normalized.lat, lng: normalized.lng };
-    const duplicate = await database.collection('pins').findOne(duplicateQuery, { projection: { _id: 1 } });
-    if (duplicate) return res.status(409).json({ message: 'Pin dengan link yang sama sudah dipublikasikan.' });
+    const publishedDuplicateKeys = await findPublishedGatherDuplicateKeys(database, [normalized]);
+    if (publishedDuplicateKeys.has(getGatherItemKey(normalized))) {
+        return res.status(409).json({ message: 'Pin yang sama sudah dipublikasikan.' });
+    }
     const now = new Date();
     const pin = {
         title: normalized.title,
@@ -8808,7 +8902,9 @@ app.use('/api', router);
 module.exports.app = app;
 module.exports.runWithDatabaseRequestContext = runWithDatabaseRequestContext;
 module.exports.geocodeAddressWithGoogle = geocodeAddressWithGoogle;
+module.exports.isGatherPublishedDuplicate = isGatherPublishedDuplicate;
 module.exports.isNonProductionHostname = isNonProductionHostname;
+module.exports.resolveGoogleApiKey = resolveGoogleApiKey;
 
 const netlifyHandler = serverless(app);
 module.exports.handler = (...args) => (

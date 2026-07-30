@@ -8,13 +8,13 @@
 - **Toko / UMKM (Merchants)** = AyaKasir POS tenant stores pushed via a partner API: logo map pins + SEO pages `/toko/:slug` with WhatsApp ordering & live availability
 - PWA (installable, service worker, offline-capable)
 - Live site: **ayanaon.app**
-- Current version: **v2.5.2**
+- Current version: **v2.6.0**
 
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
 - **Map:** Google Maps JavaScript API
 - **Backend:** Single Express.js app exported through a Netlify `serverless-http` adapter and a Cloudflare Workers `httpServerHandler` adapter
-- **Hosting:** Netlify remains the custom-domain production/rollback provider; the Cloudflare Workers + Static Assets staging deployment is live at `ayanaon.petalytix-id.workers.dev` pending DNS cutover
+- **Hosting:** Cloudflare Workers + Static Assets serves production `www.ayanaon.app`; Netlify retains the apex redirect and a rollback deployment during the observation window, while staging remains `noindex`
 - **Database:** MongoDB (database name: `ayanaon-db`)
 - **Auth:** JWT + bcrypt (separate flows for sellers and residents)
 
@@ -26,11 +26,13 @@
 - Admin dashboard: manage pins, Gather Pins external scraper drafts, SEO, categories, tabs, brands, areas, mass promotions (flagged, location-gated, shared images), analytics
 - Light/dark theme
 - SEO: server-rendered pin and merchant pages, dynamic sitemap (merchant writes invalidate it; CDN freshness target 15 minutes), robots.txt
+- Cloudflare delivery: protected staging, provider-compatible service-worker caching, and a retained Netlify rollback path
 
 ## Environment Variables
 - `MONGODB_URI` - MongoDB connection string
 - `GOOGLE_MAPS_BROWSER_API_KEY` - browser-restricted Maps JavaScript/Places key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
 - `GOOGLE_GEOCODING_API_KEY` - server-only Geocoding API key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
+- Local Cloudflare development selects Wrangler environment `local`, which admits the legacy Google key during migration; the top-level production environment still requires the separate browser and server keys.
 - `JWT_SECRET` - JWT signing secret (default: `ayanaon-dev-secret`)
 - `MONGODB_DASHBOARD_PASSWORD` - embedded MongoDB Charts password
 - `AYAKASIR_PARTNER_SECRET` - Bearer secret for the AyaKasir merchants push API (integration returns 503 when unset)

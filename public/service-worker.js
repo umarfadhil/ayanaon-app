@@ -1,5 +1,5 @@
 // Bump this to force clients to fetch fresh assets after deploys
-const CACHE_NAME = 'ayanaon-static-v2.5.2-cf2';
+const CACHE_NAME = 'ayanaon-static-v2.6.0';
 const PRECACHE_URLS = [
     '/',
     '/admin.css',

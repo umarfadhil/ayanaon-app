@@ -2581,6 +2581,27 @@ textarea {
     margin-top: 8px;
 }
 
+.gather-link-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.gather-open-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.gather-open-link[aria-disabled="true"] {
+    pointer-events: none;
+    opacity: 0.45;
+}
+
 .gather-location-picker {
     display: grid;
     gap: 8px;
@@ -2611,6 +2632,15 @@ textarea {
     border-radius: 14px;
     background: rgba(7, 17, 31, 0.32);
 }
+
+.gather-location-map.is-unavailable {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--muted);
+    text-align: center;
+}
+
 
 .gather-image {
     position: relative;
