@@ -115,12 +115,10 @@
     const els = {};
     let miniMap = null;
     let miniMarker = null;
-    let miniGeocoder = null;
     let googleMapsPromise = null;
     let mapsApiKey = null;
     let massMap = null;
     let massPlacesService = null;
-    let massGeocoder = null;
     let massInfoWindow = null;
     let massMarkers = new Map();
     let massMarkerBounds = null;
@@ -3187,7 +3185,6 @@
         }
         try {
             const gmaps = await ensureGoogleMaps();
-            miniGeocoder = new gmaps.Geocoder();
             const initial = getCurrentCoords() || getPinCoords(state.selectedPin) || DEFAULT_COORDS;
             miniMap = new gmaps.Map(els.miniMapContainer, {
                 center: initial,
@@ -3238,6 +3235,39 @@
         setMiniMapPosition(coords, { pan: false });
     }
 
+    async function geocodeAdminLocation(query) {
+        const normalizedQuery = String(query || '').trim();
+        if (!normalizedQuery) {
+            throw new Error('Masukkan nama tempat atau alamat terlebih dahulu.');
+        }
+
+        const headers = {};
+        const token = getToken();
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        const response = await fetch(
+            `/api/admin/gather/geocode?query=${encodeURIComponent(normalizedQuery)}`,
+            { headers, cache: 'no-store' }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data?.message || 'Gagal mencari lokasi.');
+        }
+
+        const lat = Number(data?.result?.lat);
+        const lng = Number(data?.result?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            throw new Error('Pencarian lokasi mengembalikan koordinat yang tidak valid.');
+        }
+        return {
+            lat,
+            lng,
+            formattedAddress: data?.result?.formattedAddress || normalizedQuery,
+            placeId: data?.result?.placeId || ''
+        };
+    }
+
     async function handleMiniMapSearch() {
         const query = els.miniMapSearchInput?.value.trim() || '';
         if (!query) {
@@ -3246,21 +3276,8 @@
         }
         try {
             await initMiniMap();
-            if (!miniGeocoder) {
-                throw new Error('Geocoder belum siap.');
-            }
-            const result = await miniGeocoder.geocode({ address: query });
-            const results = result?.results || [];
-            if (!results.length) {
-                showMessage('error', 'Lokasi tidak ditemukan, coba kata kunci lain.');
-                return;
-            }
-            const loc = results[0].geometry?.location;
-            if (!loc || typeof loc.lat !== 'function' || typeof loc.lng !== 'function') {
-                showMessage('error', 'Lokasi tidak ditemukan, coba kata kunci lain.');
-                return;
-            }
-            const coords = { lat: loc.lat(), lng: loc.lng() };
+            const result = await geocodeAdminLocation(query);
+            const coords = { lat: result.lat, lng: result.lng };
             setLocationInputs(formatCoord(coords.lat), formatCoord(coords.lng));
             setMiniMapPosition(coords, { pan: true });
             showMessage(null, '');
@@ -3566,20 +3583,11 @@
         if (!location) {
             return null;
         }
-        const gmaps = await ensureGoogleMaps();
-        if (!massGeocoder) {
-            massGeocoder = new gmaps.Geocoder();
-        }
-        const result = await massGeocoder.geocode({ address: location });
-        const results = result?.results || [];
-        if (!results.length) {
-            return null;
-        }
-        const first = results[0];
+        const result = await geocodeAdminLocation(location);
         return {
-            location: first.geometry?.location || null,
-            bounds: first.geometry?.viewport || null,
-            formatted: first.formatted_address || location
+            location: { lat: result.lat, lng: result.lng },
+            bounds: null,
+            formatted: result.formattedAddress || location
         };
     }
 

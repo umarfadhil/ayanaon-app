@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { test } = require('node:test');
 
 delete process.env.MONGODB_URI;
@@ -57,4 +59,11 @@ test('requires a configured server geocoding key', async () => {
         geocodeAddressWithGoogle('Jakarta', { apiKey: '' }),
         (error) => error.statusCode === 503 && error.code === 'NOT_CONFIGURED'
     );
+});
+test('admin location searches use the authenticated server geocoding endpoint', () => {
+    const adminSource = fs.readFileSync(path.resolve(__dirname, '../public/admin.js'), 'utf8');
+
+    assert.match(adminSource, /\/api\/admin\/gather\/geocode\?query=/);
+    assert.match(adminSource, /headers\.Authorization = `Bearer \$\{token\}`/);
+    assert.doesNotMatch(adminSource, /new\s+gmaps\.Geocoder\s*\(/);
 });
