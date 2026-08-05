@@ -30,6 +30,7 @@
 
 ## Environment Variables
 - `MONGODB_URI` - MongoDB connection string
+- `MONGODB_DATABASE` - optional database name override, validated against `[A-Za-z0-9_-]{1,64}` else falls back to `ayanaon-db`; Wrangler `local` environment sets it to `ayanaon-local` for isolation, production omits it
 - `GOOGLE_MAPS_BROWSER_API_KEY` - browser-restricted Maps JavaScript/Places key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
 - `GOOGLE_GEOCODING_API_KEY` - server-only Geocoding API key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
 - Local Cloudflare development selects Wrangler environment `local`, which admits the legacy Google key during migration; the top-level production environment still requires the separate browser and server keys.
@@ -50,7 +51,7 @@
 - `analytics_events` - page views, pin views, referrers
 - `brands` - brand directory with locations
 - `areas` - Indonesian provinces and cities
-- `merchants` - AyaKasir tenant stores (pushed from the AyaKasir portal; unique `slug` + `tenantId`; `status: active|hidden`; fields incl. `logoUrl`, `menuLayout` LIST/GRID/ACCORDION, `menuHighlights[]` full menu ≤100 with per-item `category`/`photoUrl`/`price`/`available`, `searchText` blob built at upsert; SSR page at `/toko/:slug` with WA-cart ordering + live availability polling; map layer in app.js with `?toko=<slug>` deep link + search integration)
+- `merchants` - AyaKasir tenant stores (pushed from the AyaKasir portal; unique `slug` + `tenantId`; `status: active|hidden`; fields incl. `logoUrl`, `menuLayout` LIST/GRID/ACCORDION, `menuHighlights[]` full menu ≤100 with per-item `category`/`photoUrl`/`price`/`available` (partner `onlineVisible: false` entries are dropped before persistence/search indexing), `searchText` blob built at upsert; SSR page at `/toko/:slug` (`Cache-Control: private, no-store` for immediate post-sync freshness) with WA-cart ordering + live availability polling; map layer in app.js with `?toko=<slug>` deep link + search integration)
 - `gather_runs` - external Apify run records and import counters/status
 - `gather_pin_drafts` - editable, authenticated pre-publication pin drafts with source provenance and completeness metadata
 

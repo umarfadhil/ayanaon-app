@@ -647,3 +647,17 @@ Max 10 lines per task.
 - Production `www.ayanaon.app` is served by Cloudflare Workers; retain Netlify's apex redirect and rollback deployment unchanged for the documented 7-14 day observation window.
 - The Gather Actor now uses the `latest` build path with Tiket full-venue summaries, KalenderLari `/events/` discovery, and duplicate checks that also protect against matching manual pins.
 - Release metadata must advance together: root package and lockfile version, README notes, project overview, and service-worker cache revision.
+
+## AyaKasir online-menu visibility defense (2026-08-05)
+- Live diagnosis for Cafe (Demo) showed the Supabase `Salt Bread` product correctly saved with `online_visible = false`, but AyaNaon's subsequently updated Mongo merchant document still contained that item. The immediate fault was therefore an outdated/unfiltered Petalytix sync payload, not AyaNaon's menu renderer.
+- The AyaKasir partner sanitizer now drops any menu entry carrying `onlineVisible: false` before persistence and `searchText` indexing. Missing visibility remains visible for backward compatibility with older senders.
+- Dynamic `/toko/:slug` HTML now returns `Cache-Control: private, no-store, max-age=0` instead of one-hour CDN caching plus one-day stale serving, preventing a second visibility delay after a correct partner sync.
+- Added focused deployment tests for the visibility contract and storefront cache policy. These changes are local only until the AyaNaon Worker is deployed.
+- Verification passed: backend syntax, `git diff --check`, all 29 deployment tests, and Wrangler 4.115.0 production dry-run (22 assets, 4,850.73 KiB / 973.77 KiB gzip). The existing `whatwg-url` default-import warning remains non-blocking.
+
+## Local AyaKasir visibility end-to-end verification (2026-08-05)
+- The first local failure was configuration, not filtering: Petalytix `.env.local` targeted inactive port 8888 while Wrangler served AyaNaon on 8787, and AyaNaon's ignored `.env` lacked `AYAKASIR_PARTNER_SECRET`.
+- Local AyaNaon also used the production `ayanaon-db` name. `MONGODB_DATABASE` is now validated/configurable; Wrangler `local` uses isolated `ayanaon-local`, while production omits the binding and preserves the `ayanaon-db` default.
+- After aligning the ignored local partner URL/secrets and restarting both servers, the real Petalytix `pushAyanaonListing` function synced Cafe (Demo) successfully into the isolated database.
+- API and browser verification passed: 16 visible items remained; `Salt Bread`, `Alat Makan`, and `Gantungan Kunci` were absent; visible `Sourdough` remained; `/toko` returned `private, no-store, max-age=0`.
+- Verification passed: backend syntax, `git diff --check`, all 30 deployment tests, and the production Wrangler dry-run. Production bindings still omit `MONGODB_DATABASE`; the existing `whatwg-url` warning remains non-blocking.

@@ -22,7 +22,8 @@
   "env": {
     "local": {
       "vars": {
-        "AYAKASIR_ORDER_URL_PREFIX": "https://ayakasir.petalytix.id/"
+        "AYAKASIR_ORDER_URL_PREFIX": "https://ayakasir.petalytix.id/",
+        "MONGODB_DATABASE": "ayanaon-local"
       },
       "secrets": {
         "required": [

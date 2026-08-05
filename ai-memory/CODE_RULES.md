@@ -23,6 +23,7 @@
 - Mass promo pins share images via `sharedImagesFromGroup` referencing `massPromotionGroupId` — only the first pin in a group stores actual image data; resolved at read time by `resolveSharedImages()`
 - IP address used for anonymous voting and visitor tracking via `getClientIp(req)`: prefer `cf-connecting-ip`, then `x-nf-client-connection-ip`, then local `req.ip`
 - Merchant writes come ONLY from the AyaKasir partner API (Bearer `AYAKASIR_PARTNER_SECRET`, timing-safe compare); every payload field is re-sanitized server-side and `slug` is immutable after create (SEO permanence). Every merchant write must bust `sitemapCache`
+- AyaKasir menu entries use an optional `onlineVisible` partner field: omitted defaults to visible for backward compatibility, while explicit `false` must be discarded before persistence/search indexing. `/toko/:slug` responses must remain `no-store` so a completed partner sync is visible on the next request.
 - Gather Pins browser work runs only in the separately deployed Apify Actor; the shared backend starts/polls runs and persists normalized results. Never put Chromium/Playwright in either hosting adapter.
 - Browser-adapter changes are not live until `gather-actor/` is pushed, the Actor's default `latest` build succeeds, and a remote smoke run confirms both a non-zero dataset and the expected build number/log signature. Keep `.actorignore` excluding dependencies, local storage, secrets, and logs from source uploads.
 - Gather drafts require title, description, category, valid HTTP(S) link, start/end dates, and valid coordinates before publication; static location sources intentionally leave dates incomplete for human review.
@@ -51,6 +52,7 @@
 
 ## Deployment
 - `npm run dev` / `npm run dev:cloudflare` must select Wrangler environment `local`, whose `secrets.required` admits both the migration-era `GOOGLE_MAPS_API_KEY` and the preferred split keys; `npm run dev:netlify` retains rollback-provider development.
+- Local Wrangler development must use `MONGODB_DATABASE=ayanaon-local`; production intentionally omits that var and falls back to `ayanaon-db`. Petalytix local partner sync must target `http://localhost:8787`, and the ignored local env files must carry matching partner secrets before testing.
 - `npm run check:cloudflare` and `npm run deploy:cloudflare` must pass `--env=""` to target the top-level production configuration explicitly; production continues to require only the split browser/geocoding keys.
 - Cloudflare serves the production `www` hostname. Keep Netlify's apex redirect, rollback deployment, adapter, configuration, secrets, and credentials intact throughout the 7-14 day observation window.
 - `public/_redirects` must not contain Netlify function rewrites; keep those only in `netlify.toml` so Workers Static Assets fall through to Express

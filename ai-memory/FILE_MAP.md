@@ -3,7 +3,7 @@
 ## Root
 - `package.json` - runtime deps plus Netlify CLI and Wrangler dual-provider development/deploy scripts
 - `netlify.toml` - Netlify rollback build config and all Netlify-only API/SEO rewrites
-- `wrangler.jsonc` - Cloudflare Worker entry, Node compatibility, static assets, observability, and unused MongoDB-native-module aliases
+- `wrangler.jsonc` - Cloudflare Worker entry, Node compatibility, static assets, observability, optional Mongo database selection (`ayanaon-local` in the local environment; production defaults to `ayanaon-db`), and unused MongoDB-native-module aliases
 - `src/worker.js` - Cloudflare `httpServerHandler` adapter over the shared Express app; wraps every fetch in the database request context
 - `src/request-scope.js` - AsyncLocalStorage request-scope utility with nested reuse and guaranteed async disposal
 - `src/mongodb-optional-native-stub.js` - excludes unused Kerberos/client-encryption native add-ons from the Worker bundle
@@ -12,6 +12,7 @@
 - `tests/request-scope.test.js` - concurrent isolation, nested reuse, and error-path disposal regression tests
 - `tests/google-geocoding.test.js` - server-key Google Geocoding request, zero-results handling, and missing-key regression tests
 - `tests/gather-pins.test.js` - Gather duplicate-suppression, draft-cleanup, source-link, and browser-adapter deployment regression tests
+- `tests/merchant-visibility.test.js` - AyaKasir partner menu visibility sanitizer (`onlineVisible: false` rejection) and merchant storefront `no-store` cache-control regression tests
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)

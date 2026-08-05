@@ -20,6 +20,11 @@ function isNonProductionHostname(hostname) {
         || normalizedHostname.endsWith('.workers.dev');
 }
 
+function resolveMongoDatabaseName(value) {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    return /^[A-Za-z0-9_-]{1,64}$/.test(normalized) ? normalized : 'ayanaon-db';
+}
+
 app.use((req, res, next) => {
     if (isNonProductionHostname(req.headers.host)) {
         res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -31,11 +36,13 @@ app.use(bodyParser.json({ limit: '20mb' }));
 
 const {
     MONGODB_URI,
+    MONGODB_DATABASE: MONGODB_DATABASE_RAW,
     JWT_SECRET = 'ayanaon-dev-secret',
     DASHBOARD_PASSWORD = process.env.MONGODB_DASHBOARD_PASSWORD || '',
     APIFY_API_TOKEN = '',
     APIFY_GATHER_ACTOR_ID = ''
 } = process.env;
+const MONGODB_DATABASE = resolveMongoDatabaseName(MONGODB_DATABASE_RAW);
 function resolveGoogleApiKey(specificKey, legacyKey) {
     return specificKey || legacyKey || '';
 }
@@ -81,7 +88,7 @@ async function connectToDatabase() {
 
             state.client = new MongoClient(MONGODB_URI);
             await state.client.connect();
-            state.database = state.client.db('ayanaon-db');
+            state.database = state.client.db(MONGODB_DATABASE);
             await ensureIndexes(state.database);
             return state.database;
         })();
@@ -5759,6 +5766,7 @@ const nodeCrypto = require('crypto');
 
 const MERCHANT_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const MERCHANT_MENU_LAYOUTS = ['LIST', 'GRID', 'ACCORDION'];
+const MERCHANT_STOREFRONT_CACHE_CONTROL = 'private, no-store, max-age=0';
 const MERCHANT_DAY_LABELS_ID = {
     mon: 'Senin', tue: 'Selasa', wed: 'Rabu', thu: 'Kamis', fri: 'Jumat', sat: 'Sabtu', sun: 'Minggu'
 };
@@ -5867,6 +5875,9 @@ function cleanMerchantMenuHighlights(value) {
     const out = [];
     for (const entry of value) {
         if (!entry || typeof entry !== 'object') continue;
+        // Backward-compatible partner contract: omitted means visible, while an
+        // explicit false is rejected before the menu is persisted or indexed.
+        if (entry.onlineVisible === false) continue;
         const name = cleanMerchantText(entry.name, 120);
         if (!name) continue;
         const priceNumber = Number(entry.price);
@@ -6750,7 +6761,9 @@ const handleMerchantPageRequest = async (req, res) => {
         const baseUrl = resolveSeoBaseUrl(seo, req);
         const html = buildMerchantPageHtml(merchant, seo, baseUrl);
         res.set('Content-Type', 'text/html; charset=utf-8');
-        res.set('Cache-Control', 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400');
+        // Menu visibility is owner-controlled and should take effect on the next
+        // request after a partner sync, without a stale CDN storefront response.
+        res.set('Cache-Control', MERCHANT_STOREFRONT_CACHE_CONTROL);
         res.send(html);
     } catch (error) {
         console.error('Failed to render merchant page', error);
@@ -8947,6 +8960,9 @@ module.exports.geocodeAddressWithGoogle = geocodeAddressWithGoogle;
 module.exports.isGatherPublishedDuplicate = isGatherPublishedDuplicate;
 module.exports.isNonProductionHostname = isNonProductionHostname;
 module.exports.resolveGoogleApiKey = resolveGoogleApiKey;
+module.exports.cleanMerchantMenuHighlights = cleanMerchantMenuHighlights;
+module.exports.resolveMongoDatabaseName = resolveMongoDatabaseName;
+module.exports.MERCHANT_STOREFRONT_CACHE_CONTROL = MERCHANT_STOREFRONT_CACHE_CONTROL;
 
 const netlifyHandler = serverless(app);
 module.exports.handler = (...args) => (

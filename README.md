@@ -113,6 +113,9 @@ Release updates are listed from the most recent version to the earliest.
 - **PWA & SEO Hardening:** The service worker, manifest, caching headers, canonical metadata, and staging `noindex` rules were strengthened for dependable updates and crawl-safe Cloudflare delivery.
 - **Reliable Gather Imports:** Tiket.com and KalenderLari adapters recover from current source changes, retain precise venue/location details, and use duplicate-aware import and publication checks that also catch matching manually created pins.
 - **Clearer Draft Review:** Gather drafts offer a safe "Open in new tab" source link, while unavailable Maps previews stay contained in the editor instead of masking an otherwise successful import.
+- **AyaKasir Menu Visibility Sync:** Menu items a tenant explicitly hides in AyaKasir (`onlineVisible: false`) are now stripped from AyaNaon before storage and search indexing, so unpublishing an item disappears from the storefront on the very next partner sync.
+- **Instant Storefront Freshness:** `/toko/<slug>` pages are no longer CDN-cached, so a completed partner sync (menu, availability, visibility) reflects immediately instead of after up to an hour of stale caching.
+- **Isolated Local Development Data:** Local Cloudflare development now targets a dedicated `ayanaon-local` MongoDB database by default, keeping local testing from touching production data.
 
 ### What's New in v2.5.2
 - **Clean Scraped Descriptions:** Gather strips source HTML, restores paragraph breaks, and decodes nested entities such as `&amp;mdash` before drafts are displayed or saved.
