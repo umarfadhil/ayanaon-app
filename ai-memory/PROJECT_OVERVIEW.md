@@ -8,7 +8,7 @@
 - **Toko / UMKM (Merchants)** = AyaKasir POS tenant stores pushed via a partner API: logo map pins + SEO pages `/toko/:slug` with WhatsApp ordering & live availability
 - PWA (installable, service worker, offline-capable)
 - Live site: **ayanaon.app**
-- Current version: **v2.6.0**
+- Current version: **v2.6.1**
 
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
@@ -30,7 +30,7 @@
 
 ## Environment Variables
 - `MONGODB_URI` - MongoDB connection string
-- `MONGODB_DATABASE` - optional database name override, validated against `[A-Za-z0-9_-]{1,64}` else falls back to `ayanaon-db`; Wrangler `local` environment sets it to `ayanaon-local` for isolation, production omits it
+- `MONGODB_DATABASE` - optional database name override, validated against `[A-Za-z0-9_-]{1,64}` else falls back to `ayanaon-db`; both production and Wrangler `local` environment omit it, so local dev connects to the same `ayanaon-db` as production (no isolation — see `ai-memory/CODE_RULES.md` Deployment section)
 - `GOOGLE_MAPS_BROWSER_API_KEY` - browser-restricted Maps JavaScript/Places key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
 - `GOOGLE_GEOCODING_API_KEY` - server-only Geocoding API key (temporarily falls back to `GOOGLE_MAPS_API_KEY`)
 - Local Cloudflare development selects Wrangler environment `local`, which admits the legacy Google key during migration; the top-level production environment still requires the separate browser and server keys.

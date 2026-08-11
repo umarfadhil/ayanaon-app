@@ -5847,6 +5847,25 @@ function cleanMerchantOpeningHours(value) {
     return out;
 }
 
+/**
+ * Discount fields shared by a menu item and each of its variants: price is
+ * ALWAYS the final (post-discount) price — it feeds the WA-cart total — while
+ * originalPrice/discountLabel are only present when a discount applies, so
+ * the /toko page can render a strikethrough + "Hemat ..." ribbon.
+ */
+function cleanMerchantDiscountFields(entry, price) {
+    const originalPriceNumber = Number(entry.originalPrice);
+    const originalPrice = Number.isFinite(originalPriceNumber) && originalPriceNumber > price && originalPriceNumber <= 100000000
+        ? Math.round(originalPriceNumber)
+        : null;
+    const discountLabel = originalPrice ? cleanMerchantText(entry.discountLabel, 40) : null;
+    // Both fields required together — a strikethrough with no label (or vice
+    // versa) is a broken partner payload, so drop the discount silently.
+    return originalPrice && discountLabel
+        ? { originalPrice, discountLabel }
+        : { originalPrice: null, discountLabel: null };
+}
+
 /** Per-product variants (size/flavor/etc.) — one purchasable row per entry. */
 function cleanMerchantVariants(value) {
     if (!Array.isArray(value)) return [];
@@ -5863,6 +5882,7 @@ function cleanMerchantVariants(value) {
         out.push({
             name,
             price,
+            ...cleanMerchantDiscountFields(entry, price),
             available: entry.available !== false
         });
         if (out.length >= 30) break;
@@ -5886,14 +5906,17 @@ function cleanMerchantMenuHighlights(value) {
             : null;
         const photoUrl = cleanMerchantHttpsUrl(entry.photoUrl);
         const category = cleanMerchantText(entry.category, 60);
+        const description = cleanMerchantMultilineText(entry.description, 500);
         // Variants (size/flavor/etc.): when present, the /toko page renders one
         // orderable row per variant instead of a single bare-product row.
         const variants = cleanMerchantVariants(entry.variants);
         out.push({
             name,
             price,
+            ...cleanMerchantDiscountFields(entry, price === null ? 0 : price),
             photoUrl: photoUrl || null,
             category: category || null,
+            description: description || null,
             // Push-time stock snapshot from AyaKasir (default: available).
             available: entry.available !== false,
             variants
@@ -6278,21 +6301,42 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         if (!menuByCategory.has(key)) menuByCategory.set(key, []);
         menuByCategory.get(key).push(item);
     });
-    // variant, when passed, turns this into one orderable row for that variant
-    // (e.g. "Es Kopi Susu (Large)") instead of a bare-product row — same markup/
-    // classes either way, so the WA-cart script and the availability poll
-    // script (both keyed on generic .toko-menu__item[data-name]) need no changes.
+    // variant, when passed, renders this as one orderable row for that variant
+    // (visible label is just the variant name — e.g. "Large" — since it's always
+    // nested under its product's own group/summary now; the WA-message identifier
+    // stays fully qualified as "Es Kopi Susu - Large" via dataName). Same markup/
+    // classes either way, so the WA-cart script and the availability poll script
+    // (both keyed on generic .toko-menu__item[data-name]) need no changes.
     const buildMenuItemRowHtml = (item, variant) => {
-        const price = Number.isFinite(variant ? variant.price : item.price) ? (variant ? variant.price : item.price) : 0;
+        const source = variant || item;
+        const price = Number.isFinite(source.price) ? source.price : 0;
         const priceLabel = formatMerchantPrice(price);
+        // originalPrice/discountLabel only ever present together (see
+        // cleanMerchantDiscountFields on the write path) — a discount always
+        // means the "real" price (post-scheme) is what's charged via WA.
+        const hasDiscount = Number.isFinite(source.originalPrice) && source.originalPrice > price && !!source.discountLabel;
+        const originalPriceLabel = hasDiscount ? formatMerchantPrice(source.originalPrice) : '';
         // Availability: SSR uses the push-time snapshot; the live poll script
         // (availScript) then re-syncs against the AyaKasir order page, so the
         // badge + stepper are ALWAYS rendered and toggled via [hidden]/disabled.
         const isAvailable = (variant ? variant.available : item.available) !== false;
-        const rowName = variant ? `${item.name} (${variant.name})` : item.name;
+        const rowName = variant ? variant.name : item.name;
         const dataName = variant ? `${item.name} - ${variant.name}` : item.name;
-        const thumb = item.photoUrl && String(item.photoUrl).startsWith('https://')
+        // A variant row never shows a photo — matching the AyaKasir order
+        // page's .olo-variant-row (name + price only) — the product's photo
+        // is already shown once, on the group summary in buildMenuItemGroupHtml.
+        const thumb = !variant && item.photoUrl && String(item.photoUrl).startsWith('https://')
             ? `<img class="toko-menu__thumb" src="${escapeHtml(item.photoUrl)}" alt="${escapeHtml(rowName)}" loading="lazy">`
+            : '';
+        // A variant row never shows its own discount ribbon — the group
+        // summary's photo already carries one (same discount applies to the
+        // whole product), so repeating it per variant is redundant clutter.
+        const ribbon = hasDiscount && !variant ? `<span class="toko-menu__ribbon${thumb ? '' : ' toko-menu__ribbon--standalone'}">${escapeHtml(source.discountLabel)}</span>` : '';
+        // Description only shows here for a bare (no-variant) product — a
+        // variant-bearing product's description is shown ONCE, on the group
+        // summary in buildMenuItemGroupHtml below, not repeated per variant row.
+        const desc = !variant && item.description
+            ? `<span class="toko-menu__desc">${escapeHtml(item.description)}</span>`
             : '';
         const stepper = canOrderViaWa
             ? `<div class="toko-menu__qty">
@@ -6303,21 +6347,66 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             : '';
         const soldOutBadge = `<span class="toko-soldout"${isAvailable ? ' hidden' : ''}>Habis</span>`;
         return `<li class="toko-menu__item${isAvailable ? '' : ' toko-menu__item--out'}" data-name="${escapeHtml(dataName)}" data-price="${price}">
-            ${thumb}
+            ${thumb ? `<span class="toko-menu__thumb-wrap">${thumb}${ribbon}</span>` : ribbon}
             <div class="toko-menu__info">
                 <span class="toko-menu__name">${escapeHtml(rowName)}</span>
-                ${priceLabel ? `<span class="toko-menu__price">${escapeHtml(priceLabel)}</span>` : ''}
+                ${desc}
+                <span class="toko-menu__price-row">
+                    ${hasDiscount ? `<span class="toko-menu__price-was">${escapeHtml(originalPriceLabel)}</span>` : ''}
+                    ${priceLabel ? `<span class="toko-menu__price">${escapeHtml(priceLabel)}</span>` : ''}
+                </span>
             </div>
             ${soldOutBadge}
             ${stepper}
         </li>`;
     };
-    // Products with variants (size/flavor/etc.) render one row per variant —
-    // the bare product isn't directly orderable, matching the AyaKasir order
-    // page where a variant selection is required. No variants → unchanged.
+    // A variant-bearing product renders as ONE collapsed card — photo, name,
+    // description, base price — that expands (native <details>/<summary>, same
+    // mechanism as the ACCORDION category groups below) to reveal each variant's
+    // own name/price/stepper row, matching the AyaKasir order page's "tap to pick
+    // a variant" pattern instead of listing every variant as its own flat row.
+    // The wrapper <li> deliberately does NOT carry the toko-menu__item class (and
+    // has no data-name/data-price/.toko-menu__count of its own) so the WA-cart
+    // and availability scripts — which query .toko-menu__item generically and can
+    // see into collapsed <details> content regardless of visibility — only ever
+    // find the real orderable variant rows nested inside, never double-count the
+    // group header itself.
+    const buildMenuItemGroupHtml = (item) => {
+        const price = Number.isFinite(item.price) ? item.price : 0;
+        const hasDiscount = Number.isFinite(item.originalPrice) && item.originalPrice > price && !!item.discountLabel;
+        const thumb = item.photoUrl && String(item.photoUrl).startsWith('https://')
+            ? `<img class="toko-menu__thumb" src="${escapeHtml(item.photoUrl)}" alt="${escapeHtml(item.name)}" loading="lazy">`
+            : '';
+        const ribbon = hasDiscount ? `<span class="toko-menu__ribbon${thumb ? '' : ' toko-menu__ribbon--standalone'}">${escapeHtml(item.discountLabel)}</span>` : '';
+        const desc = item.description
+            ? `<span class="toko-menu__desc">${escapeHtml(item.description)}</span>`
+            : '';
+        const variantRows = item.variants.map((variant) => buildMenuItemRowHtml(item, variant)).join('');
+        // No price shown on the summary itself: with multiple variants at
+        // different prices, a single "the" price here would be misleading —
+        // each variant's own price is shown once it's expanded below.
+        return `<li class="toko-menu__group-item">
+            <details class="toko-menu__variants">
+                <summary class="toko-menu__variants-summary">
+                    ${thumb ? `<span class="toko-menu__thumb-wrap">${thumb}${ribbon}</span>` : ribbon}
+                    <div class="toko-menu__info">
+                        <span class="toko-menu__name">${escapeHtml(item.name)}</span>
+                        ${desc}
+                    </div>
+                    <span class="toko-menu__variants-toggle" aria-hidden="true">
+                        <span class="toko-menu__variants-toggle-label">Lihat Varian</span>
+                        <span class="toko-menu__variants-toggle-icon">&#9662;</span>
+                    </span>
+                </summary>
+                <ul class="toko-menu__variant-list">${variantRows}</ul>
+            </details>
+        </li>`;
+    };
+    // Products with variants (size/flavor/etc.) render as one expandable group
+    // (see buildMenuItemGroupHtml). No variants → unchanged single row.
     const buildMenuItemHtml = (item) => {
         if (Array.isArray(item.variants) && item.variants.length > 0) {
-            return item.variants.map((variant) => buildMenuItemRowHtml(item, variant)).join('');
+            return buildMenuItemGroupHtml(item);
         }
         return buildMenuItemRowHtml(item);
     };
@@ -6365,14 +6454,37 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     // No "Pesan Online" (AyaKasir QR) button here — that flow is for physical
     // visitors scanning at the store. Online visitors order via WhatsApp: pick
     // menu items with the steppers, then the CTA opens a pre-filled wa.me chat.
+    // "Lihat Keranjang" lets a shopper review/adjust picks (name, price, qty,
+    // total) in a modal before committing to the WA handoff — disabled until
+    // count > 0, same toggling pattern as the WA button itself.
     const actionsHtml = `<div class="toko-actions">
-        ${canOrderViaWa ? `<a id="toko-wa-order" class="toko-action toko-action--cta toko-action--disabled" href="#" data-wa="${escapeHtml(whatsapp)}" data-store="${escapeHtml(name)}" target="_blank" rel="noopener">Pesan via WhatsApp</a>
+        ${canOrderViaWa ? `<button type="button" id="toko-cart-btn" class="toko-action toko-action--secondary toko-cart-btn toko-action--disabled" disabled>Lihat Keranjang <span id="toko-cart-badge" class="toko-cart-badge">0</span></button>
+        <a id="toko-wa-order" class="toko-action toko-action--cta toko-action--disabled" href="#" data-wa="${escapeHtml(whatsapp)}" data-store="${escapeHtml(name)}" target="_blank" rel="noopener">Pesan via WhatsApp</a>
         <p id="toko-wa-hint" class="toko-wa-hint">Pilih menu di atas untuk memesan via WhatsApp.</p>` : ''}
         <div class="toko-actions-row">
             ${directionsUrl ? `<a class="toko-action toko-action--secondary" href="${escapeHtml(directionsUrl)}" target="_blank" rel="noopener">Arahkan</a>` : ''}
             ${mapFocusUrl ? `<a class="toko-action toko-action--secondary" href="${escapeHtml(mapFocusUrl)}">Lihat di Peta</a>` : ''}
         </div>
     </div>`;
+    // Modal markup for the cart review panel; only needed when WA ordering is
+    // possible (same gate as actionsHtml's cart button / waScript).
+    const cartModalHtml = canOrderViaWa
+        ? `<div id="toko-cart-modal" class="toko-cart-modal" hidden>
+        <div class="toko-cart-modal__overlay" data-cart-close></div>
+        <div class="toko-cart-modal__panel" role="dialog" aria-modal="true" aria-labelledby="toko-cart-modal-title">
+            <div class="toko-cart-modal__head">
+                <h2 id="toko-cart-modal-title">Keranjang</h2>
+                <button type="button" class="toko-cart-modal__close" data-cart-close aria-label="Tutup">&times;</button>
+            </div>
+            <ul id="toko-cart-list" class="toko-cart-list"></ul>
+            <div class="toko-cart-modal__total">
+                <span>Total</span>
+                <span id="toko-cart-modal-total">Rp0</span>
+            </div>
+            <button type="button" id="toko-cart-modal-order" class="toko-action toko-action--cta">Pesan via WhatsApp</button>
+        </div>
+    </div>`
+        : '';
 
     // Client-side WhatsApp cart: qty steppers feed a pre-filled wa.me message.
     // NOTE: no backticks or dollar-brace inside — the script body lives in a
@@ -6385,6 +6497,12 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     var waNumber = waButton.getAttribute('data-wa') || '';
     var storeName = waButton.getAttribute('data-store') || 'Toko';
     var hint = document.getElementById('toko-wa-hint');
+    var cartBtn = document.getElementById('toko-cart-btn');
+    var cartBadge = document.getElementById('toko-cart-badge');
+    var cartModal = document.getElementById('toko-cart-modal');
+    var cartList = document.getElementById('toko-cart-list');
+    var cartTotalEl = document.getElementById('toko-cart-modal-total');
+    var cartOrderBtn = document.getElementById('toko-cart-modal-order');
     var rows = Array.prototype.slice.call(document.querySelectorAll('.toko-menu__item'));
     function formatPrice(value) {
         return 'Rp' + Number(value || 0).toLocaleString('id-ID');
@@ -6416,6 +6534,103 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             waButton.textContent = 'Pesan via WhatsApp';
             if (hint) hint.style.display = '';
         }
+        if (cartBtn) {
+            cartBtn.disabled = count === 0;
+            cartBtn.classList.toggle('toko-action--disabled', count === 0);
+        }
+        if (cartBadge) cartBadge.textContent = String(count);
+        if (cartModal && !cartModal.hidden) renderCartList();
+    }
+    function findRow(itemName) {
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-name') === itemName) return rows[i];
+        }
+        return null;
+    }
+    function adjustCartQty(itemName, step) {
+        var row = findRow(itemName);
+        if (!row) return;
+        var countEl = row.querySelector('.toko-menu__count');
+        if (!countEl) return;
+        var next = Math.max(0, (parseInt(countEl.textContent, 10) || 0) + step);
+        countEl.textContent = String(next);
+        refresh();
+    }
+    function renderCartList() {
+        if (!cartList) return;
+        cartList.innerHTML = '';
+        var items = selection();
+        var total = 0;
+        items.forEach(function (item) {
+            total += item.price * item.qty;
+            var li = document.createElement('li');
+            li.className = 'toko-cart-row';
+            var info = document.createElement('div');
+            info.className = 'toko-cart-row__info';
+            var nameEl = document.createElement('span');
+            nameEl.className = 'toko-cart-row__name';
+            nameEl.textContent = item.name;
+            var priceEl = document.createElement('span');
+            priceEl.className = 'toko-cart-row__price';
+            priceEl.textContent = formatPrice(item.price) + ' x ' + item.qty;
+            info.appendChild(nameEl);
+            info.appendChild(priceEl);
+            var qtyBox = document.createElement('div');
+            qtyBox.className = 'toko-menu__qty';
+            var minusBtn = document.createElement('button');
+            minusBtn.type = 'button';
+            minusBtn.className = 'toko-menu__step';
+            minusBtn.textContent = String.fromCharCode(8722);
+            minusBtn.setAttribute('aria-label', 'Kurangi ' + item.name);
+            minusBtn.addEventListener('click', function () { adjustCartQty(item.name, -1); });
+            var countSpan = document.createElement('span');
+            countSpan.className = 'toko-menu__count';
+            countSpan.textContent = String(item.qty);
+            var plusBtn = document.createElement('button');
+            plusBtn.type = 'button';
+            plusBtn.className = 'toko-menu__step';
+            plusBtn.textContent = '+';
+            plusBtn.setAttribute('aria-label', 'Tambah ' + item.name);
+            plusBtn.addEventListener('click', function () { adjustCartQty(item.name, 1); });
+            qtyBox.appendChild(minusBtn);
+            qtyBox.appendChild(countSpan);
+            qtyBox.appendChild(plusBtn);
+            li.appendChild(info);
+            li.appendChild(qtyBox);
+            cartList.appendChild(li);
+        });
+        if (items.length === 0) {
+            var empty = document.createElement('li');
+            empty.className = 'toko-cart-empty';
+            empty.textContent = 'Keranjang masih kosong.';
+            cartList.appendChild(empty);
+        }
+        if (cartTotalEl) cartTotalEl.textContent = formatPrice(total);
+    }
+    function openCartModal() {
+        if (!cartModal) return;
+        renderCartList();
+        cartModal.hidden = false;
+    }
+    function closeCartModal() {
+        if (cartModal) cartModal.hidden = true;
+    }
+    if (cartBtn) {
+        cartBtn.addEventListener('click', function () { openCartModal(); });
+    }
+    if (cartModal) {
+        Array.prototype.forEach.call(cartModal.querySelectorAll('[data-cart-close]'), function (el) {
+            el.addEventListener('click', closeCartModal);
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && !cartModal.hidden) closeCartModal();
+        });
+    }
+    if (cartOrderBtn) {
+        cartOrderBtn.addEventListener('click', function () {
+            waButton.click();
+            closeCartModal();
+        });
     }
     rows.forEach(function (row) {
         var countEl = row.querySelector('.toko-menu__count');
@@ -6658,6 +6873,64 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     .toko-menu__acc { border-bottom: 1px solid var(--t-border); padding-bottom: 8px; }
     .toko-menu__acc-summary { cursor: pointer; padding: 6px 0; user-select: none; }
     .toko-menu__acc-summary::marker { color: var(--t-link); }
+    /* Expandable variant group (product with variants) — the <li> wrapper
+       carries no toko-menu__item styling of its own so it stays out of the
+       WA-cart/availability scripts' generic .toko-menu__item selector; the
+       <summary> is styled to LOOK like a normal row instead. Layout mirrors
+       the AyaKasir order page's variant picker (.olo-add trigger button,
+       .olo-variants dashed-top-border list, plain no-photo .olo-variant-row). */
+    .toko-menu__group-item { border-bottom: 1px dashed var(--t-border); }
+    .toko-menu__group-item:last-child { border-bottom: none; }
+    .toko-menu__variants-summary {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; font-size: 15px; cursor: pointer; user-select: none; list-style: none;
+    }
+    .toko-menu__variants-summary::-webkit-details-marker { display: none; }
+    /* A real labelled button — "Lihat Varian" + chevron — not a bare unicode
+       glyph, so the "tap to see variants" affordance is as obvious as the
+       AyaKasir order page's "+" trigger. */
+    .toko-menu__variants-toggle {
+      flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      padding: 7px 12px; border-radius: 999px;
+      border: 1px solid var(--t-accent); color: var(--t-accent);
+      background: color-mix(in srgb, var(--t-accent) 10%, transparent);
+      font-size: 12.5px; font-weight: 700; white-space: nowrap;
+    }
+    .toko-menu__variants-toggle-icon { display: inline-block; font-size: 11px; transition: transform 0.15s ease; }
+    .toko-menu__variants[open] > .toko-menu__variants-summary .toko-menu__variants-toggle-icon {
+      transform: rotate(180deg);
+    }
+    .toko-menu__variant-list {
+      padding-top: 8px; margin: 4px 0 8px; border-top: 1px dashed var(--t-border);
+      display: grid; gap: 4px;
+    }
+    /* Higher specificity than the plain/grid .toko-menu__item rules below on
+       purpose — a variant row is always the plain "name · price [stepper]"
+       shape (no photo, no card border/radius), whether the surrounding
+       category list is LIST, GRID, or ACCORDION. */
+    .toko-menu__variant-list .toko-menu__item {
+      padding: 6px 0; font-size: 14px; border: none; border-radius: 0;
+      flex-direction: row; align-items: center;
+    }
+    .toko-menu__variant-list .toko-menu__item:last-child { border-bottom: none; }
+    .toko-menu__variant-list .toko-menu__qty { justify-content: flex-end; }
+    .toko-menu__list--grid .toko-menu__group-item {
+      border: 1px solid var(--t-border); border-radius: 12px; padding: 10px; border-bottom: 1px solid var(--t-border);
+    }
+    .toko-menu__list--grid .toko-menu__group-item:last-child { border-bottom: 1px solid var(--t-border); }
+    .toko-menu__list--grid .toko-menu__variants-summary { flex-direction: column; align-items: stretch; gap: 8px; padding: 0; }
+    .toko-menu__list--grid .toko-menu__variants-summary .toko-menu__thumb { width: 100%; height: auto; aspect-ratio: 1 / 1; }
+    .toko-menu__list--grid .toko-menu__variants-summary .toko-menu__variants-toggle { align-self: stretch; }
+    .toko-menu__list--grid .toko-menu__variant-list { margin-top: 8px; }
+    /* A narrow grid card (~150-180px) has no room for a horizontal
+       ribbon+name+price+stepper row — wrap the name/price onto their own
+       full-width line and let the stepper drop to a right-aligned line
+       below, instead of overflowing past the card's edge. */
+    .toko-menu__list--grid .toko-menu__variant-list .toko-menu__item {
+      flex-wrap: wrap; row-gap: 4px;
+    }
+    .toko-menu__list--grid .toko-menu__variant-list .toko-menu__item .toko-menu__info { flex: 1 1 100%; }
+    .toko-menu__list--grid .toko-menu__variant-list .toko-menu__qty { flex: 1 1 100%; justify-content: flex-end; }
     .toko-menu__item--out { opacity: 0.55; }
     .toko-menu__item--out .toko-menu__thumb { filter: grayscale(1); }
     .toko-soldout {
@@ -6667,8 +6940,22 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     .toko-menu__thumb {
       width: 48px; height: 48px; border-radius: 10px; object-fit: cover; flex: 0 0 auto;
     }
+    .toko-menu__thumb-wrap { position: relative; flex: 0 0 auto; display: inline-flex; }
+    .toko-menu__list--grid .toko-menu__thumb-wrap { display: block; width: 100%; }
+    .toko-menu__ribbon {
+      position: absolute; top: -4px; left: -4px; background: #c2453d; color: #fff;
+      font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px;
+      white-space: nowrap; line-height: 1.4; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    }
+    .toko-menu__ribbon--standalone { position: static; flex: 0 0 auto; box-shadow: none; }
     .toko-menu__info { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .toko-menu__name { color: var(--t-text); font-weight: 600; }
+    .toko-menu__desc {
+      color: var(--t-muted); font-size: 12.5px; line-height: 1.4;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .toko-menu__price-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .toko-menu__price-was { color: var(--t-muted); font-size: 12.5px; text-decoration: line-through; white-space: nowrap; }
     .toko-menu__price { color: var(--t-body); font-size: 14px; white-space: nowrap; }
     .toko-menu__qty { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
     .toko-menu__step {
@@ -6701,6 +6988,42 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     .toko-action--secondary {
       background: var(--t-card); color: var(--t-link); border: 1px solid var(--t-btn-border);
       padding: 9px 14px; flex: 1 1 auto; font-size: 14px;
+    }
+    .toko-cart-btn { width: 100%; gap: 8px; cursor: pointer; font-family: inherit; }
+    .toko-cart-btn:disabled { cursor: not-allowed; }
+    .toko-cart-badge {
+      background: var(--t-accent); color: #fff; font-size: 12px; font-weight: 700;
+      border-radius: 999px; padding: 1px 7px; min-width: 18px; display: inline-block; text-align: center;
+    }
+    .toko-cart-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: flex-end; justify-content: center; }
+    .toko-cart-modal[hidden] { display: none; }
+    @media (min-width: 640px) { .toko-cart-modal { align-items: center; } }
+    .toko-cart-modal__overlay { position: absolute; inset: 0; background: rgba(15, 21, 36, 0.55); }
+    .toko-cart-modal__panel {
+      position: relative; background: var(--t-card); border-radius: 16px 16px 0 0; padding: 18px;
+      width: 100%; max-width: 480px; max-height: 80vh; display: flex; flex-direction: column;
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.2);
+    }
+    @media (min-width: 640px) { .toko-cart-modal__panel { border-radius: 16px; max-height: 70vh; } }
+    .toko-cart-modal__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .toko-cart-modal__head h2 { margin: 0; font-size: 17px; color: var(--t-text); }
+    .toko-cart-modal__close {
+      border: none; background: none; font-size: 22px; line-height: 1; cursor: pointer;
+      color: var(--t-muted); padding: 4px; font-family: inherit;
+    }
+    .toko-cart-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1 1 auto; }
+    .toko-cart-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--t-border);
+    }
+    .toko-cart-row:last-child { border-bottom: none; }
+    .toko-cart-row__info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .toko-cart-row__name { color: var(--t-text); font-weight: 600; font-size: 14px; }
+    .toko-cart-row__price { color: var(--t-muted); font-size: 12.5px; }
+    .toko-cart-empty { text-align: center; color: var(--t-muted); font-size: 14px; padding: 24px 0; }
+    .toko-cart-modal__total {
+      display: flex; align-items: center; justify-content: space-between; font-weight: 700;
+      color: var(--t-text); padding: 12px 0; border-top: 1px solid var(--t-border); margin-top: 4px;
     }
     .toko-footer { text-align: center; color: var(--t-muted); font-size: 13px; padding: 24px 0 16px; }
   </style>
@@ -6738,6 +7061,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     </main>
     <footer class="toko-footer">AyaNaon.app powered by Petalytix</footer>
   </div>
+  ${cartModalHtml}
   ${waScript}
   ${availScript}
 </body>

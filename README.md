@@ -107,6 +107,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.6.1
+- **Expandable Variant Menus on `/toko`:** Products with size/flavor variants (e.g. "Large"/"Regular") now collapse into a single tappable group showing the shared photo, description, and base price — expanding reveals each orderable variant, mirroring the AyaKasir order page's own variant picker. This also fixes a bug where every variant-bearing product's description silently failed to render on the storefront, independent of the tenant's own description-visibility setting.
+- **Cart Review Before Ordering:** A new "Lihat Keranjang" button on `/toko/<slug>` opens a review modal listing every selected item, quantity, and running total, with the same quantity controls as the menu, before handing off to the pre-filled WhatsApp order message.
+- **Local Development Connects Directly to Production Data:** Local Cloudflare development (`npm run dev`) now targets the same `ayanaon-db` database as production instead of an isolated local sandbox, so local changes are visible immediately without deploying first — local writes (pins, admin actions, etc.) affect live data, so treat local sessions with production-level care.
+
 ### What's New in v2.6.0
 - **Cloudflare Production Delivery:** AyaNaon now serves `www.ayanaon.app` through Cloudflare Workers and Static Assets, while Netlify remains available as the DNS-level rollback path during the observation window.
 - **Safer Maps & Admin Location Search:** Browser Maps/Places and server-side Geocoding use separate keys. Admin and Gather address searches now use an authenticated backend geocoding route, keeping the Geocoding key out of browsers.
