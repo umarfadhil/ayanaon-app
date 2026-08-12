@@ -2581,6 +2581,14 @@ textarea {
     margin-top: 8px;
 }
 
+#gather-image-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 10px;
+}
+
 .gather-link-control {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

@@ -40,9 +40,9 @@ test('falls back from empty Wrangler Google bindings to the legacy key', () => {
     assert.equal(apiModule.resolveGoogleApiKey('specific-test-key', 'legacy-test-key'), 'specific-test-key');
 });
 
-test('uses an isolated and validated Mongo database name for local development', () => {
+test('uses the validated production database default for local development', () => {
     const wrangler = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../wrangler.jsonc'), 'utf8'));
-    assert.equal(wrangler.env.local.vars.MONGODB_DATABASE, 'ayanaon-local');
+    assert.equal(wrangler.env.local.vars.MONGODB_DATABASE, undefined);
     assert.equal(apiModule.resolveMongoDatabaseName('ayanaon-preview_1'), 'ayanaon-preview_1');
     assert.equal(apiModule.resolveMongoDatabaseName('../ayanaon-db'), 'ayanaon-db');
     assert.equal(apiModule.resolveMongoDatabaseName(''), 'ayanaon-db');

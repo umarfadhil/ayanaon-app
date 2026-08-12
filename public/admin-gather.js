@@ -156,7 +156,15 @@
     }
 
     function validCoordinates(lat, lng) {
-        return Number.isFinite(lat) && lat >= -90 && lat <= 90 && Number.isFinite(lng) && lng >= -180 && lng <= 180;
+        return Number.isFinite(lat) && lat >= -90 && lat <= 90
+            && Number.isFinite(lng) && lng >= -180 && lng <= 180
+            && !(lat === 0 && lng === 0);
+    }
+
+    function optionalCoordinate(value) {
+        if (value === null || value === '' || typeof value === 'undefined') return null;
+        const coordinate = Number(value);
+        return Number.isFinite(coordinate) ? coordinate : null;
     }
 
     function applyCoordinates(lat, lng, options = {}) {
@@ -231,7 +239,7 @@
     function missingLabels(draft) {
         const labels = {
             title: 'Title', description: 'Description', category: 'Category', link: 'Link',
-            startDate: 'Start Date', endDate: 'End Date', coordinates: 'Coordinates'
+            dateRange: 'Date range', coordinates: 'Coordinates'
         };
         return (draft?.missingFields || []).map((field) => labels[field] || field);
     }
@@ -252,9 +260,10 @@
         }
         els.gatherDraftList.innerHTML = visible.map((draft) => {
             const missing = missingLabels(draft);
-            const readiness = missing.length ? `${missing.length} belum lengkap` : 'Siap publikasi';
+            const isUpdate = Boolean(draft.updateTargetPinId);
+            const readiness = missing.length ? `${missing.length} belum lengkap` : (isUpdate ? 'Siap update pin' : 'Siap publikasi');
             return `<button type="button" class="gather-draft-card${draft.id === state.selectedId ? ' is-active' : ''}" data-draft-id="${escapeHtml(draft.id)}">
-                <span class="gather-draft-card__source">${escapeHtml(sourceLabel(draft.source))}</span>
+                <span class="gather-draft-card__source">${escapeHtml(sourceLabel(draft.source))}${isUpdate ? ' · UPDATE PIN' : ''}</span>
                 <strong>${escapeHtml(draft.title || 'Tanpa judul')}</strong>
                 <span>${escapeHtml(draft.category || 'Kategori belum diisi')}</span>
                 <em class="${missing.length ? 'is-incomplete' : 'is-ready'}">${escapeHtml(readiness)}</em>
@@ -301,8 +310,9 @@
         if (!draft) return clearEditor();
         els.gatherReviewGrid?.classList.remove('is-editor-empty');
         els.gatherDraftForm?.classList.remove('hidden');
-        els.gatherEditorSource.textContent = sourceLabel(draft.source);
+        els.gatherEditorSource.textContent = `${sourceLabel(draft.source)}${draft.updateTargetPinId ? ' · UPDATE PIN' : ''}`;
         els.gatherEditorTitle.textContent = draft.title || 'Edit draft';
+        if (els.gatherPublishBtn) els.gatherPublishBtn.textContent = draft.updateTargetPinId ? 'Update pin' : 'Publikasikan pin';
         els.gatherTitle.value = draft.title || '';
         els.gatherDescription.value = draft.description || '';
         populateCategories(draft.category || '');
@@ -310,8 +320,10 @@
         updateOpenLink(draft.link || '');
         els.gatherStartDate.value = draft.startDate || '';
         els.gatherEndDate.value = draft.endDate || '';
-        els.gatherLat.value = Number.isFinite(Number(draft.lat)) ? draft.lat : '';
-        els.gatherLng.value = Number.isFinite(Number(draft.lng)) ? draft.lng : '';
+        const draftLat = optionalCoordinate(draft.lat);
+        const draftLng = optionalCoordinate(draft.lng);
+        els.gatherLat.value = draftLat === null ? '' : draftLat;
+        els.gatherLng.value = draftLng === null ? '' : draftLng;
         updateCompleteness(draft);
         renderImages(draft);
         renderDrafts();
@@ -321,6 +333,7 @@
     function clearEditor() {
         state.selectedId = '';
         updateOpenLink('');
+        if (els.gatherPublishBtn) els.gatherPublishBtn.textContent = 'Publikasikan pin';
         els.gatherReviewGrid?.classList.add('is-editor-empty');
         els.gatherDraftForm?.classList.add('hidden');
         renderDrafts();
@@ -343,19 +356,24 @@
 
     function localMissing(payload) {
         const missing = [];
-        ['title', 'description', 'category', 'link', 'startDate', 'endDate'].forEach((key) => {
+        ['title', 'description', 'category', 'link'].forEach((key) => {
             if (!payload[key]) missing.push(key);
         });
-        if (!Number.isFinite(payload.lat) || !Number.isFinite(payload.lng)) missing.push('coordinates');
-        if (payload.startDate && payload.endDate && payload.endDate < payload.startDate && !missing.includes('endDate')) missing.push('endDate');
+        if (!validCoordinates(payload.lat, payload.lng)) missing.push('coordinates');
+        if (payload.startDate && payload.endDate && payload.endDate < payload.startDate) missing.push('dateRange');
         return missing;
     }
 
     function updateCompleteness(draft) {
         if (!els.gatherCompleteness) return;
         const missing = draft?.missingFields || localMissing(formPayload());
+        const requiredFields = new Set(['title', 'description', 'category', 'link', 'coordinates']);
+        const missingRequiredCount = missing.filter((field) => requiredFields.has(field)).length;
+        const invalidRange = missing.includes('dateRange');
         els.gatherCompleteness.classList.toggle('is-ready', !missing.length);
-        els.gatherCompleteness.textContent = missing.length ? `${7 - missing.length}/7 field siap` : '7/7 siap dipublikasikan';
+        els.gatherCompleteness.textContent = missing.length
+            ? `${5 - missingRequiredCount}/5 field wajib siap${invalidRange ? ' · periksa rentang tanggal' : ''}`
+            : '5/5 field wajib siap dipublikasikan';
     }
 
     function setBusy(busy) {
@@ -399,7 +417,9 @@
         els.gatherProgressBar.style.width = status === 'SUCCEEDED' ? '100%' : (running ? '64%' : '100%');
         els.gatherProgressBar.classList.toggle('is-running', running);
         els.gatherRunMetrics.innerHTML = [
-            ['Hasil', run.itemCount || 0], ['Draft baru', run.draftCount || 0],
+            ['Hasil', run.itemCount || 0], ['Draft antrean', run.draftCount || 0],
+            ['Perlu update', run.updateDraftCount || 0],
+            ['Draft diperkaya', run.refreshedCount || 0],
             ['Sudah dikenal', run.excludedItemCount || 0], ['Duplikat hasil', run.duplicateCount || 0],
             ['Perlu dilengkapi', run.invalidCount || 0]
         ].map(([label, value]) => `<span><strong>${value}</strong>${label}</span>`).join('');
@@ -443,7 +463,10 @@
                 renderRun(data.run);
                 if (data.run.status === 'SUCCEEDED') {
                     await loadDrafts({ selectFirst: true });
-                    showMessage('success', `${data.run.draftCount} draft baru siap diperiksa.`);
+                    showMessage(
+                        'success',
+                        `${data.run.draftCount || 0} draft siap diperiksa (${data.run.updateDraftCount || 0} update pin); ${data.run.refreshedCount || 0} draft lama diperkaya.`
+                    );
                     return;
                 }
                 if (TERMINAL.has(data.run.status)) return;
@@ -491,10 +514,10 @@
         if (!saved) return;
         setBusy(true);
         try {
-            await api(`/api/admin/gather/drafts/${saved.id}/publish`, { method: 'POST' });
+            const result = await api(`/api/admin/gather/drafts/${saved.id}/publish`, { method: 'POST' });
             state.drafts = state.drafts.filter((item) => item.id !== saved.id);
             clearEditor();
-            showMessage('success', 'Pin berhasil dipublikasikan ke peta AyaNaon.');
+            showMessage('success', result.updated ? 'Pin lama berhasil diperbarui.' : 'Pin berhasil dipublikasikan ke peta AyaNaon.');
         } catch (error) {
             showMessage('error', error.message);
         } finally {

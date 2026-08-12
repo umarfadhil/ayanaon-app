@@ -40,6 +40,8 @@
 
 ### External Gather Actor (`gather-actor/`)
 - `src/main.js` - normalized, duplicate-aware adapters for tiket.com, Loket, Yesplis, IndoRelawan, KalenderLari, MICHELIN, Pertamina, and SPKLU
+- `src/pertamina-utils.js` - source-specific SPBU COCO description formatting with multiline fuel and facility values
+- `src/spklu-utils.js` - SPKLU charger-total fallback and per-charger-box description formatting
 - `src/tiket-utils.js` - Tiket full-venue cleanup, price normalization, and Indonesian event-summary formatting
 - `.actor/actor.json` + `.actor/input_schema.json` - Apify Actor manifest and source/limit input schema
 - `Dockerfile` - Playwright Chrome Actor runtime; deployed separately from the web app

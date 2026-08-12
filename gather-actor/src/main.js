@@ -1,9 +1,12 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler, RequestQueue } from 'crawlee';
+import { buildPertaminaDescription } from './pertamina-utils.js';
+import { buildSpkluDescription } from './spklu-utils.js';
 import { buildTiketDescription, cleanTiketLocation, normalizeTiketPrice } from './tiket-utils.js';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const TODAY = new Date().toISOString().slice(0, 10);
+const YESPLIS_API_BASE = 'https://api-v5.yesplis.com';
 const MONTHS_ID = { januari: 1, jan: 1, februari: 2, feb: 2, maret: 3, mar: 3, april: 4, apr: 4, mei: 5, juni: 6, jun: 6, juli: 7, jul: 7, agustus: 8, agu: 8, ags: 8, september: 9, sep: 9, oktober: 10, okt: 10, november: 11, nov: 11, desember: 12, des: 12 };
 const MONTHS_EN = {
     jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
@@ -14,11 +17,17 @@ const MONTHS_EN = {
 const CATEGORIES = {
     event: '🎉 Konser Musik & Acara', social: '🧑‍🤝‍🧑 Sosial & Kopdar',
     sport: '🏃 Olahraga & Aktivitas Hobi', hotel: '🏡 Akomodasi Pilihan',
-    spbu: '⛽ SPBU', spklu: '⚡ SPKLU', education: '🎓 Edukasi',
+    spbu: '⛽ SPBU/SPBG', spklu: '⚡ SPKLU', education: '🎓 Edukasi',
     culture: '🎭 Budaya & Hiburan', market: '🛒 Pasar Lokal & Pameran', other: '💡 Lain-lain'
 };
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
+function identifier(value) {
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'bigint') return String(value);
+    return '';
+}
 function numeric(value) { if (value === null || value === '' || typeof value === 'undefined') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
 function decodeHtmlEntities(value) {
     const entities = {
@@ -64,7 +73,7 @@ function createExclusions(input) {
     };
 }
 function isExcluded(exclusions, item = {}) {
-    const externalId = text(item.externalId || item.id);
+    const externalId = identifier(item.externalId || item.id);
     const link = canonicalLink(item.link);
     return Boolean((externalId && exclusions.externalIds.has(externalId)) || (link && exclusions.links.has(link)));
 }
@@ -109,7 +118,7 @@ function normalizeImageUrls(values) {
 function normalize(item, source) {
     return {
         source,
-        externalId: text(item.externalId || item.id),
+        externalId: identifier(item.externalId || item.id),
         title: htmlToText(item.title),
         description: htmlToText(item.description),
         category: text(item.category),
@@ -147,6 +156,21 @@ async function fetchJson(url, options = {}, retries = 3) {
         }
     }
     throw lastError;
+}
+
+function actorFailureMessage(source, error) {
+    const sourceName = source === 'yesplis' ? 'Yesplis' : `Scraper ${source || 'eksternal'}`;
+    const causes = [];
+    for (let current = error; current && !causes.includes(current); current = current.cause) causes.push(current);
+    const dnsError = causes.find((item) => item?.code === 'ENOTFOUND');
+    if (dnsError) {
+        const host = text(dnsError.hostname) || 'sumber eksternal';
+        return `${sourceName} gagal: host ${host} tidak ditemukan (DNS).`;
+    }
+    const detail = causes.map((item) => text(item?.message)).find((message) => message && message !== 'fetch failed')
+        || text(error?.message)
+        || 'Kesalahan sumber tidak diketahui.';
+    return `${sourceName} gagal: ${detail}`.slice(0, 240);
 }
 async function geocode(query) {
     const exact = text(query);
@@ -210,7 +234,7 @@ async function scrapeYesplis(limit, exclusions) {
     const output = [];
     for (let page = 1; output.length < limit; page += 1) {
         const headers = { 'yp-page-code': 'https://www.yesplis.com/', Origin: 'https://www.yesplis.com', Referer: 'https://www.yesplis.com/' };
-        const payload = await fetchJson(`https://api-v4.yesplis.com/api/v3/public/events/landing-page?show=24&page=${page}`, { headers });
+        const payload = await fetchJson(`${YESPLIS_API_BASE}/api/v3/public/events/landing-page?show=24&page=${page}`, { headers });
         const data = payload?.data || {};
         const rows = data.rows || [];
         if (!rows.length) break;
@@ -218,7 +242,7 @@ async function scrapeYesplis(limit, exclusions) {
             if (!summary.slug) continue;
             const link = `https://www.yesplis.com/event/${summary.slug}`;
             if (isExcluded(exclusions, { externalId: summary.slug, link })) continue;
-            let detail = (await fetchJson(`https://api-v4.yesplis.com/api/v3/public/events/detail/${summary.slug}`, {
+            let detail = (await fetchJson(`${YESPLIS_API_BASE}/api/v3/public/events/detail/${summary.slug}`, {
                 headers: { ...headers, 'yp-page-code': link, Referer: link }
             }))?.data;
             if (Array.isArray(detail)) detail = detail[0];
@@ -277,7 +301,7 @@ async function scrapePertamina(limit, exclusions) {
             if (isExcluded(exclusions, { externalId: item.id || item.code })) continue;
             output.push(normalize({
                 externalId: item.id || item.code, title: item.name, category: CATEGORIES.spbu,
-                description: `🕓 Jam Operasional: ${text(item.operational_hour) || '-'}\n\n⛽ Bahan Bakar:\n${text(item.fuel) || '-'}\n\n🏪 Fasilitas:\n${text(item.facility) || '-'}`,
+                description: buildPertaminaDescription(item),
                 link: 'https://pertaminaretail.com/outlet-locator', startDate: '', endDate: '', lat: item.lat, lng: item.long,
                 images: [item.images, item.image, item.photo, item.logo, item.image_url]
             }, 'pertamina'));
@@ -292,15 +316,12 @@ async function scrapeSpklu(limit, exclusions) {
     const rows = await fetchJson('https://petaspklu.id/api/v1/spklu/all');
     return (Array.isArray(rows) ? rows : []).filter((item) => !isExcluded(exclusions, {
         externalId: item.id
-    })).slice(0, limit).map((item) => {
-        const total = numeric(item.total_charger) ?? (item.chargerboxes || []).reduce((sum, box) => sum + (numeric(box.jumlah_charger) || 0), 0);
-        return normalize({
+    })).slice(0, limit).map((item) => normalize({
             externalId: item.id, title: item.nama_lokasi, category: CATEGORIES.spklu,
-            description: `⚡ Daya Max: ${text(item.watt) || '-'}\n🔌 Total Charger: ${total || '-'}`,
+            description: buildSpkluDescription(item),
             link: 'https://petaspklu.id/', startDate: '', endDate: '', lat: item.latitude, lng: item.longitude,
             images: [item.images, item.image, item.photo, item.logo, item.image_url]
-        }, 'spklu');
-    });
+        }, 'spklu'));
 }
 
 function pickTranslation(rows = []) { return rows.find((row) => ['ID', 'id'].includes(row.language)) || rows.find((row) => ['EN', 'en'].includes(row.language)) || rows[0] || {}; }
@@ -574,11 +595,29 @@ async function scrapeKalenderLari(limit, exclusions) {
                 const domLocation = document.querySelector('.mec-single-event-location')?.textContent?.replace(/^\s*Location\s*/i, '').trim() || '';
                 const domStartDate = document.querySelector('.mec-single-event-date .mec-start-date-label, .mec-start-date-label')?.textContent?.trim() || '';
                 const domEndDate = document.querySelector('.mec-single-event-date .mec-end-date-label, .mec-end-date-label')?.textContent?.trim() || domStartDate;
+                const kalenderLariHost = window.location.hostname.replace(/^www\./i, '').toLowerCase();
+                const originalLinkCandidates = [
+                    ...document.querySelectorAll('.mec-more-info-button[href], .mec-booking-button[href], .mec-events-event-more-info a[href]')
+                ].map((anchor) => anchor.href);
+                const schemaOffers = Array.isArray(schema.offers) ? schema.offers : [schema.offers];
+                schemaOffers.filter(Boolean).forEach((offer) => originalLinkCandidates.push(offer.url));
+                const originalLink = originalLinkCandidates.find((candidate) => {
+                    try {
+                        const url = new URL(candidate, window.location.href);
+                        return ['http:', 'https:'].includes(url.protocol)
+                            && url.hostname.replace(/^www\./i, '').toLowerCase() !== kalenderLariHost;
+                    } catch {
+                        return false;
+                    }
+                }) || '';
                 return {
                     title: schema.name || document.querySelector('h1, .mec-single-title')?.textContent?.trim() || document.title,
                     startDate: schema.startDate || domStartDate,
                     endDate: schema.endDate || schema.startDate || domEndDate,
                     location: [...new Set([schema.location?.name, addressText].filter(Boolean))].join(', ') || domLocation,
+                    lat: schema.location?.geo?.latitude,
+                    lng: schema.location?.geo?.longitude,
+                    originalLink,
                     description,
                     images: [
                         schema.image,
@@ -589,16 +628,20 @@ async function scrapeKalenderLari(limit, exclusions) {
                 };
             });
             const dates = dateRange([data.startDate, data.endDate].filter(Boolean).join(' '));
-            const geo = await geocode(data.location);
+            const schemaLat = numeric(data.lat);
+            const schemaLng = numeric(data.lng);
+            const geo = schemaLat !== null && schemaLng !== null
+                ? { lat: schemaLat, lng: schemaLng }
+                : await geocode(data.location);
             const item = normalize({
                 externalId: request.userData.slug,
                 title: data.title,
                 description: data.description,
                 category: CATEGORIES.sport,
-                link: request.url,
+                link: data.originalLink || request.url,
                 ...dates,
                 images: data.images,
-                sourceMeta: { location: data.location },
+                sourceMeta: { location: data.location, kalenderLariLink: request.url },
                 ...geo
             }, 'kalenderlari');
             if (item.title) output.push(item);
@@ -615,8 +658,14 @@ await Actor.main(async () => {
     const source = text(input.source).toLowerCase();
     const limit = Math.min(Math.max(Number(input.limit) || 50, 1), 500);
     const exclusions = createExclusions(input);
-    if (!SCRAPERS[source]) throw new Error(`Unsupported source: ${source}`);
-    const items = await SCRAPERS[source](limit, exclusions);
-    if (items.length) await Actor.pushData(items.slice(0, limit));
-    console.log(`Gathered ${items.length} new ${source} item(s); skipped against ${exclusions.externalIds.size} known IDs and ${exclusions.links.size} known links.`);
+    try {
+        if (!SCRAPERS[source]) throw new Error(`Unsupported source: ${source}`);
+        const items = await SCRAPERS[source](limit, exclusions);
+        if (items.length) await Actor.pushData(items.slice(0, limit));
+        console.log(`Gathered ${items.length} new ${source} item(s); skipped against ${exclusions.externalIds.size} known IDs and ${exclusions.links.size} known links.`);
+    } catch (error) {
+        const statusMessage = actorFailureMessage(source, error);
+        await Actor.setStatusMessage(statusMessage, { isStatusMessageTerminal: true, level: 'ERROR' }).catch(() => {});
+        throw error;
+    }
 });

@@ -2,7 +2,7 @@
   "actorSpecification": 1,
   "name": "ayanaon-gather",
   "title": "AyaNaon Gather Pins",
-  "version": "1.2",
+  "version": "1.5",
   "buildTag": "latest",
   "build": { "dockerfile": "./Dockerfile" },
   "input": "./input_schema.json"

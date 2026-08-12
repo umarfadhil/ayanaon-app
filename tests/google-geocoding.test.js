@@ -54,6 +54,28 @@ test('returns a safe not-found error for zero results', async () => {
     );
 });
 
+test('explains when the server key incorrectly uses website referrer restrictions', async () => {
+    const httpClient = {
+        async get() {
+            return {
+                data: {
+                    status: 'REQUEST_DENIED',
+                    error_message: 'API keys with referer restrictions cannot be used with this API.',
+                    results: []
+                }
+            };
+        }
+    };
+
+    await assert.rejects(
+        geocodeAddressWithGoogle('Jakarta', { apiKey: 'server-test-key', httpClient }),
+        (error) => error.statusCode === 503
+            && error.code === 'REQUEST_DENIED'
+            && /pembatasan Website\/referrer/.test(error.message)
+            && /Geocoding API/.test(error.message)
+    );
+});
+
 test('requires a configured server geocoding key', async () => {
     await assert.rejects(
         geocodeAddressWithGoogle('Jakarta', { apiKey: '' }),

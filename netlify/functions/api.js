@@ -7215,7 +7215,7 @@ const GATHER_SOURCES = [
     { id: 'indorelawan', label: 'Indorelawan', kind: 'browser', category: '🧑‍🤝‍🧑 Sosial & Kopdar' },
     { id: 'kalenderlari', label: 'KalenderLari', kind: 'browser', category: '🏃 Olahraga' },
     { id: 'michelin', label: 'MICHELIN Guide', kind: 'api', category: '🏡 Akomodasi Pilihan' },
-    { id: 'pertamina', label: 'Pertamina Outlet', kind: 'api', category: '⛽ SPBU' },
+    { id: 'pertamina', label: 'SPBU COCO', kind: 'api', category: '⛽ SPBU/SPBG' },
     { id: 'spklu', label: 'SPKLU', kind: 'api', category: '⚡ SPKLU' }
 ];
 const GATHER_SOURCE_IDS = new Set(GATHER_SOURCES.map((source) => source.id));
@@ -7258,6 +7258,17 @@ async function geocodeAddressWithGoogle(address, options = {}) {
     }
     if (googleStatus === 'OVER_QUERY_LIMIT') {
         throw createGeocodingError('Kuota pencarian lokasi sedang habis. Coba lagi nanti.', 503, googleStatus);
+    }
+    if (googleStatus === 'REQUEST_DENIED') {
+        const providerMessage = cleanGatherText(payload.error_message, 500);
+        const hasReferrerRestriction = /refer(?:er|rer) restrictions?/i.test(providerMessage);
+        throw createGeocodingError(
+            hasReferrerRestriction
+                ? 'Google Geocoding ditolak: GOOGLE_GEOCODING_API_KEY memakai pembatasan Website/referrer. Gunakan key server tanpa pembatasan referrer dan batasi API hanya ke Geocoding API.'
+                : 'Google Geocoding menolak key server. Periksa status Geocoding API, billing, dan pembatasan key di Google Cloud.',
+            503,
+            googleStatus
+        );
     }
     if (googleStatus !== 'OK' || !payload.results?.[0]) {
         throw createGeocodingError('Google Geocoding menolak atau gagal memproses pencarian.', 502, googleStatus || 'UNKNOWN_ERROR');
@@ -7341,6 +7352,39 @@ function cleanGatherDescription(value) {
         .slice(0, 6000);
 }
 
+function formatPertaminaDescription(value) {
+    const description = cleanGatherDescription(value);
+    const lines = description.split('\n');
+    const operationalIndex = lines.findIndex((line) => /Jam Operasional\s*:/i.test(line));
+    const fuelIndex = lines.findIndex((line) => /Bahan Bakar\s*:/i.test(line));
+    const facilityIndex = lines.findIndex((line) => /Fasilitas\s*:/i.test(line));
+    if (operationalIndex < 0 || fuelIndex <= operationalIndex || facilityIndex <= fuelIndex) return description;
+
+    const valueAfterColon = (line) => line.slice(line.indexOf(':') + 1).trim();
+    const detailLines = (headingLine, followingLines) => [valueAfterColon(headingLine), ...followingLines]
+        .flatMap((line) => line.split(/\s*[,;]\s*/))
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const fuels = detailLines(lines[fuelIndex], lines.slice(fuelIndex + 1, facilityIndex));
+    const facilities = detailLines(lines[facilityIndex], lines.slice(facilityIndex + 1));
+
+    return [
+        `🕓 Jam Operasional : ${valueAfterColon(lines[operationalIndex]) || '-'}`,
+        '',
+        '🛢️ Bahan Bakar :',
+        ...(fuels.length ? fuels : ['-']),
+        '',
+        '🏪 Fasilitas :',
+        ...(facilities.length ? facilities : ['-'])
+    ].join('\n');
+}
+
+function normalizeGatherCategory(value, source) {
+    const category = cleanGatherText(value, 120);
+    if (source === 'pertamina' && ['⛽ SPBU', '⛽ SPBU/SPBG'].includes(category)) return '⛽ SPBU/SPBG';
+    return category;
+}
+
 function cleanGatherDate(value) {
     const text = cleanGatherText(value, 40);
     const match = /^(\d{4}-\d{2}-\d{2})/.exec(text);
@@ -7389,6 +7433,39 @@ function normalizeGatherComparableText(value) {
         .trim();
 }
 
+function isKalenderLariEventLink(value) {
+    const link = cleanGatherLink(value);
+    if (!link) return false;
+    try {
+        const parsed = new URL(link);
+        return parsed.hostname.replace(/^www\./i, '').toLowerCase() === 'kalenderlari.com'
+            && /^\/events\/[^/]+\/?$/i.test(parsed.pathname);
+    } catch {
+        return false;
+    }
+}
+
+function parseGatherCoordinate(value, min, max) {
+    if (value === null || value === '' || typeof value === 'undefined') return null;
+    const coordinate = Number(value);
+    return Number.isFinite(coordinate) && coordinate >= min && coordinate <= max ? coordinate : null;
+}
+
+function hasUsableGatherCoordinates(value) {
+    const lat = parseGatherCoordinate(value?.lat, -90, 90);
+    const lng = parseGatherCoordinate(value?.lng, -180, 180);
+    return lat !== null && lng !== null && !(lat === 0 && lng === 0);
+}
+
+function needsKalenderLariRefresh(value) {
+    return isKalenderLariEventLink(value?.link) || !hasUsableGatherCoordinates(value);
+}
+
+function needsSpkluDescriptionRefresh(value) {
+    const description = cleanGatherDescription(value);
+    return !description.includes('⛽ Charger Box Tersedia:');
+}
+
 function gatherDistanceKm(first, second) {
     const coordinate = (value) => value === null || value === '' || typeof value === 'undefined' ? NaN : Number(value);
     const firstLat = coordinate(first?.lat);
@@ -7418,9 +7495,30 @@ function isGatherPublishedDuplicate(item, pin) {
     return Boolean(itemLink && itemLink === canonicalGatherComparisonLink(pin?.link));
 }
 
-async function findPublishedGatherDuplicateKeys(database, items) {
+function getGatherChangedFields(item, pin) {
+    const changedFields = [];
+    const source = cleanGatherText(item?.source, 40);
+    if (normalizeGatherComparableText(item?.title) !== normalizeGatherComparableText(pin?.title)) changedFields.push('title');
+    const itemDescription = source === 'pertamina'
+        ? formatPertaminaDescription(item?.description)
+        : cleanGatherDescription(item?.description);
+    const pinDescription = source === 'pertamina'
+        ? formatPertaminaDescription(pin?.description)
+        : cleanGatherDescription(pin?.description);
+    if (itemDescription !== pinDescription) changedFields.push('description');
+    if (normalizeGatherCategory(item?.category, source) !== normalizeGatherCategory(pin?.category, source)) changedFields.push('category');
+    if (canonicalGatherComparisonLink(item?.link) !== canonicalGatherComparisonLink(pin?.link)) changedFields.push('link');
+    if (gatherDistanceKm(item, pin) > 0.01) changedFields.push('coordinates');
+    return changedFields;
+}
+
+function hasGatherMaterialChanges(item, pin) {
+    return getGatherChangedFields(item, pin).length > 0;
+}
+
+async function findPublishedGatherMatches(database, items) {
     const candidates = (Array.isArray(items) ? items : []).filter(Boolean);
-    if (!candidates.length) return new Set();
+    if (!candidates.length) return new Map();
     const queries = [];
     const idsBySource = new Map();
     for (const item of candidates) {
@@ -7437,19 +7535,22 @@ async function findPublishedGatherDuplicateKeys(database, items) {
     const links = [...new Set(candidates.map((item) => cleanGatherLink(item.link)).filter(Boolean))];
     if (titles.length) queries.push({ title: { $in: titles } });
     if (links.length) queries.push({ link: { $in: links } });
-    if (!queries.length) return new Set();
+    if (!queries.length) return new Map();
 
     const pins = await database.collection('pins').find(
         { $or: queries },
-        { projection: { title: 1, link: 1, lat: 1, lng: 1, gatheredFrom: 1 } }
+        { projection: { title: 1, description: 1, category: 1, link: 1, lat: 1, lng: 1, lifetime: 1, images: 1, gatheredFrom: 1 } }
     ).collation({ locale: 'en', strength: 2 }).toArray();
-    const duplicateKeys = new Set();
+    const matches = new Map();
     for (const item of candidates) {
-        if (pins.some((pin) => isGatherPublishedDuplicate(item, pin))) {
-            duplicateKeys.add(getGatherItemKey(item));
-        }
+        const pin = pins.find((candidate) => isGatherPublishedDuplicate(item, candidate));
+        if (pin) matches.set(getGatherItemKey(item), pin);
     }
-    return duplicateKeys;
+    return matches;
+}
+
+async function findPublishedGatherDuplicateKeys(database, items) {
+    return new Set((await findPublishedGatherMatches(database, items)).keys());
 }
 
 function validateGatherImagePayload(images) {
@@ -7497,35 +7598,66 @@ function normalizeGatherImages(rawImages) {
 
 function normalizeGatherDraft(raw, fallbackSource) {
     const source = GATHER_SOURCE_IDS.has(raw?.source) ? raw.source : fallbackSource;
-    const lat = Number(raw?.lat);
-    const lng = Number(raw?.lng);
+    let lat = parseGatherCoordinate(raw?.lat, -90, 90);
+    let lng = parseGatherCoordinate(raw?.lng, -180, 180);
+    if (lat === 0 && lng === 0) {
+        lat = null;
+        lng = null;
+    }
     const draft = {
         source,
         externalId: cleanGatherText(raw?.externalId || raw?.id, 180),
         title: cleanGatherText(raw?.title, 180),
-        description: cleanGatherDescription(raw?.description),
-        category: cleanGatherText(raw?.category, 120),
+        description: source === 'pertamina'
+            ? formatPertaminaDescription(raw?.description)
+            : cleanGatherDescription(raw?.description),
+        category: normalizeGatherCategory(raw?.category, source),
         link: cleanGatherLink(raw?.link),
         startDate: cleanGatherDate(raw?.startDate || raw?.lifetime?.start),
         endDate: cleanGatherDate(raw?.endDate || raw?.lifetime?.end),
-        lat: Number.isFinite(lat) && lat >= -90 && lat <= 90 ? lat : null,
-        lng: Number.isFinite(lng) && lng >= -180 && lng <= 180 ? lng : null,
+        lat,
+        lng,
         images: normalizeGatherImages(raw?.images || raw?.imageUrls || []),
         sourceMeta: raw?.sourceMeta && typeof raw.sourceMeta === 'object' ? raw.sourceMeta : {}
     };
-    if (draft.startDate && draft.endDate && draft.endDate < draft.startDate) {
-        draft.endDate = '';
-    }
+    const hasInvalidDateRange = Boolean(draft.startDate && draft.endDate && draft.endDate < draft.startDate);
     draft.missingFields = [
         ['title', draft.title],
         ['description', draft.description],
         ['category', draft.category],
         ['link', draft.link],
-        ['startDate', draft.startDate],
-        ['endDate', draft.endDate],
-        ['coordinates', Number.isFinite(draft.lat) && Number.isFinite(draft.lng)]
+        ['coordinates', Number.isFinite(draft.lat) && Number.isFinite(draft.lng)],
+        ['dateRange', !hasInvalidDateRange]
     ].filter((entry) => !entry[1]).map((entry) => entry[0]);
     return draft;
+}
+
+async function enrichGatherDraftCoordinates(raw, fallbackSource, geocode = geocodeAddressWithGoogle) {
+    const normalized = normalizeGatherDraft(raw, fallbackSource);
+    if (normalized.source !== 'kalenderlari' || hasUsableGatherCoordinates(normalized)) return normalized;
+    const location = cleanGatherText(normalized.sourceMeta?.location, 250);
+    if (!location) return normalized;
+    try {
+        const result = await geocode(location);
+        return normalizeGatherDraft({
+            ...normalized,
+            lat: result?.lat,
+            lng: result?.lng,
+            sourceMeta: {
+                ...normalized.sourceMeta,
+                location,
+                formattedAddress: cleanGatherText(result?.formattedAddress, 500),
+                placeId: cleanGatherText(result?.placeId, 250)
+            }
+        }, normalized.source);
+    } catch (error) {
+        console.warn('KalenderLari venue geocoding fallback failed', {
+            externalId: normalized.externalId,
+            code: error?.code || '',
+            message: error?.message || 'Unknown error'
+        });
+        return normalized;
+    }
 }
 
 function serializeGatherRun(run) {
@@ -7537,6 +7669,8 @@ function serializeGatherRun(run) {
         apifyRunId: run.apifyRunId,
         itemCount: Number(run.itemCount || 0),
         draftCount: Number(run.draftCount || 0),
+        updateDraftCount: Number(run.updateDraftCount || 0),
+        refreshedCount: Number(run.refreshedCount || 0),
         excludedItemCount: Number(run.excludedItemCount || 0),
         duplicateCount: Number(run.duplicateCount || 0),
         invalidCount: Number(run.invalidCount || 0),
@@ -7548,24 +7682,28 @@ function serializeGatherRun(run) {
 
 function serializeGatherDraft(draft) {
     if (!draft) return null;
+    const normalized = normalizeGatherDraft(draft, draft.source);
     return {
         id: draft._id?.toString(),
         source: draft.source,
         externalId: draft.externalId || '',
         title: draft.title || '',
-        description: cleanGatherDescription(draft.description),
+        description: normalized.description,
         category: draft.category || '',
         link: draft.link || '',
         startDate: draft.startDate || '',
         endDate: draft.endDate || '',
         lat: draft.lat,
         lng: draft.lng,
-        missingFields: Array.isArray(draft.missingFields) ? draft.missingFields : [],
+        missingFields: normalized.missingFields,
         status: draft.status || 'draft',
         images: Array.isArray(draft.images) ? draft.images : [],
         imageCount: Array.isArray(draft.images) ? draft.images.length : 0,
         createdAt: draft.createdAt,
         updatedAt: draft.updatedAt,
+        updateTargetPinId: draft.updateTargetPinId?.toString() || '',
+        reviewMode: draft.updateTargetPinId ? 'update' : 'create',
+        changedFields: Array.isArray(draft.changedFields) ? draft.changedFields : [],
         publishedPinId: draft.publishedPinId?.toString() || ''
     };
 }
@@ -7575,11 +7713,11 @@ async function loadGatherExclusions(database, source) {
     const [drafts, pins] = await Promise.all([
         database.collection('gather_pin_drafts').find(
             { source, status: { $in: ['draft', 'published'] } },
-            { projection: { externalId: 1, link: 1, description: 1, images: 1 } }
+            { projection: { externalId: 1, link: 1, description: 1, images: 1, status: 1, lat: 1, lng: 1 } }
         ).sort({ createdAt: -1 }).limit(maxRecords).toArray(),
         database.collection('pins').find(
             { 'gatheredFrom.source': source },
-            { projection: { 'gatheredFrom.externalId': 1, link: 1 } }
+            { projection: { 'gatheredFrom.externalId': 1, link: 1, description: 1, lat: 1, lng: 1 } }
         ).sort({ createdAt: -1 }).limit(maxRecords).toArray()
     ]);
     const externalIds = new Set();
@@ -7594,10 +7732,18 @@ async function loadGatherExclusions(database, source) {
         if (cleanLink) links.add(cleanLink);
     };
     drafts.forEach((draft) => {
+        if (source === 'spklu') {
+            if (draft.status === 'draft') add(draft.externalId, draft.link);
+            return;
+        }
+        if (source === 'kalenderlari' && needsKalenderLariRefresh(draft)) return;
         const descriptionNeedsCleaning = /<[^>]+>|&(?:amp|quot|apos|lt|gt|nbsp|mdash|ndash|lsquo|rsquo|ldquo|rdquo|hellip)/i.test(draft.description || '');
         if (!descriptionNeedsCleaning) add(draft.externalId, draft.link);
     });
-    pins.forEach((pin) => add(pin.gatheredFrom?.externalId, pin.link));
+    if (source !== 'spklu') pins.forEach((pin) => {
+        if (source === 'kalenderlari' && needsKalenderLariRefresh(pin)) return;
+        add(pin.gatheredFrom?.externalId, pin.link);
+    });
     return {
         excludeExternalIds: [...externalIds],
         excludeLinks: [...links]
@@ -7623,31 +7769,73 @@ async function importGatherRunDataset(database, runDoc, apifyRun) {
         });
         const items = Array.isArray(response.data) ? response.data : [];
         const draftsCollection = database.collection('gather_pin_drafts');
-        const normalizedItems = items.map((item) => normalizeGatherDraft(item, runDoc.source));
+        const normalizedItems = await Promise.all(items.map((item) => enrichGatherDraftCoordinates(item, runDoc.source)));
         const links = normalizedItems.map((item) => item.link).filter(Boolean);
         const externalIds = normalizedItems.map((item) => item.externalId).filter(Boolean);
         const draftQueries = [];
         if (externalIds.length) draftQueries.push({ source: runDoc.source, externalId: { $in: externalIds } });
         if (links.length) draftQueries.push({ link: { $in: links }, source: { $ne: runDoc.source } });
-        const [publishedDuplicateKeys, existingDrafts] = await Promise.all([
-            findPublishedGatherDuplicateKeys(database, normalizedItems),
-            draftQueries.length ? draftsCollection.find({ $and: [{ status: { $in: ['draft', 'published'] } }, { $or: draftQueries }] }, { projection: { source: 1, externalId: 1, link: 1, title: 1, description: 1, lat: 1, lng: 1, images: 1, status: 1 } }).toArray() : []
-        ]);
-        const knownKeys = new Set(publishedDuplicateKeys);
+        const publishedMatches = await findPublishedGatherMatches(database, normalizedItems);
+        const matchedPinIds = [...new Set([...publishedMatches.values()].map((pin) => pin._id?.toString()).filter(Boolean))]
+            .map((id) => new ObjectId(id));
+        if (matchedPinIds.length) draftQueries.push({ updateTargetPinId: { $in: matchedPinIds }, status: 'draft' });
+        const existingDrafts = draftQueries.length
+            ? await draftsCollection.find(
+                { $and: [{ status: { $in: ['draft', 'published'] } }, { $or: draftQueries }] },
+                { projection: { source: 1, externalId: 1, link: 1, title: 1, description: 1, category: 1, lat: 1, lng: 1, images: 1, status: 1, updateTargetPinId: 1 } }
+            ).toArray()
+            : [];
+        const knownKeys = new Set();
         const existingDraftByKey = new Map();
+        const existingDraftByTargetPinId = new Map();
         existingDrafts.forEach((entry) => {
             const key = getGatherItemKey(entry);
             knownKeys.add(key);
             existingDraftByKey.set(key, entry);
+            if (entry.updateTargetPinId) existingDraftByTargetPinId.set(entry.updateTargetPinId.toString(), entry);
         });
         const now = new Date();
         const documents = [];
         let duplicateCount = 0;
+        let updateDraftCount = 0;
+        let refreshedCount = 0;
         let invalidCount = 0;
         for (const normalized of normalizedItems) {
             const itemKey = getGatherItemKey(normalized);
-            if (publishedDuplicateKeys.has(itemKey)) {
-                duplicateCount += 1;
+            const publishedPin = publishedMatches.get(itemKey);
+            if (publishedPin) {
+                const changedFields = getGatherChangedFields(normalized, publishedPin);
+                if (changedFields.length) {
+                    const queuedUpdate = existingDraftByTargetPinId.get(publishedPin._id.toString());
+                    if (queuedUpdate?.status === 'draft') {
+                        duplicateCount += 1;
+                    } else {
+                        const images = normalized.images.length ? normalized.images : (publishedPin.images || []);
+                        if (normalized.missingFields.length) invalidCount += 1;
+                        documents.push({
+                            ...normalized,
+                            images,
+                            status: 'draft',
+                            updateTargetPinId: publishedPin._id,
+                            changedFields,
+                            runId: runDoc._id,
+                            apifyRunId: runDoc.apifyRunId,
+                            createdBy: runDoc.createdBy,
+                            createdAt: now,
+                            updatedAt: now
+                        });
+                        updateDraftCount += 1;
+                    }
+                } else {
+                    if (normalized.externalId
+                        && (!publishedPin.gatheredFrom?.source || !publishedPin.gatheredFrom?.externalId)) {
+                        await database.collection('pins').updateOne(
+                            { _id: publishedPin._id },
+                            { $set: { gatheredFrom: { source: runDoc.source, externalId: normalized.externalId, runId: runDoc._id } } }
+                        );
+                    }
+                    duplicateCount += 1;
+                }
                 continue;
             }
             if (knownKeys.has(itemKey)) {
@@ -7655,18 +7843,37 @@ async function importGatherRunDataset(database, runDoc, apifyRun) {
                 if (existingDraft?.status === 'draft') {
                     const refresh = {};
                     if (!existingDraft.images?.length && normalized.images.length) refresh.images = normalized.images;
-                    if (normalized.description && cleanGatherDescription(existingDraft.description) !== existingDraft.description) {
+                    if (runDoc.source === 'kalenderlari') {
+                        if (isKalenderLariEventLink(existingDraft.link) && normalized.link && normalized.link !== existingDraft.link) {
+                            refresh.link = normalized.link;
+                        }
+                        if (!hasUsableGatherCoordinates(existingDraft) && hasUsableGatherCoordinates(normalized)) {
+                            refresh.lat = normalized.lat;
+                            refresh.lng = normalized.lng;
+                            refresh.sourceMeta = normalized.sourceMeta;
+                        }
+                    }
+                    const descriptionNeedsCleaning = cleanGatherDescription(existingDraft.description) !== existingDraft.description;
+                    const shouldRefreshSpkluDescription = runDoc.source === 'spklu'
+                        && needsSpkluDescriptionRefresh(existingDraft.description);
+                    if (normalized.description && (descriptionNeedsCleaning || shouldRefreshSpkluDescription)) {
                         refresh.description = normalized.description;
                     }
                     if (Object.keys(refresh).length) {
+                        refresh.runId = runDoc._id;
+                        refresh.apifyRunId = runDoc.apifyRunId;
                         refresh.updatedAt = now;
                         await draftsCollection.updateOne(
                             { _id: existingDraft._id, status: 'draft' },
                             { $set: refresh }
                         );
+                        refreshedCount += 1;
+                    } else {
+                        duplicateCount += 1;
                     }
+                } else {
+                    duplicateCount += 1;
                 }
-                duplicateCount += 1;
                 continue;
             }
             knownKeys.add(itemKey);
@@ -7691,6 +7898,8 @@ async function importGatherRunDataset(database, runDoc, apifyRun) {
                     importing: false,
                     itemCount: items.length,
                     draftCount: documents.length,
+                    updateDraftCount,
+                    refreshedCount,
                     duplicateCount,
                     invalidCount,
                     finishedAt: new Date(apifyRun.finishedAt || Date.now()),
@@ -7771,6 +7980,8 @@ router.post('/admin/gather/runs', async (req, res) => {
             importing: false,
             itemCount: 0,
             draftCount: 0,
+            updateDraftCount: 0,
+            refreshedCount: 0,
             duplicateCount: 0,
             invalidCount: 0,
             excludedItemCount: exclusions.excludeExternalIds.length + exclusions.excludeLinks.length,
@@ -7839,8 +8050,14 @@ router.get('/admin/gather/drafts', async (req, res) => {
     let drafts = await draftsCollection.find(query).sort({ createdAt: -1 }).limit(500).toArray();
     let removedDuplicateCount = 0;
     if (query.status === 'draft' && drafts.length) {
-        const publishedDuplicateKeys = await findPublishedGatherDuplicateKeys(database, drafts);
-        const duplicateDrafts = drafts.filter((draft) => publishedDuplicateKeys.has(getGatherItemKey(draft)));
+        const publishedMatches = await findPublishedGatherMatches(database, drafts);
+        const duplicateDrafts = drafts.filter((draft) => {
+            const publishedPin = publishedMatches.get(getGatherItemKey(draft));
+            if (!publishedPin) return false;
+            if (!draft.updateTargetPinId) return true;
+            return publishedPin._id?.toString() === draft.updateTargetPinId.toString()
+                && !hasGatherMaterialChanges(normalizeGatherDraft(draft, draft.source), publishedPin);
+        });
         if (duplicateDrafts.length) {
             await draftsCollection.deleteMany({ _id: { $in: duplicateDrafts.map((draft) => draft._id) }, status: 'draft' });
             const duplicateIds = new Set(duplicateDrafts.map((draft) => draft._id.toString()));
@@ -7897,35 +8114,60 @@ router.post('/admin/gather/drafts/:id/publish', async (req, res) => {
     if (normalized.missingFields.length) {
         return res.status(400).json({ message: `Lengkapi field wajib: ${normalized.missingFields.join(', ')}.` });
     }
-    const publishedDuplicateKeys = await findPublishedGatherDuplicateKeys(database, [normalized]);
-    if (publishedDuplicateKeys.has(getGatherItemKey(normalized))) {
-        return res.status(409).json({ message: 'Pin yang sama sudah dipublikasikan.' });
+    let updateTarget = null;
+    if (draft.updateTargetPinId) {
+        if (!ObjectId.isValid(draft.updateTargetPinId)) return res.status(400).json({ message: 'Target update pin tidak valid.' });
+        updateTarget = await database.collection('pins').findOne({ _id: new ObjectId(draft.updateTargetPinId) });
+        if (!updateTarget) return res.status(404).json({ message: 'Pin target update sudah tidak ditemukan.' });
+    } else {
+        const publishedDuplicateKeys = await findPublishedGatherDuplicateKeys(database, [normalized]);
+        if (publishedDuplicateKeys.has(getGatherItemKey(normalized))) {
+            return res.status(409).json({ message: 'Pin yang sama sudah dipublikasikan.' });
+        }
     }
     const now = new Date();
-    const pin = {
+    const lifetime = normalized.startDate || normalized.endDate
+        ? { type: 'date', start: normalized.startDate, end: normalized.endDate }
+        : null;
+    const pinFields = {
         title: normalized.title,
         description: normalized.description,
         category: normalized.category,
         link: normalized.link,
         lat: normalized.lat,
         lng: normalized.lng,
-        lifetime: { type: 'date', start: normalized.startDate, end: normalized.endDate },
-        expiresAt: computeExpiresAtFromLifetime({ type: 'date', start: normalized.startDate, end: normalized.endDate }),
+        lifetime,
+        expiresAt: computeExpiresAtFromLifetime(lifetime),
         images: Array.isArray(draft.images) ? draft.images : [],
         imageCount: Array.isArray(draft.images) ? draft.images.length : 0,
+        gatheredFrom: { source: draft.source, externalId: draft.externalId || '', runId: draft.runId },
+        updatedAt: now
+    };
+    const location = await resolveProvinceCityFromCoords(pinFields.lat, pinFields.lng);
+    if (location) {
+        pinFields.province = location.province;
+        pinFields.city = location.city;
+    }
+    if (updateTarget) {
+        await database.collection('pins').updateOne(
+            { _id: updateTarget._id },
+            { $set: pinFields }
+        );
+        await drafts.updateOne(
+            { _id: draft._id },
+            { $set: { status: 'published', publishedPinId: updateTarget._id, publishedAt: now, updatedAt: now, publishedBy: resident._id } }
+        );
+        return res.json({ ok: true, updated: true, pinId: updateTarget._id.toString() });
+    }
+    const pin = {
+        ...pinFields,
         createdAt: now,
         reporter: `gather:${draft.source}`,
         upvotes: 0,
         downvotes: 0,
         upvoterIps: [],
-        downvoterIps: [],
-        gatheredFrom: { source: draft.source, externalId: draft.externalId || '', runId: draft.runId }
+        downvoterIps: []
     };
-    const location = await resolveProvinceCityFromCoords(pin.lat, pin.lng);
-    if (location) {
-        pin.province = location.province;
-        pin.city = location.city;
-    }
     const result = await database.collection('pins').insertOne(pin);
     await drafts.updateOne(
         { _id: draft._id },
@@ -9281,7 +9523,13 @@ app.use('/api', router);
 module.exports.app = app;
 module.exports.runWithDatabaseRequestContext = runWithDatabaseRequestContext;
 module.exports.geocodeAddressWithGoogle = geocodeAddressWithGoogle;
+module.exports.enrichGatherDraftCoordinates = enrichGatherDraftCoordinates;
 module.exports.isGatherPublishedDuplicate = isGatherPublishedDuplicate;
+module.exports.hasGatherMaterialChanges = hasGatherMaterialChanges;
+module.exports.needsKalenderLariRefresh = needsKalenderLariRefresh;
+module.exports.normalizeGatherDraft = normalizeGatherDraft;
+module.exports.needsSpkluDescriptionRefresh = needsSpkluDescriptionRefresh;
+module.exports.computeExpiresAtFromLifetime = computeExpiresAtFromLifetime;
 module.exports.isNonProductionHostname = isNonProductionHostname;
 module.exports.resolveGoogleApiKey = resolveGoogleApiKey;
 module.exports.cleanMerchantMenuHighlights = cleanMerchantMenuHighlights;

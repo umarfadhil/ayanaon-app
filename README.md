@@ -107,6 +107,13 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.6.2
+- **Smarter Permanent Location Drafts:** Gathered SPBU/SPKLU records no longer need event dates. Complete records with blank dates publish as permanent pins, while supportive-image thumbnails stay compact and easy to review.
+- **Review-First Infrastructure Updates:** When a published SPKLU record materially changes, Gather creates an `UPDATE PIN` draft for Admin approval instead of silently overwriting the pin or treating it as an unhelpful duplicate. Approved updates preserve the pin identity and community history.
+- **Richer Energy Location Details:** SPKLU drafts calculate charger totals from charger boxes when providers report a zero total, and show normalized per-box details. The Pertamina source is now labeled **SPBU COCO** and preserves its readable multiline fuel and facility format, including older drafts.
+- **More Accurate Event Sources:** KalenderLari now prefers the original registration link and repairs missing venue coordinates through secure server-side geocoding. Yesplis now uses its current v5 API and surfaces a useful Indonesian failure reason when an Actor source breaks.
+- **Clearer Location-Search Guidance:** Server-side geocoding now recognizes Google referrer-restricted key failures and returns an actionable Indonesian configuration message instead of a generic error.
+
 ### What's New in v2.6.1
 - **Expandable Variant Menus on `/toko`:** Products with size/flavor variants (e.g. "Large"/"Regular") now collapse into a single tappable group showing the shared photo, description, and base price — expanding reveals each orderable variant, mirroring the AyaKasir order page's own variant picker. This also fixes a bug where every variant-bearing product's description silently failed to render on the storefront, independent of the tenant's own description-visibility setting.
 - **Cart Review Before Ordering:** A new "Lihat Keranjang" button on `/toko/<slug>` opens a review modal listing every selected item, quantity, and running total, with the same quantity controls as the menu, before handing off to the pre-filled WhatsApp order message.

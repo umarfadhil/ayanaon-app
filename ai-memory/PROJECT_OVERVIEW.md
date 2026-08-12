@@ -8,7 +8,7 @@
 - **Toko / UMKM (Merchants)** = AyaKasir POS tenant stores pushed via a partner API: logo map pins + SEO pages `/toko/:slug` with WhatsApp ordering & live availability
 - PWA (installable, service worker, offline-capable)
 - Live site: **ayanaon.app**
-- Current version: **v2.6.1**
+- Current version: **v2.6.2**
 
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
