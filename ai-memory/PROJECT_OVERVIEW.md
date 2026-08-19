@@ -8,22 +8,23 @@
 - **Toko / UMKM (Merchants)** = AyaKasir POS tenant stores pushed via a partner API: logo map pins + SEO pages `/toko/:slug` with WhatsApp ordering & live availability
 - PWA (installable, service worker, offline-capable)
 - Live site: **ayanaon.app**
-- Current version: **v2.6.2**
+- Current version: **v2.6.3**
 
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
 - **Map:** Google Maps JavaScript API
 - **Backend:** Single Express.js app exported through a Netlify `serverless-http` adapter and a Cloudflare Workers `httpServerHandler` adapter
-- **Hosting:** Cloudflare Workers + Static Assets serves production `www.ayanaon.app`; Netlify retains the apex redirect and a rollback deployment during the observation window, while staging remains `noindex`
+- **Hosting:** Cloudflare Workers + Static Assets serves production `www.ayanaon.app`; Netlify retains the apex redirect and rollback deployment until its retirement is explicitly approved, while staging remains `noindex`
 - **Database:** MongoDB (database name: `ayanaon-db`)
 - **Auth:** JWT + bcrypt (separate flows for sellers and residents)
 
 ## Key Features
 - Pin CRUD with categories, photos (up to 3), voting, expiration
 - Category filtering, keyword search, date-range filtering
+- Travel Mode: car/motorcycle-aware parking within 3 km plus SPBU/SPKLU discovery within 30 km; walking/off hides travel-managed categories
 - Gerobak Online: seller registration, live broadcasting, menu gallery, community verification
 - Warga system: resident profiles, avatars, status, location sharing, saved pins
-- Admin dashboard: manage pins, Gather Pins external scraper drafts, SEO, categories, tabs, brands, areas, mass promotions (flagged, location-gated, shared images), analytics
+- Admin dashboard: manage pins, Gather Pins review drafts (including optional source links, permanent locations, in-place updates, and provenance-backed parking data), SEO, categories, tabs, brands, areas, mass promotions (flagged, location-gated, shared images), analytics
 - Light/dark theme
 - SEO: server-rendered pin and merchant pages, dynamic sitemap (merchant writes invalidate it; CDN freshness target 15 minutes), robots.txt
 - Cloudflare delivery: protected staging, provider-compatible service-worker caching, and a retained Netlify rollback path
@@ -53,7 +54,7 @@
 - `areas` - Indonesian provinces and cities
 - `merchants` - AyaKasir tenant stores (pushed from the AyaKasir portal; unique `slug` + `tenantId`; `status: active|hidden`; fields incl. `logoUrl`, `menuLayout` LIST/GRID/ACCORDION, `menuHighlights[]` full menu ≤100 with per-item `category`/`photoUrl`/`price`/`available` (partner `onlineVisible: false` entries are dropped before persistence/search indexing), `searchText` blob built at upsert; SSR page at `/toko/:slug` (`Cache-Control: private, no-store` for immediate post-sync freshness) with WA-cart ordering + live availability polling; map layer in app.js with `?toko=<slug>` deep link + search integration)
 - `gather_runs` - external Apify run records and import counters/status
-- `gather_pin_drafts` - editable, authenticated pre-publication pin drafts with source provenance and completeness metadata
+- `gather_pin_drafts` - editable, authenticated pre-publication/update drafts with source provenance and completeness metadata; links are optional, and estimated parking coordinates remain review-only until Admin publication
 
 ## User Roles
 - `admin` - full access to admin dashboard

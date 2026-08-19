@@ -1,6 +1,6 @@
 {
   "name": "ayanaon",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "check:cloudflare": "wrangler deploy --env=\"\" --dry-run --outdir .wrangler-dist",
     "check:syntax": "node --check netlify/functions/api.js",
     "db:mirror-local": "node scripts/mirror-db-to-local.js",
-    "test:deployment": "node --test tests/deployment-adapters.test.js tests/request-scope.test.js tests/google-geocoding.test.js tests/pwa-seo.test.js tests/gather-pins.test.js tests/merchant-visibility.test.js"
+    "test:deployment": "node --test tests/deployment-adapters.test.js tests/request-scope.test.js tests/google-geocoding.test.js tests/pwa-seo.test.js tests/gather-pins.test.js tests/merchant-visibility.test.js tests/travel-mode.test.js"
   },
   "keywords": [],
   "author": "",

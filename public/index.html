@@ -339,9 +339,10 @@
                             <span class="toggle-label toggle-label-ev">EV</span>
                         </div>
                     </div>
-                    <button id="special-category-on-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Show fuel and EV stations">🚗</button>
-                    <button id="special-category-off-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Hide fuel and EV stations">🚶🏻</button>
-                    <span class="action-menu-row-note">🚗 untuk menampilkan SPBU / EV terdekat atau 🚶🏻 untuk menyembunyikan</span>
+                    <button id="special-category-on-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Aktifkan Travel Mode mobil" aria-pressed="false" title="Travel Mode Mobil">🚗</button>
+                    <button id="special-category-motorcycle-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Aktifkan Travel Mode motor" aria-pressed="false" title="Travel Mode Motor">🏍️</button>
+                    <button id="special-category-off-btn" type="button" class="menu-pill-btn travel-mode-btn" aria-label="Matikan Travel Mode" aria-pressed="true" title="Matikan Travel Mode">🚶🏻</button>
+                    <span class="action-menu-row-note">🚗 mobil atau 🏍️ motor menampilkan parkir yang sesuai dalam 3 km. SPBU / EV tetap dalam 30 km. 🚶🏻 untuk menyembunyikan.</span>
                 </div>
             </section>
             <section class="action-menu-section">
@@ -515,6 +516,7 @@
     <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js" defer></script>
     <script src="resident-session.js"></script>
     <script src="auth.js"></script>
+    <script src="travel-mode.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

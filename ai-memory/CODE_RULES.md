@@ -5,7 +5,7 @@
 - **No frontend framework** - DOM manipulation with `document.getElementById` etc.
 - **Monolith backend** - everything in one `api.js` file with Express router
 - **Monolith frontend** - `app.js` is one large file with global variables
-- **Serverless** - the shared Express app runs through Netlify `serverless-http` and Cloudflare Workers `httpServerHandler` adapters during migration
+- **Serverless** - the shared Express app runs through a production Cloudflare Workers `httpServerHandler` adapter and a retained Netlify `serverless-http` rollback adapter
 
 ## Language & Naming
 - UI text is in **Bahasa Indonesia** (Indonesian)
@@ -26,7 +26,8 @@
 - AyaKasir menu entries use an optional `onlineVisible` partner field: omitted defaults to visible for backward compatibility, while explicit `false` must be discarded before persistence/search indexing. `/toko/:slug` responses must remain `no-store` so a completed partner sync is visible on the next request.
 - Gather Pins browser work runs only in the separately deployed Apify Actor; the shared backend starts/polls runs and persists normalized results. Never put Chromium/Playwright in either hosting adapter.
 - Browser-adapter changes are not live until `gather-actor/` is pushed, the Actor's default `latest` build succeeds, and a remote smoke run confirms both a non-zero dataset and the expected build number/log signature. Keep `.actorignore` excluding dependencies, local storage, secrets, and logs from source uploads.
-- Gather drafts require title, description, category, valid HTTP(S) link, and valid coordinates before publication. Start/end dates are optional for permanent locations such as SPBU/SPKLU; when both are blank, publish with `lifetime: null` and `expiresAt: null`. If both dates are present, end must not precede start.
+- Gather drafts require title, description, category, and valid coordinates before publication. Link is optional, but any supplied link must be valid HTTP(S). Start/end dates are optional for permanent locations such as SPBU/SPKLU; when both are blank, publish with `lifetime: null` and `expiresAt: null`. If both dates are present, end must not precede start.
+- `🅿️ Lokasi Parkir` is a curated admin-only category. Keep its category roles exactly `{ admin: true, pin_manager: false, resident: false }`. Spreadsheet-sourced parking records must enter `gather_pin_drafts` as unpublished drafts, retain source-row and coordinate-quality provenance in `sourceMeta`, and never auto-publish guessed locations. For Kota Bogor parking, the decree's SRP columns are authoritative: positive capacity renders `Ya (N)`, zero/dash renders `Tidak`, and every description must end with the exact three-line Keputusan Wali Kota Bogor No. 100.3.3.3/KEP.315-Dis.Hub/2024 source footer.
 - Gather deduplication prefers `source + externalId` (not link alone) because Pertamina/SPKLU records legitimately share a locator URL.
 - Published-pin duplicate checks must also cover manual/admin-created pins: require a normalized title match plus either the same canonical link or coordinates within 350 meters; remove matching stale drafts from the review queue. A shared locator URL alone is never sufficient.
 - Before starting an Actor run, the shared backend sends known source IDs (or links only when an ID is absent); adapters skip them before detail/geocoding work and continue until the requested number of new rows is collected. SPKLU is the exception: published pins stay eligible because its single API response is cheap and must be compared for provider-side changes; only SPKLU rows already represented by a pending draft are excluded.
@@ -57,6 +58,7 @@
 - Seller session: JWT stored in `localStorage` as `seller_token`
 - Theme preference: `localStorage` key `ayanaon_theme`
 - A missing Google Maps browser key is an editor-preview limitation, not a Gather run failure; keep its warning inside the map container and allow authenticated server geocoding to fill coordinates independently.
+- Public `🅿️ Lokasi Parkir` visibility is managed only by Travel Mode and requires a user location: 🚗 shows pins within an inclusive 3 km radius whose description has positive/unspecified-quantity `Parkir Mobil: Ya`; 🏍️ applies the same rule to `Parkir Motor`; 🚶/off hides all parking pins. Keep the existing SPBU/SPKLU Fuel/EV selection and 30 km radius unchanged, and apply the rule consistently to both map markers and list results.
 
 ## Deployment
 - `npm run dev` / `npm run dev:cloudflare` must select Wrangler environment `local`, whose `secrets.required` admits both the migration-era `GOOGLE_MAPS_API_KEY` and the preferred split keys; `npm run dev:netlify` retains rollback-provider development.
@@ -65,7 +67,7 @@
 - The formerly isolated `ayanaon-local` database (and `scripts/mirror-db-to-local.js` / `npm run db:mirror-local`) existed from 2026-08-05 to 2026-08-11 to keep local writes from touching prod. It was dropped on 2026-08-11 (`db:mirror-local -- --revert --yes`) to free Atlas storage once local dev stopped pointing at it. The mirror script file still exists in the repo but is now dead code for the primary dev workflow — nothing points `MONGODB_DATABASE` at `ayanaon-local` anymore; only its `--revert` path was actually used for the drop.
 - Atlas M0 free tier is a single 512 MB storage pool shared by every database on the cluster (confirmed live 2026-08-11: `AtlasError` code 8000 blocked writes cluster-wide, production included, when a mirror briefly overflowed it). With local dev now writing straight into `ayanaon-db`, there is no separate local storage cost to manage — but the underlying quota ceiling for the whole cluster (prod included) is still 512 MB and unchanged.
 - `npm run check:cloudflare` and `npm run deploy:cloudflare` must pass `--env=""` to target the top-level production configuration explicitly; production continues to require only the split browser/geocoding keys.
-- Cloudflare serves the production `www` hostname. Keep Netlify's apex redirect, rollback deployment, adapter, configuration, secrets, and credentials intact throughout the 7-14 day observation window.
+- Cloudflare serves the production `www` hostname. Keep Netlify's apex redirect, rollback deployment, adapter, configuration, secrets, and credentials intact until the owner explicitly approves retirement.
 - `public/_redirects` must not contain Netlify function rewrites; keep those only in `netlify.toml` so Workers Static Assets fall through to Express
 - `npm run test:deployment` validates both provider exports, browser-key routing, Cloudflare/Netlify IP precedence, and request-scope isolation/nesting/cleanup; the legacy `npm test` placeholder remains
 - Service worker cache version must be bumped on each release
@@ -78,7 +80,7 @@
 - Roles: `admin`, `pin_manager`, `resident`
 
 ## Release Process
-- Version in `package.json`
+- Keep the release version synchronized in `package.json`, `package-lock.json`, and `ai-memory/PROJECT_OVERVIEW.md`
 - Update release notes in `README.md`
 - Bump service worker cache version in `public/service-worker.js`
 - Commit message format: `chore: release vX.Y.Z`

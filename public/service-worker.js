@@ -1,5 +1,5 @@
 // Bump this to force clients to fetch fresh assets after deploys
-const CACHE_NAME = 'ayanaon-static-v2.6.2';
+const CACHE_NAME = 'ayanaon-static-v2.6.3';
 const PRECACHE_URLS = [
     '/',
     '/admin.css',
@@ -19,6 +19,7 @@ const PRECACHE_URLS = [
     '/resident-auth.js',
     '/resident-session.js',
     '/style.css',
+    '/travel-mode.js',
     '/verify.html',
     '/warga-login.html',
     '/warga-register.html'

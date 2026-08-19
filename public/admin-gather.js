@@ -104,6 +104,16 @@
         return state.sources.find((source) => source.id === sourceId)?.label || sourceId || 'Unknown';
     }
 
+    function validOptionalHttpLink(value) {
+        const link = String(value || '').trim();
+        if (!link) return true;
+        try {
+            return ['http:', 'https:'].includes(new URL(link).protocol);
+        } catch {
+            return false;
+        }
+    }
+
     function updateOpenLink(value = els.gatherLink?.value || '') {
         if (!els.gatherOpenLink) return;
         let href = '';
@@ -239,7 +249,7 @@
     function missingLabels(draft) {
         const labels = {
             title: 'Title', description: 'Description', category: 'Category', link: 'Link',
-            dateRange: 'Date range', coordinates: 'Coordinates'
+            linkFormat: 'Link format', dateRange: 'Date range', coordinates: 'Coordinates'
         };
         return (draft?.missingFields || []).map((field) => labels[field] || field);
     }
@@ -356,9 +366,10 @@
 
     function localMissing(payload) {
         const missing = [];
-        ['title', 'description', 'category', 'link'].forEach((key) => {
+        ['title', 'description', 'category'].forEach((key) => {
             if (!payload[key]) missing.push(key);
         });
+        if (!validOptionalHttpLink(payload.link)) missing.push('linkFormat');
         if (!validCoordinates(payload.lat, payload.lng)) missing.push('coordinates');
         if (payload.startDate && payload.endDate && payload.endDate < payload.startDate) missing.push('dateRange');
         return missing;
@@ -367,13 +378,14 @@
     function updateCompleteness(draft) {
         if (!els.gatherCompleteness) return;
         const missing = draft?.missingFields || localMissing(formPayload());
-        const requiredFields = new Set(['title', 'description', 'category', 'link', 'coordinates']);
+        const requiredFields = new Set(['title', 'description', 'category', 'coordinates']);
         const missingRequiredCount = missing.filter((field) => requiredFields.has(field)).length;
         const invalidRange = missing.includes('dateRange');
+        const invalidLink = missing.includes('linkFormat');
         els.gatherCompleteness.classList.toggle('is-ready', !missing.length);
         els.gatherCompleteness.textContent = missing.length
-            ? `${5 - missingRequiredCount}/5 field wajib siap${invalidRange ? ' · periksa rentang tanggal' : ''}`
-            : '5/5 field wajib siap dipublikasikan';
+            ? `${4 - missingRequiredCount}/4 field wajib siap${invalidLink ? ' · periksa format link' : ''}${invalidRange ? ' · periksa rentang tanggal' : ''}`
+            : '4/4 field wajib siap dipublikasikan';
     }
 
     function setBusy(busy) {

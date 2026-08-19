@@ -25,6 +25,7 @@ AyaNaon-app (which roughly translates to "What's up?" or "What's happening?" in 
 - **Interactive Map:** Explore your local area with an intuitive Google Maps interface.
 - **Category Filtering:** Quickly find what you're looking for by filtering pins based on different categories like "Events," "Food & Drink Promos," "Traffic & Accidents," and more.
 - **Location Services:** Find your current location on the map with a single click.
+- **Vehicle-Aware Travel Mode:** Use car or motorcycle mode to find compatible parking within 3 km while keeping nearby SPBU/SPKLU discovery within 30 km; walking/off mode hides these travel-only results.
 - **Real-time Updates:** See the number of active pins and unique contributors in real-time.
 - **Responsive Design:** Enjoy a seamless experience whether you're on your desktop or mobile phone.
 
@@ -106,6 +107,12 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 ## Release Notes
 
 Release updates are listed from the most recent version to the earliest.
+
+### What's New in v2.6.3
+- **Vehicle-Specific Parking Discovery:** Travel Mode now has dedicated car and motorcycle states. Parking pins appear only within an inclusive 3 km radius when their official capacity supports the selected vehicle; walking/off mode hides parking, while the existing SPBU/SPKLU selector keeps its 30 km radius.
+- **Curated Kota Bogor Parking Data:** A new admin-only `🅿️ Lokasi Parkir` category supports 105 review-first parking records with stable source-row IDs, coordinate-quality provenance, and unique landmark-based titles. Estimated coordinates remain unpublished until an Admin reviews them.
+- **Official Car and Motorcycle Capacities:** Kota Bogor parking descriptions now use the mayoral decree's authoritative SRP capacities, render `Ya (N)` or `Tidak` per vehicle type, and retain the exact decree citation for traceability.
+- **Optional Gather Source Links:** Gather drafts now require four publication fields—title, description, category, and valid coordinates. Source links may be blank, while any supplied link must still be a valid HTTP(S) URL.
 
 ### What's New in v2.6.2
 - **Smarter Permanent Location Drafts:** Gathered SPBU/SPKLU records no longer need event dates. Complete records with blank dates publish as permanent pins, while supportive-image thumbnails stay compact and easy to review.

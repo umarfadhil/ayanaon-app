@@ -7379,6 +7379,43 @@ function formatPertaminaDescription(value) {
     ].join('\n');
 }
 
+const BOGOR_PARKING_GATHER_SOURCE = 'Parkir Kota Bogor (Excel)';
+const BOGOR_PARKING_SOURCE_FOOTER = [
+    'Sumber: KEPUTUSAN WALI KOTA BOGOR',
+    'NOMOR 100.3.3.3/KEP.315-Dis.Hub/2024 TENTANG',
+    'TEMPAT PARKIR DI TEPI JALAN UMUM DAN TEMPAT KHUSUS PARKIR DI KOTA BOGOR'
+].join('\n');
+
+function normalizeBogorParkingCapacity(value) {
+    if (value === null || value === '' || typeof value === 'undefined') return null;
+    const capacity = Number(value);
+    return Number.isInteger(capacity) && capacity >= 0 ? capacity : null;
+}
+
+function formatBogorParkingDescription(value, sourceMeta = {}) {
+    const description = cleanGatherDescription(value);
+    const lines = description.split('\n');
+    const footerIndex = lines.findIndex((line) => /^Sumber:\s*KEPUTUSAN WALI KOTA BOGOR/i.test(line));
+    const contentLines = (footerIndex >= 0 ? lines.slice(0, footerIndex) : lines)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const locationLine = contentLines.find((line) => /^📍\s*Titik Parkir\s*:/i.test(line)) || contentLines[0] || '';
+    const existingCarLine = contentLines.find((line) => /^🚗\s*Parkir Mobil\s*:/i.test(line)) || '';
+    const existingMotorLine = contentLines.find((line) => /^🏍️?\s*Parkir Motor\s*:/i.test(line)) || '';
+    const carCapacity = normalizeBogorParkingCapacity(sourceMeta.carCapacity);
+    const motorCapacity = normalizeBogorParkingCapacity(sourceMeta.motorCapacity);
+    const formatCapacityLine = (label, icon, existingLine, capacity) => {
+        if (capacity === null) return existingLine;
+        return `${icon} ${label}: ${capacity > 0 ? `Ya (${capacity})` : 'Tidak'}`;
+    };
+    const body = [
+        locationLine,
+        formatCapacityLine('Parkir Mobil', '🚗', existingCarLine, carCapacity),
+        formatCapacityLine('Parkir Motor', '🏍️', existingMotorLine, motorCapacity)
+    ].filter(Boolean);
+    return [...body, '', BOGOR_PARKING_SOURCE_FOOTER].join('\n').slice(0, 6000);
+}
+
 function normalizeGatherCategory(value, source) {
     const category = cleanGatherText(value, 120);
     if (source === 'pertamina' && ['⛽ SPBU', '⛽ SPBU/SPBG'].includes(category)) return '⛽ SPBU/SPBG';
@@ -7598,6 +7635,7 @@ function normalizeGatherImages(rawImages) {
 
 function normalizeGatherDraft(raw, fallbackSource) {
     const source = GATHER_SOURCE_IDS.has(raw?.source) ? raw.source : fallbackSource;
+    const sourceMeta = raw?.sourceMeta && typeof raw.sourceMeta === 'object' ? raw.sourceMeta : {};
     let lat = parseGatherCoordinate(raw?.lat, -90, 90);
     let lng = parseGatherCoordinate(raw?.lng, -180, 180);
     if (lat === 0 && lng === 0) {
@@ -7610,7 +7648,9 @@ function normalizeGatherDraft(raw, fallbackSource) {
         title: cleanGatherText(raw?.title, 180),
         description: source === 'pertamina'
             ? formatPertaminaDescription(raw?.description)
-            : cleanGatherDescription(raw?.description),
+            : source === BOGOR_PARKING_GATHER_SOURCE
+                ? formatBogorParkingDescription(raw?.description, sourceMeta)
+                : cleanGatherDescription(raw?.description),
         category: normalizeGatherCategory(raw?.category, source),
         link: cleanGatherLink(raw?.link),
         startDate: cleanGatherDate(raw?.startDate || raw?.lifetime?.start),
@@ -7618,14 +7658,13 @@ function normalizeGatherDraft(raw, fallbackSource) {
         lat,
         lng,
         images: normalizeGatherImages(raw?.images || raw?.imageUrls || []),
-        sourceMeta: raw?.sourceMeta && typeof raw.sourceMeta === 'object' ? raw.sourceMeta : {}
+        sourceMeta
     };
     const hasInvalidDateRange = Boolean(draft.startDate && draft.endDate && draft.endDate < draft.startDate);
     draft.missingFields = [
         ['title', draft.title],
         ['description', draft.description],
         ['category', draft.category],
-        ['link', draft.link],
         ['coordinates', Number.isFinite(draft.lat) && Number.isFinite(draft.lng)],
         ['dateRange', !hasInvalidDateRange]
     ].filter((entry) => !entry[1]).map((entry) => entry[0]);
@@ -7690,7 +7729,7 @@ function serializeGatherDraft(draft) {
         title: draft.title || '',
         description: normalized.description,
         category: draft.category || '',
-        link: draft.link || '',
+        link: normalized.link,
         startDate: draft.startDate || '',
         endDate: draft.endDate || '',
         lat: draft.lat,
@@ -8077,6 +8116,10 @@ router.put('/admin/gather/drafts/:id', async (req, res) => {
     const drafts = database.collection('gather_pin_drafts');
     const existing = await drafts.findOne({ _id: new ObjectId(req.params.id), status: 'draft' });
     if (!existing) return res.status(404).json({ message: 'Draft tidak ditemukan.' });
+    const submittedLink = cleanGatherText(req.body?.link, 2048);
+    if (submittedLink && !cleanGatherLink(submittedLink)) {
+        return res.status(400).json({ message: 'Link harus menggunakan alamat HTTP(S) yang valid.' });
+    }
     const imageError = validateGatherImagePayload(req.body?.images);
     if (imageError) return res.status(400).json({ message: imageError });
     const normalized = normalizeGatherDraft({ ...existing, ...req.body, source: existing.source }, existing.source);
@@ -9528,6 +9571,7 @@ module.exports.isGatherPublishedDuplicate = isGatherPublishedDuplicate;
 module.exports.hasGatherMaterialChanges = hasGatherMaterialChanges;
 module.exports.needsKalenderLariRefresh = needsKalenderLariRefresh;
 module.exports.normalizeGatherDraft = normalizeGatherDraft;
+module.exports.formatBogorParkingDescription = formatBogorParkingDescription;
 module.exports.needsSpkluDescriptionRefresh = needsSpkluDescriptionRefresh;
 module.exports.computeExpiresAtFromLifetime = computeExpiresAtFromLifetime;
 module.exports.isNonProductionHostname = isNonProductionHostname;

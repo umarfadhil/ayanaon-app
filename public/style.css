@@ -2351,12 +2351,14 @@ body.maintenance-active #action-menu-toggle {
 }
 
 #special-category-on-btn,
+#special-category-motorcycle-btn,
 #special-category-off-btn {
     position: static;
     box-shadow: none;
 }
 
-#special-category-on-btn.active {
+#special-category-on-btn.active,
+#special-category-motorcycle-btn.active {
     background: rgba(74, 222, 128, 0.25);
     border-color: rgba(74, 222, 128, 0.45);
     color: #bbf7d0;
@@ -2369,6 +2371,7 @@ body.maintenance-active #action-menu-toggle {
 }
 
 #special-category-on-btn:disabled,
+#special-category-motorcycle-btn:disabled,
 #special-category-off-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
