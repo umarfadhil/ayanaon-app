@@ -3,7 +3,7 @@
 ## Root
 - `package.json` - runtime deps plus Netlify CLI and Wrangler dual-provider development/deploy scripts
 - `netlify.toml` - Netlify rollback build config and all Netlify-only API/SEO rewrites
-- `wrangler.jsonc` - Cloudflare Worker entry, Node compatibility, static assets, observability, optional Mongo database selection (`ayanaon-local` in the local environment; production defaults to `ayanaon-db`), and unused MongoDB-native-module aliases
+- `wrangler.jsonc` - Cloudflare Worker entry, Node compatibility, static assets, observability, and unused MongoDB-native-module aliases; both production and the `local` environment currently omit `MONGODB_DATABASE` and therefore use `ayanaon-db`
 - `src/worker.js` - Cloudflare `httpServerHandler` adapter over the shared Express app; wraps every fetch in the database request context
 - `src/request-scope.js` - AsyncLocalStorage request-scope utility with nested reuse and guaranteed async disposal
 - `src/mongodb-optional-native-stub.js` - excludes unused Kerberos/client-encryption native add-ons from the Worker bundle
@@ -11,12 +11,13 @@
 - `tests/deployment-adapters.test.js` - provider-adapter exports, Google browser-key routing, and Cloudflare/Netlify client-IP precedence tests
 - `tests/request-scope.test.js` - concurrent isolation, nested reuse, and error-path disposal regression tests
 - `tests/google-geocoding.test.js` - server-key Google Geocoding request, zero-results handling, and missing-key regression tests
-- `tests/gather-pins.test.js` - Gather duplicate-suppression, draft-cleanup, source-link, and browser-adapter deployment regression tests
+- `tests/gather-pins.test.js` - Gather duplicate-suppression, draft-cleanup, optional-link validation, Kota Bogor parking-capacity formatting, source-link, and browser-adapter deployment regression tests
 - `tests/merchant-visibility.test.js` - AyaKasir partner menu visibility sanitizer (`onlineVisible: false` rejection) and merchant storefront `no-store` cache-control regression tests
+- `tests/travel-mode.test.js` - Travel Mode vehicle-capacity parsing, 3 km parking boundary, and main-map wiring regressions
 - `.gitignore` - ignores: node_modules, .env, .netlify
 
 ## Backend (single file)
-- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~8910+ lines)
+- `netlify/functions/api.js` - **THE ENTIRE BACKEND** (~9,500+ lines)
   - Express router mounted at `/api/*`; exports both the shared `app` and the Netlify `handler`
   - MongoDB client connects lazily once per request context, shares one in-request connection promise, and closes before the adapter request completes
   - MongoDB connection + index setup; never retain MongoDB clients/databases/I/O promises across Worker requests
@@ -29,13 +30,14 @@
 ### Main App
 - `index.html` - main page (map, pin list, forms, modals)
 - `app.js` - all map/pin/UI logic (large monolith)
+- `travel-mode.js` - pure Travel Mode parking rules: car/motorcycle capacity parsing and the 3 km visibility boundary
 - `style.css` - all main styles
 - `_headers` - provider-compatible `no-cache` rule for the service worker; Netlify-only `_redirects` moved to `netlify.toml`
 
 ### Admin
 - `admin.html` - admin dashboard page
 - `admin.js` - admin logic (manage pins, SEO, categories, brands, areas, mass promos, analytics)
-- `admin-gather.js` - Gather Pins source runs, polling, category-backed draft editing, authenticated server-proxied address search, map coordinates, automatic/manual images, and publication UI
+- `admin-gather.js` - Gather Pins source runs, polling, category-backed draft editing, optional HTTP(S) source-link validation, authenticated server-proxied address search, map coordinates, automatic/manual images, and publication UI
 - `admin.css` - admin styles
 
 ### External Gather Actor (`gather-actor/`)
@@ -95,7 +97,7 @@
 - `GET /admin/gather/sources` - source catalog + external-service configuration status
 - `GET /admin/gather/geocode?query=` - authenticated, server-side Google Geocoding lookup for Gather and admin location searches
 - `POST /admin/gather/runs` | `GET /admin/gather/runs[/:id]` - start/poll/list Apify runs; successful results import into drafts
-- `GET /PUT/DELETE /admin/gather/drafts[/:id]` | `POST /admin/gather/drafts/:id/publish` - review, edit, discard, and publish gathered drafts
+- `GET /PUT/DELETE /admin/gather/drafts[/:id]` | `POST /admin/gather/drafts/:id/publish` - review, edit, discard, and publish gathered drafts; publication can insert a new pin or update a linked target pin in place
 - `GET /admin/residents` | `PUT /:id/role` | `DELETE /:id`
 - `POST /admin/pins/backfill-city` | `backfill-provinces`
 - `GET /admin/mass-promotions` - list mass promo groups; `PUT /:groupId` - bulk-edit group; `DELETE /:groupId` - bulk-delete group

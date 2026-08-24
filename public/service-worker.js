@@ -19,6 +19,7 @@ const PRECACHE_URLS = [
     '/resident-auth.js',
     '/resident-session.js',
     '/style.css',
+    '/travel-mode.js',
     '/verify.html',
     '/warga-login.html',
     '/warga-register.html'

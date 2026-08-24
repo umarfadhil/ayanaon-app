@@ -42,8 +42,10 @@ let fuelToggleEvLabel;
 let fuelToggleContainer;
 let fuelCheckbox;
 let evCheckbox;
+let parkingCheckbox;
 let suppressSpecialCategorySync = false;
 let fuelToggleMode = 'fuel';
+let travelVehicleMode = 'car';
 const ADMIN_EDIT_HANDOFF_KEY = 'ayanaon_admin_edit_pin';
 let pendingAdminEditPinId = null;
 let trackedPinViews = new Set();
@@ -80,6 +82,7 @@ const DARK_MAP_STYLES = [
 ];
 
 let specialCategoryOnButton;
+let specialCategoryMotorcycleButton;
 let specialCategoryOffButton;
 let showSpecialCategories = false;
 let updateAppBtn;
@@ -1208,6 +1211,10 @@ const PIN_PHOTO_MAX_DIMENSION = 1280;
 const FUEL_CATEGORY = '⛽ SPBU/SPBG';
 const EV_CATEGORY = '⚡ SPKLU';
 const SPECIAL_CATEGORY_DISTANCE_KM = 30;
+const TRAVEL_MODE_RULES = window.AyanaonTravelMode || {};
+const PARKING_CATEGORY = TRAVEL_MODE_RULES.PARKING_CATEGORY || '🅿️ Lokasi Parkir';
+const VEHICLE_CAR = TRAVEL_MODE_RULES.VEHICLE_CAR || 'car';
+const VEHICLE_MOTORCYCLE = TRAVEL_MODE_RULES.VEHICLE_MOTORCYCLE || 'motorcycle';
 
 const DEBUG_LOGGER = (() => {
     let enabled = true;
@@ -1374,7 +1381,7 @@ function refreshMarkerCluster(visibleMarkers) {
 }
 
 function isSpecialCategory(category) {
-    return category === FUEL_CATEGORY || category === EV_CATEGORY;
+    return category === FUEL_CATEGORY || category === EV_CATEGORY || category === PARKING_CATEGORY;
 }
 
 function passesSpecialCategoryRules(marker) {
@@ -1395,7 +1402,21 @@ function passesSpecialCategoryRules(marker) {
         return false;
     }
     const distanceKm = calculateDistanceKm(userLocation, markerPosition);
-    if (!Number.isFinite(distanceKm) || distanceKm > SPECIAL_CATEGORY_DISTANCE_KM) {
+    if (!Number.isFinite(distanceKm)) {
+        return false;
+    }
+    if (category === PARKING_CATEGORY) {
+        if (typeof TRAVEL_MODE_RULES.shouldShowParkingPin !== 'function') {
+            return false;
+        }
+        return TRAVEL_MODE_RULES.shouldShowParkingPin({
+            travelModeActive: showSpecialCategories,
+            vehicleMode: travelVehicleMode,
+            distanceKm,
+            description: pinData.description || ''
+        });
+    }
+    if (distanceKm > SPECIAL_CATEGORY_DISTANCE_KM) {
         return false;
     }
     if (fuelToggleMode === 'fuel' && category !== FUEL_CATEGORY) {
@@ -1426,11 +1447,20 @@ function updateFuelToggleUI() {
         fuelToggleEvLabel.classList.toggle('active', allowSpecialSelection && fuelToggleMode === 'ev');
     }
     if (specialCategoryOnButton) {
-        specialCategoryOnButton.classList.toggle('active', showSpecialCategories);
+        const isActive = allowSpecialSelection && travelVehicleMode === VEHICLE_CAR;
+        specialCategoryOnButton.classList.toggle('active', isActive);
+        specialCategoryOnButton.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         specialCategoryOnButton.disabled = hasLocation ? false : true;
     }
+    if (specialCategoryMotorcycleButton) {
+        const isActive = allowSpecialSelection && travelVehicleMode === VEHICLE_MOTORCYCLE;
+        specialCategoryMotorcycleButton.classList.toggle('active', isActive);
+        specialCategoryMotorcycleButton.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        specialCategoryMotorcycleButton.disabled = hasLocation ? false : true;
+    }
     if (specialCategoryOffButton) {
-        specialCategoryOffButton.classList.toggle('active', !showSpecialCategories);
+        specialCategoryOffButton.classList.toggle('active', !allowSpecialSelection);
+        specialCategoryOffButton.setAttribute('aria-pressed', allowSpecialSelection ? 'false' : 'true');
         specialCategoryOffButton.disabled = hasLocation ? false : true;
     }
 
@@ -1443,6 +1473,10 @@ function updateFuelToggleUI() {
         if (evCheckbox) {
             evCheckbox.disabled = !allowSpecialSelection;
             evCheckbox.checked = allowSpecialSelection && fuelToggleMode === 'ev';
+        }
+        if (parkingCheckbox) {
+            parkingCheckbox.disabled = !allowSpecialSelection;
+            parkingCheckbox.checked = allowSpecialSelection;
         }
         suppressSpecialCategorySync = false;
     }
@@ -1468,6 +1502,19 @@ function setSpecialCategoryVisibility(enabled) {
     showSpecialCategories = enabled;
     updateFuelToggleUI();
     applyFilters();
+}
+
+function setTravelVehicleMode(mode) {
+    if (![VEHICLE_CAR, VEHICLE_MOTORCYCLE].includes(mode)) {
+        return;
+    }
+    const didChange = travelVehicleMode !== mode || !showSpecialCategories;
+    travelVehicleMode = mode;
+    showSpecialCategories = true;
+    updateFuelToggleUI();
+    if (didChange) {
+        applyFilters();
+    }
 }
 
 function animateMetricChange(element) {
@@ -7379,6 +7426,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     fuelToggleEvLabel = document.querySelector('#fuel-toggle-container .toggle-label-ev');
     fuelCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === FUEL_CATEGORY) || null;
     evCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === EV_CATEGORY) || null;
+    parkingCheckbox = categoryCheckboxList.find(checkbox => checkbox.value === PARKING_CATEGORY) || null;
 
     initializeNavigationModal();
     initializeLiveSellerControls();
@@ -7404,10 +7452,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     specialCategoryOnButton = document.getElementById('special-category-on-btn');
+    specialCategoryMotorcycleButton = document.getElementById('special-category-motorcycle-btn');
     specialCategoryOffButton = document.getElementById('special-category-off-btn');
     if (specialCategoryOnButton) {
         specialCategoryOnButton.addEventListener('click', () => {
-            setSpecialCategoryVisibility(true);
+            setTravelVehicleMode(VEHICLE_CAR);
+        });
+    }
+    if (specialCategoryMotorcycleButton) {
+        specialCategoryMotorcycleButton.addEventListener('click', () => {
+            setTravelVehicleMode(VEHICLE_MOTORCYCLE);
         });
     }
     if (specialCategoryOffButton) {
@@ -7507,9 +7561,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         categoryCheckboxes.forEach(checkbox => {
             if (isSpecialCategory(checkbox.value)) {
                 suppressSpecialCategorySync = true;
-                checkbox.checked = allowSpecialSelection && (fuelToggleMode === 'ev'
-                    ? checkbox.value === EV_CATEGORY
-                    : checkbox.value === FUEL_CATEGORY);
+                checkbox.checked = allowSpecialSelection && (checkbox.value === PARKING_CATEGORY
+                    || (fuelToggleMode === 'ev'
+                        ? checkbox.value === EV_CATEGORY
+                        : checkbox.value === FUEL_CATEGORY));
                 suppressSpecialCategorySync = false;
             } else {
                 checkbox.checked = shouldCheck;
@@ -7537,6 +7592,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     suppressSpecialCategorySync = true;
                     checkbox.checked = true;
                     suppressSpecialCategorySync = false;
+                    filterMarkers();
+                    return;
+                }
+                if (value === PARKING_CATEGORY) {
+                    filterMarkers();
                     return;
                 }
                 fuelToggleMode = value === EV_CATEGORY ? 'ev' : 'fuel';

@@ -8,6 +8,7 @@ delete process.env.MONGODB_URI;
 const {
     computeExpiresAtFromLifetime,
     enrichGatherDraftCoordinates,
+    formatBogorParkingDescription,
     hasGatherMaterialChanges,
     isGatherPublishedDuplicate,
     needsKalenderLariRefresh,
@@ -77,7 +78,7 @@ test('a missing browser Maps key degrades only the location preview', () => {
     assert.doesNotMatch(script, /catch \(error\) \{\s*showMessage\('error', error\.message\);\s*\}\s*\}\s*\n\s*async function searchLocation/);
 });
 
-test('Gather dates are optional and supportive images stay compact', () => {
+test('Gather dates and links are optional, and supportive images stay compact', () => {
     const html = fs.readFileSync(path.resolve(__dirname, '../public/admin.html'), 'utf8');
     const script = fs.readFileSync(path.resolve(__dirname, '../public/admin-gather.js'), 'utf8');
     const css = fs.readFileSync(path.resolve(__dirname, '../public/admin.css'), 'utf8');
@@ -86,9 +87,12 @@ test('Gather dates are optional and supportive images stay compact', () => {
     assert.match(html, /Start Date \(optional\)/);
     assert.match(html, /End Date \(optional\)/);
     assert.doesNotMatch(html, /id="gather-(?:start|end)-date"[^>]*required/);
-    assert.match(script, /\['title', 'description', 'category', 'link'\]\.forEach/);
+    assert.match(html, /<label for="gather-link">Link \(optional\)<\/label>/);
+    assert.doesNotMatch(html, /id="gather-link"[^>]*required/);
+    assert.match(script, /\['title', 'description', 'category'\]\.forEach/);
+    assert.match(script, /validOptionalHttpLink/);
     assert.match(script, /missing\.push\('dateRange'\)/);
-    assert.match(script, /5\/5 field wajib siap dipublikasikan/);
+    assert.match(script, /4\/4 field wajib siap dipublikasikan/);
     assert.match(api, /\['dateRange', !hasInvalidDateRange\]/);
     assert.match(api, /const lifetime = normalized\.startDate \|\| normalized\.endDate/);
     assert.match(api, /: null;\s*const pinFields =/);
@@ -96,7 +100,7 @@ test('Gather dates are optional and supportive images stay compact', () => {
 
     const permanentDraft = normalizeGatherDraft({
         source: 'spklu', title: 'SPKLU Senayan', description: 'Lokasi pengisian kendaraan listrik',
-        category: 'SPKLU', link: 'https://example.com/spklu', lat: -6.21, lng: 106.8,
+        category: 'SPKLU', link: '', lat: -6.21, lng: 106.8,
         startDate: '', endDate: ''
     }, 'spklu');
     assert.deepEqual(permanentDraft.missingFields, []);
@@ -106,6 +110,33 @@ test('Gather dates are optional and supportive images stay compact', () => {
         ...permanentDraft, startDate: '2026-08-13', endDate: '2026-08-12'
     }, 'spklu');
     assert.deepEqual(reversedDates.missingFields, ['dateRange']);
+});
+
+test('Bogor parking descriptions use official SRP capacities and decree footer', () => {
+    const description = formatBogorParkingDescription(
+        '📍 Titik Parkir: Bahu Jalan Depan Asinan Ny. Yenni\n🚗 Parkir Mobil: Ya\n🏍️ Parkir Motor: Tidak',
+        { carCapacity: 12, motorCapacity: 0 }
+    );
+    assert.equal(description,
+        '📍 Titik Parkir: Bahu Jalan Depan Asinan Ny. Yenni\n'
+        + '🚗 Parkir Mobil: Ya (12)\n'
+        + '🏍️ Parkir Motor: Tidak\n\n'
+        + 'Sumber: KEPUTUSAN WALI KOTA BOGOR\n'
+        + 'NOMOR 100.3.3.3/KEP.315-Dis.Hub/2024 TENTANG\n'
+        + 'TEMPAT PARKIR DI TEPI JALAN UMUM DAN TEMPAT KHUSUS PARKIR DI KOTA BOGOR');
+
+    const draft = normalizeGatherDraft({
+        source: 'Parkir Kota Bogor (Excel)',
+        title: 'Parkir - Jalan Bina Marga I - Asinan Ny. Yenni',
+        description,
+        category: '🅿️ Lokasi Parkir',
+        link: '',
+        lat: -6.6,
+        lng: 106.8,
+        sourceMeta: { carCapacity: 12, motorCapacity: 0 }
+    }, 'Parkir Kota Bogor (Excel)');
+    assert.equal(draft.description, description);
+    assert.deepEqual(draft.missingFields, []);
 });
 
 test('SPKLU descriptions derive charger totals from charger boxes and expose each box', async () => {
