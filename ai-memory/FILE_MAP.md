@@ -115,7 +115,7 @@
 - `GET /analytics/dashboard-password`
 
 ### Merchants (AyaKasir partner integration)
-- `PUT /partners/ayakasir/stores` - upsert tenant store (Bearer `AYAKASIR_PARTNER_SECRET`; upsert key `tenantId`; slug immutable after create; builds `searchText` blob; sanitizes `logoUrl`/`menuLayout`/per-item `category`+`available`; menu cap 100)
+- `PUT /partners/ayakasir/stores` - upsert tenant store (Bearer `AYAKASIR_PARTNER_SECRET`; upsert key `tenantId`; slug immutable after create; builds `searchText` blob; sanitizes `logoUrl`/`menuLayout`/per-item `category`+`available`; menu cap 100; per-item `variants[]` size/flavor axis + per-item `modifierGroups[]` "Varian Bertingkat" reusable option sets, both optional and orthogonal)
 - `DELETE /partners/ayakasir/stores/:tenantId` - soft-hide (default) or `?purge=1` hard delete
 - `GET /merchants` - lean active list for the map layer (logoUrl, photos $slice 3, menuHighlights $slice 3, searchText)
 - `GET /merchants/:slug` - full merchant detail

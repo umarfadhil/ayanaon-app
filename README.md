@@ -107,6 +107,11 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.6.3
+- **Modifier Groups on `/toko` ("Varian Bertingkat"):** Menu items synced from AyaKasir with reusable option sets (e.g. Level Gula) now show a "+" button that opens a picker instead of a plain quantity stepper. Each chosen combination becomes its own cart line, so two different picks of the same item never merge, while picking the same combination again just increases its quantity.
+- **Consistent Quantity Controls:** Modifier items now also have a "-" button alongside the "+", matching every other menu row, so removing the most recently chosen combination is a single tap.
+- **Category-Matched Store Icons:** Merchants without a logo now show a map marker and list icon matched to their actual store category (e.g. 🏍️ for a motorcycle workshop, 🐾 for a pet clinic) instead of a generic storefront icon for every logo-less store.
+
 ### What's New in v2.6.2
 - **Smarter Permanent Location Drafts:** Gathered SPBU/SPKLU records no longer need event dates. Complete records with blank dates publish as permanent pins, while supportive-image thumbnails stay compact and easy to review.
 - **Review-First Infrastructure Updates:** When a published SPKLU record materially changes, Gather creates an `UPDATE PIN` draft for Admin approval instead of silently overwriting the pin or treating it as an unhelpful duplicate. Approved updates preserve the pin identity and community history.

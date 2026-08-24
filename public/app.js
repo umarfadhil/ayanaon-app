@@ -3152,9 +3152,87 @@ let merchantMarkers = [];
 let activeMerchantInfoWindow = null;
 let hasFetchedMerchants = false;
 
+// Fallback icon for merchants without a logo, keyed to the real tenant-picked
+// store category. `category` is NOT free text in practice: AyaKasir's store
+// settings (petalytix `src/lib/ayanaon-categories.ts` AYANAON_CATEGORIES,
+// mirrored byte-identical in the Android app's BusinessCategories.kt) render
+// it as a fixed <select> dropdown, so an exact (case/whitespace-insensitive)
+// match against that enum is the primary and most reliable signal — keep
+// this list in sync if that enum changes. Keyword substring matching stays
+// as a fallback net for legacy docs predating the picker (e.g. the old
+// hardcoded 'Kuliner' default) or any off-list value.
+const MERCHANT_CATEGORY_ICONS = {
+    'restoran': '🍽️', 'cafe': '☕', 'bakery': '🍞', 'makanan': '🍱',
+    'minuman': '🥤', 'catering': '🍛', 'food truck': '🚚',
+    'toko kelontong': '🏪', 'sembako': '🌾', 'minimarket': '🏬',
+    'toko sayur': '🥬', 'toko daging': '🥩',
+    'elektronik': '🔌', 'atk': '✏️', 'toko buku': '📚', 'toko mainan': '🧸',
+    'oleh-oleh': '🎁', 'toko bangunan': '🧱', 'toko kosmetik': '💄',
+    'toko buah': '🍎', 'toko ritel lainnya': '🛍️',
+    'toko pakaian': '👕', 'toko tas': '👜', 'toko sepatu': '👟',
+    'toko aksesoris': '🕶️', 'toko perhiasan': '💍',
+    'salon': '💇', 'barbershop': '💈', 'kecantikan': '💅', 'spa & reflexy': '💆',
+    'apotek': '💊', 'klinik': '🩺', 'toko alat kesehatan': '🩹', 'optik': '👓',
+    'laundry kiloan': '🧺', 'laundry sepatu': '🧼', 'laundry lainnya': '🧺',
+    'bengkel motor': '🏍️', 'bengkel mobil': '🚗', 'servis elektronik': '🛠️',
+    'cuci kendaraan': '🚿',
+    'jahit pakaian': '🧵', 'fotokopi': '📄', 'printing': '🖨️',
+    'studio foto': '📸', 'jasa lainnya': '🧰',
+    'penginapan': '🏨', 'hiburan': '🎮', 'pendidikan': '🎓',
+    'klinik hewan': '🐾', 'pet shop': '🐶',
+    'manufaktur': '🏭', 'distributor': '🚛', 'supplier': '📦', 'agen': '🤝',
+    'grosir': '🏢', 'lainnya': '🏪'
+};
+
+const MERCHANT_CATEGORY_KEYWORD_RULES = [
+    { keywords: ['kopi', 'coffee', 'kafe', 'cafe'], icon: '☕' },
+    { keywords: ['roti', 'bakery', 'kue', 'cake', 'pastry'], icon: '🍞' },
+    { keywords: ['minuman', 'jus', 'juice', 'boba', 'teh', 'drink'], icon: '🥤' },
+    { keywords: ['seafood', 'ikan'], icon: '🦐' },
+    { keywords: ['ayam', 'chicken'], icon: '🍗' },
+    { keywords: ['bakso', 'mie', 'noodle', 'soto'], icon: '🍜' },
+    { keywords: ['pizza'], icon: '🍕' },
+    { keywords: ['burger'], icon: '🍔' },
+    { keywords: ['es krim', 'ice cream', 'gelato'], icon: '🍦' },
+    { keywords: ['snack', 'jajanan', 'gorengan', 'cemilan'], icon: '🍟' },
+    { keywords: ['restoran', 'resto', 'rumah makan', 'warung', 'kuliner', 'makan', 'food'], icon: '🍽️' },
+    { keywords: ['sayur', 'buah', 'sembako', 'grosir', 'kelontong', 'minimarket', 'supermarket'], icon: '🛒' },
+    { keywords: ['fashion', 'baju', 'pakaian', 'busana', 'butik', 'clothing'], icon: '👕' },
+    { keywords: ['sepatu', 'sandal', 'shoes'], icon: '👟' },
+    { keywords: ['kecantikan', 'salon', 'spa', 'kosmetik', 'beauty'], icon: '💇' },
+    { keywords: ['apotek', 'farmasi', 'obat', 'pharmacy', 'kesehatan', 'klinik'], icon: '💊' },
+    { keywords: ['bengkel', 'otomotif', 'sparepart', 'motor', 'mobil', 'automotive'], icon: '🔧' },
+    { keywords: ['laundry', 'cuci'], icon: '🧺' },
+    { keywords: ['elektronik', 'gadget', 'handphone', 'komputer', 'electronic'], icon: '🔌' },
+    { keywords: ['bunga', 'florist', 'tanaman', 'flower'], icon: '💐' },
+    { keywords: ['hewan', 'pet'], icon: '🐾' },
+    { keywords: ['buku', 'atk', 'stationery', 'percetakan', 'fotokopi', 'fotocopy'], icon: '📚' },
+    { keywords: ['perhiasan', 'jewelry', 'aksesoris'], icon: '💍' },
+    { keywords: ['bangunan', 'material', 'hardware'], icon: '🧱' },
+    { keywords: ['furniture', 'mebel'], icon: '🛋️' }
+];
+
+function getMerchantCategoryIcon(category) {
+    if (typeof category !== 'string' || !category.trim()) {
+        return String.fromCodePoint(0x1F3EA);
+    }
+    const normalized = category.trim().toLowerCase();
+    if (MERCHANT_CATEGORY_ICONS[normalized]) {
+        return MERCHANT_CATEGORY_ICONS[normalized];
+    }
+    const emojiMatch = category.match(/\p{Extended_Pictographic}/u);
+    if (emojiMatch && emojiMatch[0]) {
+        return emojiMatch[0];
+    }
+    const matched = MERCHANT_CATEGORY_KEYWORD_RULES.find(
+        (rule) => rule.keywords.some((keyword) => normalized.includes(keyword))
+    );
+    return matched ? matched.icon : String.fromCodePoint(0x1F3EA);
+}
+
 function createMerchantMarkerElement(merchant = {}) {
     // Rounded SQUARE pin showing the tenant's LOGO (never a menu photo);
-    // store-emoji fallback when the tenant has no logo.
+    // category-matched emoji fallback when the tenant has no logo.
     const element = document.createElement('div');
     element.className = 'merchant-marker';
     element.style.width = '36px';
@@ -3178,7 +3256,7 @@ function createMerchantMarkerElement(merchant = {}) {
         element.appendChild(logoElement);
     } else {
         const iconElement = document.createElement('span');
-        iconElement.textContent = String.fromCodePoint(0x1F3EA);
+        iconElement.textContent = getMerchantCategoryIcon(merchant.category);
         iconElement.style.fontSize = '18px';
         iconElement.setAttribute('aria-hidden', 'true');
         element.appendChild(iconElement);
@@ -4696,7 +4774,7 @@ function updatePinListPanel(context = {}) {
                 item.appendChild(logoElement);
             } else {
                 const iconElement = document.createElement('span');
-                iconElement.textContent = String.fromCodePoint(0x1F3EA);
+                iconElement.textContent = getMerchantCategoryIcon(merchant.category);
                 iconElement.style.fontSize = '20px';
                 iconElement.style.flex = '0 0 auto';
                 iconElement.setAttribute('aria-hidden', 'true');

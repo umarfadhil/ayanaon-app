@@ -8,7 +8,7 @@
 - **Toko / UMKM (Merchants)** = AyaKasir POS tenant stores pushed via a partner API: logo map pins + SEO pages `/toko/:slug` with WhatsApp ordering & live availability
 - PWA (installable, service worker, offline-capable)
 - Live site: **ayanaon.app**
-- Current version: **v2.6.2**
+- Current version: **v2.6.3**
 
 ## Tech Stack
 - **Frontend:** Vanilla HTML/CSS/JS (no framework/bundler)
@@ -51,7 +51,7 @@
 - `analytics_events` - page views, pin views, referrers
 - `brands` - brand directory with locations
 - `areas` - Indonesian provinces and cities
-- `merchants` - AyaKasir tenant stores (pushed from the AyaKasir portal; unique `slug` + `tenantId`; `status: active|hidden`; fields incl. `logoUrl`, `menuLayout` LIST/GRID/ACCORDION, `menuHighlights[]` full menu ≤100 with per-item `category`/`photoUrl`/`price`/`available` (partner `onlineVisible: false` entries are dropped before persistence/search indexing), `searchText` blob built at upsert; SSR page at `/toko/:slug` (`Cache-Control: private, no-store` for immediate post-sync freshness) with WA-cart ordering + live availability polling; map layer in app.js with `?toko=<slug>` deep link + search integration)
+- `merchants` - AyaKasir tenant stores (pushed from the AyaKasir portal; unique `slug` + `tenantId`; `status: active|hidden`; fields incl. `logoUrl`, `menuLayout` LIST/GRID/ACCORDION, `menuHighlights[]` full menu ≤100 with per-item `category`/`photoUrl`/`price`/`available`, optional per-item `variants[]` (size/flavor price axis, rendered as an expandable group on `/toko`) and optional per-item `modifierGroups[]` ("Varian Bertingkat" reusable option sets, e.g. Level Gula, rendered as a picker modal) — both orthogonal and independently optional — (partner `onlineVisible: false` entries are dropped before persistence/search indexing), `searchText` blob built at upsert; SSR page at `/toko/:slug` (`Cache-Control: private, no-store` for immediate post-sync freshness) with WA-cart ordering + live availability polling; map layer in app.js with `?toko=<slug>` deep link + search integration + category-matched fallback icon when no logo is set)
 - `gather_runs` - external Apify run records and import counters/status
 - `gather_pin_drafts` - editable, authenticated pre-publication pin drafts with source provenance and completeness metadata
 

@@ -5890,6 +5890,45 @@ function cleanMerchantVariants(value) {
     return out;
 }
 
+/**
+ * Per-product Modifier Groups ("Varian Bertingkat") — tenant-level, reusable
+ * option groups (e.g. Saus/Seasoning) pushed alongside a menu item, orthogonal
+ * to `variants` above. Single-select in v1; priceAdjustment is currently
+ * always 0 from the partner side but sanitized generically since the AyaKasir
+ * schema column already exists for future charging.
+ */
+function cleanMerchantModifierGroupValues(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object') continue;
+        const name = cleanMerchantText(entry.name, 60);
+        if (!name) continue;
+        const adjustmentNumber = Number(entry.priceAdjustment);
+        const priceAdjustment = Number.isFinite(adjustmentNumber)
+            ? Math.max(-100000000, Math.min(100000000, Math.round(adjustmentNumber)))
+            : 0;
+        out.push({ name, priceAdjustment });
+        if (out.length >= 30) break;
+    }
+    return out;
+}
+
+function cleanMerchantModifierGroups(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object') continue;
+        const name = cleanMerchantText(entry.name, 60);
+        if (!name) continue;
+        const values = cleanMerchantModifierGroupValues(entry.values);
+        if (values.length === 0) continue;
+        out.push({ name, values });
+        if (out.length >= 10) break;
+    }
+    return out;
+}
+
 function cleanMerchantMenuHighlights(value) {
     if (!Array.isArray(value)) return [];
     const out = [];
@@ -5910,6 +5949,10 @@ function cleanMerchantMenuHighlights(value) {
         // Variants (size/flavor/etc.): when present, the /toko page renders one
         // orderable row per variant instead of a single bare-product row.
         const variants = cleanMerchantVariants(entry.variants);
+        // Modifier groups (Saus/Seasoning/etc.) apply to the product regardless
+        // of which variant is picked — same product-level link AyaKasir's POS
+        // uses (variant picker first, then modifier picker), never per-variant.
+        const modifierGroups = cleanMerchantModifierGroups(entry.modifierGroups);
         out.push({
             name,
             price,
@@ -5919,7 +5962,8 @@ function cleanMerchantMenuHighlights(value) {
             description: description || null,
             // Push-time stock snapshot from AyaKasir (default: available).
             available: entry.available !== false,
-            variants
+            variants,
+            modifierGroups
         });
         // Full menu parity with the AyaKasir order page (not just highlights).
         if (out.length >= 100) break;
@@ -6294,6 +6338,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     // price, and — when the store has WhatsApp — a qty stepper feeding the
     // "Pesan via WhatsApp" pre-filled order message.
     const canOrderViaWa = Boolean(whatsapp);
+    const hasAnyModifierGroups = menuHighlights.some((item) => Array.isArray(item?.modifierGroups) && item.modifierGroups.length > 0);
     const menuByCategory = new Map();
     menuHighlights.forEach((item) => {
         if (!item || !item.name) return;
@@ -6322,6 +6367,12 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         const isAvailable = (variant ? variant.available : item.available) !== false;
         const rowName = variant ? variant.name : item.name;
         const dataName = variant ? `${item.name} - ${variant.name}` : item.name;
+        // Modifier groups are product-level (apply the same regardless of which
+        // variant this row is), so both a bare item row and each of its variant
+        // rows check item.modifierGroups, never a variant-scoped list.
+        const modifierGroups = Array.isArray(item.modifierGroups) ? item.modifierGroups : [];
+        const hasModifiers = modifierGroups.length > 0;
+        const modifiersAttr = hasModifiers ? ` data-modifiers="${escapeHtml(JSON.stringify(modifierGroups))}"` : '';
         // A variant row never shows a photo — matching the AyaKasir order
         // page's .olo-variant-row (name + price only) — the product's photo
         // is already shown once, on the group summary in buildMenuItemGroupHtml.
@@ -6338,15 +6389,26 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         const desc = !variant && item.description
             ? `<span class="toko-menu__desc">${escapeHtml(item.description)}</span>`
             : '';
+        // A modifier-bearing row swaps the direct +/- stepper for a single
+        // "add" button that opens the modifier picker first (see modifierScript
+        // below) — one row can end up as several distinct cart lines (one per
+        // chosen combination), so its own count badge only ever displays their
+        // aggregate, never a directly-editable quantity.
         const stepper = canOrderViaWa
-            ? `<div class="toko-menu__qty">
-                <button type="button" class="toko-menu__step" data-step="-1"${isAvailable ? '' : ' disabled'} aria-label="Kurangi ${escapeHtml(rowName)}">&minus;</button>
-                <span class="toko-menu__count">0</span>
-                <button type="button" class="toko-menu__step" data-step="1"${isAvailable ? '' : ' disabled'} aria-label="Tambah ${escapeHtml(rowName)}">+</button>
-            </div>`
+            ? (hasModifiers
+                ? `<div class="toko-menu__qty toko-menu__qty--modifier">
+                    <button type="button" class="toko-menu__step" data-modifier-minus${isAvailable ? '' : ' disabled'} aria-label="Kurangi ${escapeHtml(rowName)}">&minus;</button>
+                    <span class="toko-menu__count">0</span>
+                    <button type="button" class="toko-menu__step toko-menu__step--add" data-open-modifier${isAvailable ? '' : ' disabled'} aria-label="Pilih modifier ${escapeHtml(rowName)}">+</button>
+                </div>`
+                : `<div class="toko-menu__qty">
+                    <button type="button" class="toko-menu__step" data-step="-1"${isAvailable ? '' : ' disabled'} aria-label="Kurangi ${escapeHtml(rowName)}">&minus;</button>
+                    <span class="toko-menu__count">0</span>
+                    <button type="button" class="toko-menu__step" data-step="1"${isAvailable ? '' : ' disabled'} aria-label="Tambah ${escapeHtml(rowName)}">+</button>
+                </div>`)
             : '';
         const soldOutBadge = `<span class="toko-soldout"${isAvailable ? ' hidden' : ''}>Habis</span>`;
-        return `<li class="toko-menu__item${isAvailable ? '' : ' toko-menu__item--out'}" data-name="${escapeHtml(dataName)}" data-price="${price}">
+        return `<li class="toko-menu__item${isAvailable ? '' : ' toko-menu__item--out'}" data-name="${escapeHtml(dataName)}" data-price="${price}"${modifiersAttr}>
             ${thumb ? `<span class="toko-menu__thumb-wrap">${thumb}${ribbon}</span>` : ribbon}
             <div class="toko-menu__info">
                 <span class="toko-menu__name">${escapeHtml(rowName)}</span>
@@ -6486,9 +6548,45 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     </div>`
         : '';
 
+    // Modal for picking a product's modifiers (e.g. Saus/Seasoning) before it
+    // is added to the cart — only emitted when at least one menu item actually
+    // has modifierGroups, so stores that don't use the feature ship no extra
+    // markup. Group/value content is filled in by modifierScript per product
+    // from each row's data-modifiers JSON, since it differs per item.
+    const modifierModalHtml = (canOrderViaWa && hasAnyModifierGroups)
+        ? `<div id="toko-modifier-modal" class="toko-cart-modal" hidden>
+        <div class="toko-cart-modal__overlay" data-modifier-close></div>
+        <div class="toko-cart-modal__panel" role="dialog" aria-modal="true" aria-labelledby="toko-modifier-modal-title">
+            <div class="toko-cart-modal__head">
+                <h2 id="toko-modifier-modal-title">Pilih Modifier</h2>
+                <button type="button" class="toko-cart-modal__close" data-modifier-close aria-label="Tutup">&times;</button>
+            </div>
+            <div id="toko-modifier-body" class="toko-modifier-body"></div>
+            <div class="toko-modifier-qty">
+                <span>Jumlah</span>
+                <div class="toko-menu__qty">
+                    <button type="button" class="toko-menu__step" id="toko-modifier-qty-minus" aria-label="Kurangi jumlah">&minus;</button>
+                    <span class="toko-menu__count" id="toko-modifier-qty-count">1</span>
+                    <button type="button" class="toko-menu__step" id="toko-modifier-qty-plus" aria-label="Tambah jumlah">+</button>
+                </div>
+            </div>
+            <button type="button" id="toko-modifier-confirm" class="toko-action toko-action--cta">Tambah ke Keranjang</button>
+        </div>
+    </div>`
+        : '';
+
     // Client-side WhatsApp cart: qty steppers feed a pre-filled wa.me message.
     // NOTE: no backticks or dollar-brace inside — the script body lives in a
     // template literal, so client code uses quotes + concatenation only.
+    // Cart state lives in a plain JS array (cart lines keyed by "key"), not
+    // derived from the DOM: a modifier-bearing row can produce several
+    // distinct cart lines (one per chosen combination of values), which a
+    // single per-row DOM counter can no longer represent 1:1. A plain row's
+    // key is just its data-name; a modifier line's key is
+    // "dataName|group:value;group:value" so two different combinations of the
+    // same product never merge, while re-picking the same exact combination
+    // increments its existing line — mirroring the "lineKey" identity AyaKasir
+    // POS itself uses for the same reason (SESSION_LEARNINGS 2026-08-24).
     const waScript = canOrderViaWa
         ? `<script>
 (function () {
@@ -6503,28 +6601,60 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     var cartList = document.getElementById('toko-cart-list');
     var cartTotalEl = document.getElementById('toko-cart-modal-total');
     var cartOrderBtn = document.getElementById('toko-cart-modal-order');
+    var modifierModal = document.getElementById('toko-modifier-modal');
+    var modifierBody = document.getElementById('toko-modifier-body');
+    var modifierQtyCount = document.getElementById('toko-modifier-qty-count');
+    var modifierQtyMinus = document.getElementById('toko-modifier-qty-minus');
+    var modifierQtyPlus = document.getElementById('toko-modifier-qty-plus');
+    var modifierConfirm = document.getElementById('toko-modifier-confirm');
     var rows = Array.prototype.slice.call(document.querySelectorAll('.toko-menu__item'));
+    var cart = [];
+    var activeModifierRow = null;
+    // Remembers the most recently confirmed combination per modifier row (keyed
+    // by its base data-name), so that row's own "-" button has an unambiguous
+    // line to decrement without opening the cart modal, matching a plain row's
+    // one-tap feel even though one row can back several distinct cart lines.
+    var lastKeyByBaseName = {};
     function formatPrice(value) {
         return 'Rp' + Number(value || 0).toLocaleString('id-ID');
     }
-    function selection() {
-        var items = [];
-        rows.forEach(function (row) {
-            var countEl = row.querySelector('.toko-menu__count');
-            var qty = countEl ? parseInt(countEl.textContent, 10) || 0 : 0;
-            if (qty > 0) {
-                items.push({
-                    name: row.getAttribute('data-name') || '',
-                    price: Number(row.getAttribute('data-price')) || 0,
-                    qty: qty
-                });
-            }
+    function findCartEntry(key) {
+        for (var i = 0; i < cart.length; i++) {
+            if (cart[i].key === key) return cart[i];
+        }
+        return null;
+    }
+    function baseNameOf(row) {
+        return row.getAttribute('data-name') || '';
+    }
+    function rowQty(row) {
+        var base = baseNameOf(row);
+        var total = 0;
+        cart.forEach(function (entry) {
+            if (entry.key === base || entry.key.indexOf(base + '|') === 0) total += entry.qty;
         });
-        return items;
+        return total;
+    }
+    function setEntryQty(key, name, price, qty) {
+        var entry = findCartEntry(key);
+        if (qty <= 0) {
+            if (entry) cart.splice(cart.indexOf(entry), 1);
+            return;
+        }
+        if (entry) {
+            entry.qty = qty;
+        } else {
+            cart.push({ key: key, name: name, price: price, qty: qty });
+        }
+    }
+    function addEntryQty(key, name, price, delta) {
+        var entry = findCartEntry(key);
+        var next = Math.max(0, (entry ? entry.qty : 0) + delta);
+        setEntryQty(key, name, price, next);
+        refresh();
     }
     function refresh() {
-        var items = selection();
-        var count = items.reduce(function (sum, item) { return sum + item.qty; }, 0);
+        var count = cart.reduce(function (sum, entry) { return sum + entry.qty; }, 0);
         if (count > 0) {
             waButton.classList.remove('toko-action--disabled');
             waButton.textContent = 'Pesan via WhatsApp (' + count + ' item)';
@@ -6539,29 +6669,17 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             cartBtn.classList.toggle('toko-action--disabled', count === 0);
         }
         if (cartBadge) cartBadge.textContent = String(count);
+        rows.forEach(function (row) {
+            var countEl = row.querySelector('.toko-menu__count');
+            if (countEl) countEl.textContent = String(rowQty(row));
+        });
         if (cartModal && !cartModal.hidden) renderCartList();
-    }
-    function findRow(itemName) {
-        for (var i = 0; i < rows.length; i++) {
-            if (rows[i].getAttribute('data-name') === itemName) return rows[i];
-        }
-        return null;
-    }
-    function adjustCartQty(itemName, step) {
-        var row = findRow(itemName);
-        if (!row) return;
-        var countEl = row.querySelector('.toko-menu__count');
-        if (!countEl) return;
-        var next = Math.max(0, (parseInt(countEl.textContent, 10) || 0) + step);
-        countEl.textContent = String(next);
-        refresh();
     }
     function renderCartList() {
         if (!cartList) return;
         cartList.innerHTML = '';
-        var items = selection();
         var total = 0;
-        items.forEach(function (item) {
+        cart.forEach(function (item) {
             total += item.price * item.qty;
             var li = document.createElement('li');
             li.className = 'toko-cart-row';
@@ -6582,7 +6700,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             minusBtn.className = 'toko-menu__step';
             minusBtn.textContent = String.fromCharCode(8722);
             minusBtn.setAttribute('aria-label', 'Kurangi ' + item.name);
-            minusBtn.addEventListener('click', function () { adjustCartQty(item.name, -1); });
+            minusBtn.addEventListener('click', function () { addEntryQty(item.key, item.name, item.price, -1); });
             var countSpan = document.createElement('span');
             countSpan.className = 'toko-menu__count';
             countSpan.textContent = String(item.qty);
@@ -6591,7 +6709,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             plusBtn.className = 'toko-menu__step';
             plusBtn.textContent = '+';
             plusBtn.setAttribute('aria-label', 'Tambah ' + item.name);
-            plusBtn.addEventListener('click', function () { adjustCartQty(item.name, 1); });
+            plusBtn.addEventListener('click', function () { addEntryQty(item.key, item.name, item.price, 1); });
             qtyBox.appendChild(minusBtn);
             qtyBox.appendChild(countSpan);
             qtyBox.appendChild(plusBtn);
@@ -6599,7 +6717,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             li.appendChild(qtyBox);
             cartList.appendChild(li);
         });
-        if (items.length === 0) {
+        if (cart.length === 0) {
             var empty = document.createElement('li');
             empty.className = 'toko-cart-empty';
             empty.textContent = 'Keranjang masih kosong.';
@@ -6615,6 +6733,118 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     function closeCartModal() {
         if (cartModal) cartModal.hidden = true;
     }
+    function openModifierModal(row) {
+        if (!modifierModal || !modifierBody) return;
+        var raw = row.getAttribute('data-modifiers');
+        var groups = [];
+        try { groups = JSON.parse(raw || '[]'); } catch (e) { groups = []; }
+        if (!groups.length) return;
+        activeModifierRow = row;
+        modifierBody.innerHTML = '';
+        groups.forEach(function (group, groupIndex) {
+            var wrap = document.createElement('div');
+            wrap.className = 'toko-modifier-group';
+            wrap.setAttribute('data-group-name', group.name || '');
+            var title = document.createElement('div');
+            title.className = 'toko-modifier-group__title';
+            title.textContent = group.name || '';
+            wrap.appendChild(title);
+            (group.values || []).forEach(function (value, valueIndex) {
+                var label = document.createElement('label');
+                label.className = 'toko-modifier-option';
+                var input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'toko-modifier-group-' + groupIndex;
+                input.value = value.name || '';
+                if (valueIndex === 0) input.checked = true;
+                var adjustment = Number(value.priceAdjustment) || 0;
+                input.setAttribute('data-adjustment', String(adjustment));
+                label.appendChild(input);
+                var text = document.createElement('span');
+                text.textContent = value.name || '';
+                label.appendChild(text);
+                if (adjustment !== 0) {
+                    var adj = document.createElement('span');
+                    adj.className = 'toko-modifier-option__adjust';
+                    adj.textContent = (adjustment > 0 ? '+' : '') + formatPrice(adjustment);
+                    label.appendChild(adj);
+                }
+                wrap.appendChild(label);
+            });
+            modifierBody.appendChild(wrap);
+        });
+        if (modifierQtyCount) modifierQtyCount.textContent = '1';
+        modifierModal.hidden = false;
+    }
+    function closeModifierModal() {
+        if (modifierModal) modifierModal.hidden = true;
+        activeModifierRow = null;
+    }
+    function confirmModifierSelection() {
+        if (!activeModifierRow || !modifierBody) return;
+        var row = activeModifierRow;
+        var baseName = baseNameOf(row);
+        var basePrice = Number(row.getAttribute('data-price')) || 0;
+        var qty = parseInt((modifierQtyCount && modifierQtyCount.textContent) || '1', 10) || 1;
+        var groupWraps = Array.prototype.slice.call(modifierBody.querySelectorAll('.toko-modifier-group'));
+        var labelParts = [];
+        var keyParts = [];
+        var adjustmentTotal = 0;
+        groupWraps.forEach(function (wrap) {
+            var checked = wrap.querySelector('input[type="radio"]:checked');
+            if (!checked) return;
+            var groupName = wrap.getAttribute('data-group-name') || '';
+            labelParts.push(checked.value);
+            keyParts.push(groupName + ':' + checked.value);
+            adjustmentTotal += Number(checked.getAttribute('data-adjustment')) || 0;
+        });
+        var price = Math.max(0, basePrice + adjustmentTotal);
+        var name = labelParts.length ? baseName + ' (' + labelParts.join(', ') + ')' : baseName;
+        var key = baseName + '|' + keyParts.join(';');
+        lastKeyByBaseName[baseName] = key;
+        addEntryQty(key, name, price, qty);
+        closeModifierModal();
+    }
+    // A modifier row's own "-" has no single obvious target once several
+    // combinations exist for it, so it decrements the most recently confirmed
+    // one; if that line is gone (removed via the cart modal, or never set) it
+    // falls back to whichever combination for this row still has quantity, so
+    // the button stays useful instead of silently doing nothing.
+    function decrementModifierRow(row) {
+        var base = baseNameOf(row);
+        var key = lastKeyByBaseName[base];
+        if (!key || !findCartEntry(key)) {
+            key = null;
+            for (var i = 0; i < cart.length; i++) {
+                if (cart[i].key === base || cart[i].key.indexOf(base + '|') === 0) {
+                    key = cart[i].key;
+                    break;
+                }
+            }
+        }
+        if (!key) return;
+        var entry = findCartEntry(key);
+        if (!entry) return;
+        addEntryQty(key, entry.name, entry.price, -1);
+    }
+    if (modifierQtyMinus && modifierQtyCount) {
+        modifierQtyMinus.addEventListener('click', function () {
+            var next = Math.max(1, (parseInt(modifierQtyCount.textContent, 10) || 1) - 1);
+            modifierQtyCount.textContent = String(next);
+        });
+    }
+    if (modifierQtyPlus && modifierQtyCount) {
+        modifierQtyPlus.addEventListener('click', function () {
+            var next = (parseInt(modifierQtyCount.textContent, 10) || 1) + 1;
+            modifierQtyCount.textContent = String(next);
+        });
+    }
+    if (modifierConfirm) modifierConfirm.addEventListener('click', confirmModifierSelection);
+    if (modifierModal) {
+        Array.prototype.forEach.call(modifierModal.querySelectorAll('[data-modifier-close]'), function (el) {
+            el.addEventListener('click', closeModifierModal);
+        });
+    }
     if (cartBtn) {
         cartBtn.addEventListener('click', function () { openCartModal(); });
     }
@@ -6622,10 +6852,12 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         Array.prototype.forEach.call(cartModal.querySelectorAll('[data-cart-close]'), function (el) {
             el.addEventListener('click', closeCartModal);
         });
-        document.addEventListener('keydown', function (event) {
-            if (event.key === 'Escape' && !cartModal.hidden) closeCartModal();
-        });
     }
+    document.addEventListener('keydown', function (event) {
+        if (event.key !== 'Escape') return;
+        if (cartModal && !cartModal.hidden) closeCartModal();
+        if (modifierModal && !modifierModal.hidden) closeModifierModal();
+    });
     if (cartOrderBtn) {
         cartOrderBtn.addEventListener('click', function () {
             waButton.click();
@@ -6633,26 +6865,30 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         });
     }
     rows.forEach(function (row) {
-        var countEl = row.querySelector('.toko-menu__count');
-        if (!countEl) return;
+        var addBtn = row.querySelector('[data-open-modifier]');
+        if (addBtn) {
+            addBtn.addEventListener('click', function () { openModifierModal(row); });
+            var minusBtn = row.querySelector('[data-modifier-minus]');
+            if (minusBtn) minusBtn.addEventListener('click', function () { decrementModifierRow(row); });
+            return;
+        }
         Array.prototype.forEach.call(row.querySelectorAll('.toko-menu__step'), function (button) {
             button.addEventListener('click', function () {
                 var step = Number(button.getAttribute('data-step')) || 0;
-                var next = Math.max(0, (parseInt(countEl.textContent, 10) || 0) + step);
-                countEl.textContent = String(next);
-                refresh();
+                var key = baseNameOf(row);
+                var price = Number(row.getAttribute('data-price')) || 0;
+                addEntryQty(key, key, price, step);
             });
         });
     });
     waButton.addEventListener('click', function (event) {
-        var items = selection();
-        if (items.length === 0) {
+        if (cart.length === 0) {
             event.preventDefault();
             return;
         }
         var total = 0;
         var lines = ['Halo ' + storeName + ', saya mau pesan:'];
-        items.forEach(function (item) {
+        cart.forEach(function (item) {
             var lineTotal = item.price * item.qty;
             total += lineTotal;
             lines.push('- ' + item.qty + 'x ' + item.name + (item.price > 0 ? ' (' + formatPrice(lineTotal) + ')' : ''));
@@ -6662,6 +6898,19 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     });
     refresh();
     window.tokoRefreshCart = refresh;
+    // Availability poll script (separate <script> tag) zeroes out any cart
+    // lines for a row that just sold out via this shared hook, since it has
+    // no access to the "cart" closure variable above.
+    window.tokoZeroItem = function (baseName) {
+        var changed = false;
+        for (var i = cart.length - 1; i >= 0; i--) {
+            if (cart[i].key === baseName || cart[i].key.indexOf(baseName + '|') === 0) {
+                cart.splice(i, 1);
+                changed = true;
+            }
+        }
+        return changed;
+    };
 })();
 </script>`
         : '';
@@ -6719,12 +6968,8 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             Array.prototype.forEach.call(row.querySelectorAll('.toko-menu__step'), function (button) {
                 button.disabled = isOut;
             });
-            if (isOut) {
-                var countEl = row.querySelector('.toko-menu__count');
-                if (countEl && countEl.textContent !== '0') {
-                    countEl.textContent = '0';
-                    changed = true;
-                }
+            if (isOut && typeof window.tokoZeroItem === 'function') {
+                if (window.tokoZeroItem(name)) changed = true;
             }
             row.style.display = (isOut && hideWhenOut) ? 'none' : '';
         });
@@ -7025,6 +7270,22 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
       display: flex; align-items: center; justify-content: space-between; font-weight: 700;
       color: var(--t-text); padding: 12px 0; border-top: 1px solid var(--t-border); margin-top: 4px;
     }
+    .toko-menu__qty--modifier { gap: 10px; }
+    .toko-modifier-body { overflow-y: auto; flex: 1 1 auto; margin-bottom: 4px; }
+    .toko-modifier-group { margin-bottom: 14px; }
+    .toko-modifier-group:last-child { margin-bottom: 0; }
+    .toko-modifier-group__title { font-size: 13px; font-weight: 700; color: var(--t-text); margin-bottom: 6px; }
+    .toko-modifier-option {
+      display: flex; align-items: center; gap: 8px; padding: 8px 0; cursor: pointer;
+      font-size: 14px; color: var(--t-text2); border-bottom: 1px solid var(--t-border);
+    }
+    .toko-modifier-option:last-child { border-bottom: none; }
+    .toko-modifier-option input { accent-color: var(--t-accent); }
+    .toko-modifier-option__adjust { margin-left: auto; color: var(--t-muted); font-size: 12.5px; white-space: nowrap; }
+    .toko-modifier-qty {
+      display: flex; align-items: center; justify-content: space-between; font-weight: 600;
+      color: var(--t-text); padding: 10px 0; border-top: 1px solid var(--t-border); margin-top: 4px;
+    }
     .toko-footer { text-align: center; color: var(--t-muted); font-size: 13px; padding: 24px 0 16px; }
   </style>
 </head>
@@ -7062,6 +7323,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     <footer class="toko-footer">AyaNaon.app powered by Petalytix</footer>
   </div>
   ${cartModalHtml}
+  ${modifierModalHtml}
   ${waScript}
   ${availScript}
 </body>
@@ -9533,6 +9795,8 @@ module.exports.computeExpiresAtFromLifetime = computeExpiresAtFromLifetime;
 module.exports.isNonProductionHostname = isNonProductionHostname;
 module.exports.resolveGoogleApiKey = resolveGoogleApiKey;
 module.exports.cleanMerchantMenuHighlights = cleanMerchantMenuHighlights;
+module.exports.cleanMerchantModifierGroups = cleanMerchantModifierGroups;
+module.exports.buildMerchantPageHtml = buildMerchantPageHtml;
 module.exports.resolveMongoDatabaseName = resolveMongoDatabaseName;
 module.exports.MERCHANT_STOREFRONT_CACHE_CONTROL = MERCHANT_STOREFRONT_CACHE_CONTROL;
 
