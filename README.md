@@ -108,6 +108,10 @@ For any inquiries or feedback, please reach out to `contact@petalytix.id`.
 
 Release updates are listed from the most recent version to the earliest.
 
+### What's New in v2.6.4
+- **Multi-Select Modifiers on `/toko`:** Modifier groups configured as "Multi" in AyaKasir (e.g. pick several free toppings) now show checkboxes instead of forcing a single choice, with a minimum/maximum hint and a confirm button that stays disabled until the pick count is valid. Single-select groups behave exactly as before.
+- **Modifier Price Adjustments:** A modifier value with its own price add-on now shows "+Rp" next to its name and is included in the cart total, wherever the tenant has configured one.
+
 ### What's New in v2.6.3
 - **Vehicle-Specific Parking Discovery:** Travel Mode now has dedicated car and motorcycle states. Parking pins appear only within an inclusive 3 km radius when their official capacity supports the selected vehicle; walking/off mode hides parking, while the existing SPBU/SPKLU selector keeps its 30 km radius.
 - **Curated Kota Bogor Parking Data:** A new admin-only `🅿️ Lokasi Parkir` category supports 105 review-first parking records with stable source-row IDs, coordinate-quality provenance, and unique landmark-based titles. Estimated coordinates remain unpublished until an Admin reviews them.

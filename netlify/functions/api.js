@@ -5893,9 +5893,10 @@ function cleanMerchantVariants(value) {
 /**
  * Per-product Modifier Groups ("Varian Bertingkat") — tenant-level, reusable
  * option groups (e.g. Saus/Seasoning) pushed alongside a menu item, orthogonal
- * to `variants` above. Single-select in v1; priceAdjustment is currently
- * always 0 from the partner side but sanitized generically since the AyaKasir
- * schema column already exists for future charging.
+ * to `variants` above. priceAdjustment carries each value's real +/- price
+ * delta (2026-08-29). selectionType/minSelect/maxSelect (2026-08-29 follow-up)
+ * let the /toko picker render checkboxes for a MULTI group instead of always
+ * assuming single-select, mirroring the AyaKasir POS/online-order pickers.
  */
 function cleanMerchantModifierGroupValues(value) {
     if (!Array.isArray(value)) return [];
@@ -5923,7 +5924,19 @@ function cleanMerchantModifierGroups(value) {
         if (!name) continue;
         const values = cleanMerchantModifierGroupValues(entry.values);
         if (values.length === 0) continue;
-        out.push({ name, values });
+        const selectionType = entry.selectionType === 'MULTI' ? 'MULTI' : 'SINGLE';
+        let minSelect = 1;
+        let maxSelect = 1;
+        if (selectionType === 'MULTI') {
+            const minNumber = Number(entry.minSelect);
+            const maxNumber = Number(entry.maxSelect);
+            minSelect = Number.isFinite(minNumber) ? Math.max(0, Math.floor(minNumber)) : 0;
+            maxSelect = Number.isFinite(maxNumber) ? Math.floor(maxNumber) : values.length;
+            maxSelect = Math.max(minSelect, maxSelect, 1);
+            if (maxSelect > values.length) maxSelect = values.length;
+            if (minSelect > maxSelect) minSelect = maxSelect;
+        }
+        out.push({ name, selectionType, minSelect, maxSelect, values });
         if (out.length >= 10) break;
     }
     return out;
@@ -6733,6 +6746,21 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     function closeCartModal() {
         if (cartModal) cartModal.hidden = true;
     }
+    // Recomputes the confirm button's disabled state: every group's checked
+    // count must fall within [data-min, data-max] (SINGLE groups are always
+    // 1/1, so the always-one-preselected-radio case stays trivially satisfied
+    // exactly as before MULTI groups existed).
+    function updateModifierConfirmState() {
+        if (!modifierBody || !modifierConfirm) return;
+        var groupWraps = Array.prototype.slice.call(modifierBody.querySelectorAll('.toko-modifier-group'));
+        var ok = groupWraps.every(function (wrap) {
+            var min = Number(wrap.getAttribute('data-min')) || 0;
+            var max = Number(wrap.getAttribute('data-max')) || 1;
+            var count = wrap.querySelectorAll('input:checked').length;
+            return count >= min && count <= max;
+        });
+        modifierConfirm.disabled = !ok;
+    }
     function openModifierModal(row) {
         if (!modifierModal || !modifierBody) return;
         var raw = row.getAttribute('data-modifiers');
@@ -6742,23 +6770,45 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
         activeModifierRow = row;
         modifierBody.innerHTML = '';
         groups.forEach(function (group, groupIndex) {
+            var isMulti = group.selectionType === 'MULTI';
+            var minSelect = Number(group.minSelect);
+            if (!Number.isFinite(minSelect)) minSelect = isMulti ? 0 : 1;
+            var maxSelect = Number(group.maxSelect);
+            if (!Number.isFinite(maxSelect)) maxSelect = 1;
             var wrap = document.createElement('div');
             wrap.className = 'toko-modifier-group';
             wrap.setAttribute('data-group-name', group.name || '');
+            wrap.setAttribute('data-min', String(minSelect));
+            wrap.setAttribute('data-max', String(maxSelect));
             var title = document.createElement('div');
             title.className = 'toko-modifier-group__title';
             title.textContent = group.name || '';
+            if (isMulti) {
+                var range = document.createElement('span');
+                range.className = 'toko-modifier-group__range';
+                range.textContent = ' (' + minSelect + '-' + maxSelect + ')';
+                title.appendChild(range);
+            }
             wrap.appendChild(title);
             (group.values || []).forEach(function (value, valueIndex) {
                 var label = document.createElement('label');
                 label.className = 'toko-modifier-option';
                 var input = document.createElement('input');
-                input.type = 'radio';
+                input.type = isMulti ? 'checkbox' : 'radio';
                 input.name = 'toko-modifier-group-' + groupIndex;
                 input.value = value.name || '';
-                if (valueIndex === 0) input.checked = true;
+                if (!isMulti && valueIndex === 0) input.checked = true;
                 var adjustment = Number(value.priceAdjustment) || 0;
                 input.setAttribute('data-adjustment', String(adjustment));
+                input.addEventListener('change', function () {
+                    if (isMulti) {
+                        // Enforce max_select client-side: uncheck the box right back
+                        // if it would push this group's count past its cap.
+                        var checkedCount = wrap.querySelectorAll('input:checked').length;
+                        if (checkedCount > maxSelect) input.checked = false;
+                    }
+                    updateModifierConfirmState();
+                });
                 label.appendChild(input);
                 var text = document.createElement('span');
                 text.textContent = value.name || '';
@@ -6774,6 +6824,7 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
             modifierBody.appendChild(wrap);
         });
         if (modifierQtyCount) modifierQtyCount.textContent = '1';
+        updateModifierConfirmState();
         modifierModal.hidden = false;
     }
     function closeModifierModal() {
@@ -6782,21 +6833,28 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     }
     function confirmModifierSelection() {
         if (!activeModifierRow || !modifierBody) return;
+        if (modifierConfirm && modifierConfirm.disabled) return;
         var row = activeModifierRow;
         var baseName = baseNameOf(row);
         var basePrice = Number(row.getAttribute('data-price')) || 0;
         var qty = parseInt((modifierQtyCount && modifierQtyCount.textContent) || '1', 10) || 1;
         var groupWraps = Array.prototype.slice.call(modifierBody.querySelectorAll('.toko-modifier-group'));
+        // Same "Group: A + B" grouping convention as the AyaKasir receipt/
+        // options_summary (2026-08-29) — a MULTI group's several picks join
+        // with " + " under one group label instead of repeating the group name.
         var labelParts = [];
         var keyParts = [];
         var adjustmentTotal = 0;
         groupWraps.forEach(function (wrap) {
-            var checked = wrap.querySelector('input[type="radio"]:checked');
-            if (!checked) return;
+            var checked = Array.prototype.slice.call(wrap.querySelectorAll('input:checked'));
+            if (!checked.length) return;
             var groupName = wrap.getAttribute('data-group-name') || '';
-            labelParts.push(checked.value);
-            keyParts.push(groupName + ':' + checked.value);
-            adjustmentTotal += Number(checked.getAttribute('data-adjustment')) || 0;
+            var values = checked.map(function (el) { return el.value; });
+            labelParts.push(values.join(' + '));
+            keyParts.push(groupName + ':' + values.slice().sort().join(','));
+            checked.forEach(function (el) {
+                adjustmentTotal += Number(el.getAttribute('data-adjustment')) || 0;
+            });
         });
         var price = Math.max(0, basePrice + adjustmentTotal);
         var name = labelParts.length ? baseName + ' (' + labelParts.join(', ') + ')' : baseName;
@@ -7275,6 +7333,8 @@ function buildMerchantPageHtml(merchant, seo, baseUrl) {
     .toko-modifier-group { margin-bottom: 14px; }
     .toko-modifier-group:last-child { margin-bottom: 0; }
     .toko-modifier-group__title { font-size: 13px; font-weight: 700; color: var(--t-text); margin-bottom: 6px; }
+    .toko-modifier-group__range { font-weight: 400; color: var(--t-muted); }
+    #toko-modifier-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
     .toko-modifier-option {
       display: flex; align-items: center; gap: 8px; padding: 8px 0; cursor: pointer;
       font-size: 14px; color: var(--t-text2); border-bottom: 1px solid var(--t-border);

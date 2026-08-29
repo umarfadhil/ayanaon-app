@@ -39,6 +39,44 @@ test('modifier group sanitizer drops empty/invalid groups and caps price adjustm
         { name: 'Normal', priceAdjustment: 0 },
         { name: 'Less', priceAdjustment: 2000 }
     ]);
+    // No selectionType sent → defaults to SINGLE/1/1, same as the AyaKasir
+    // server-side normalizeSelection() default.
+    assert.equal(result[0].selectionType, 'SINGLE');
+    assert.equal(result[0].minSelect, 1);
+    assert.equal(result[0].maxSelect, 1);
+});
+
+test('modifier group sanitizer clamps MULTI min/max to the value count (2026-08-29)', () => {
+    const [tooWide] = cleanMerchantModifierGroups([
+        {
+            name: 'Topping',
+            selectionType: 'MULTI',
+            minSelect: 5,
+            maxSelect: 99,
+            values: [{ name: 'Bubble', priceAdjustment: 2000 }, { name: 'Mango Slice', priceAdjustment: 5000 }]
+        }
+    ]);
+    assert.equal(tooWide.selectionType, 'MULTI');
+    assert.equal(tooWide.maxSelect, 2); // clamped to values.length
+    assert.equal(tooWide.minSelect, 2); // clamped down since it can't exceed maxSelect
+
+    const [optional] = cleanMerchantModifierGroups([
+        {
+            name: 'Topping',
+            selectionType: 'MULTI',
+            minSelect: 0,
+            maxSelect: 2,
+            values: [{ name: 'Bubble' }, { name: 'Mango Slice' }]
+        }
+    ]);
+    assert.equal(optional.minSelect, 0);
+    assert.equal(optional.maxSelect, 2);
+
+    const [garbage] = cleanMerchantModifierGroups([
+        { name: 'Topping', selectionType: 'MULTI', minSelect: 'nope', maxSelect: null, values: [{ name: 'Bubble' }] }
+    ]);
+    assert.equal(garbage.minSelect, 0);
+    assert.equal(garbage.maxSelect, 1);
 });
 
 test('menu highlights carry sanitized modifierGroups alongside variants', () => {
@@ -53,7 +91,13 @@ test('menu highlights carry sanitized modifierGroups alongside variants', () => 
     ]);
 
     assert.deepEqual(item.modifierGroups, [
-        { name: 'Level Gula', values: [{ name: 'Normal', priceAdjustment: 0 }, { name: 'Less', priceAdjustment: 0 }] }
+        {
+            name: 'Level Gula',
+            selectionType: 'SINGLE',
+            minSelect: 1,
+            maxSelect: 1,
+            values: [{ name: 'Normal', priceAdjustment: 0 }, { name: 'Less', priceAdjustment: 0 }]
+        }
     ]);
 });
 
